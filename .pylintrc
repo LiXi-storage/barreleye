@@ -1,0 +1,2 @@
+[TYPECHECK]
+disable=line-too-long,anomalous-backslash-in-string,invalid-name,superfluous-parens,bare-except,too-many-return-statements,too-many-arguments

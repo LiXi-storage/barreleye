@@ -1,0 +1,8 @@
+#!/usr/bin/python3 -u
+"""
+Barreleye utilities
+"""
+from pybarreleye import barrele
+
+if __name__ == "__main__":
+    barrele.main()

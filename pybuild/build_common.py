@@ -1,0 +1,329 @@
+"""
+Common library for building
+"""
+import os
+import logging
+import sys
+from pycoral import utils
+from pycoral import time_util
+
+
+# Key is plugin name, value is CoralPluginType()
+CORAL_PLUGIN_DICT = {}
+# Key is plugin name, value is CoralPluginType()
+CORAL_RELEASE_PLUGIN_DICT = {}
+# Key is plugin name, value is CoralPluginType()
+CORAL_DEVEL_PLUGIN_DICT = {}
+
+
+class CoralCommand(object):
+    """
+    The command line utility for building Coral.
+    :param debug: Whether to dump debug logs into files, default: False
+    """
+    # pylint: disable=too-few-public-methods
+    _cc_cmds = []
+
+    def __init__(self, debug=False):
+        # pylint: disable=protected-access
+        self._cc_log_to_file = debug
+        for command in self._cc_cmds:
+            command._init(debug)
+
+
+def coral_command_register(command_name, obj):
+    """
+    Register a new subcommand to coral command
+    """
+    if hasattr(CoralCommand, command_name):
+        logging.error("command [%s] has already been registered",
+                      command_name)
+        sys.exit(1)
+    setattr(CoralCommand, command_name, obj)
+
+
+class CoralPluginType(object):
+    """
+    Each resource has this type
+    """
+    # pylint: disable=too-few-public-methods
+    def __init__(self, plugin_name, build_dependent_rpms,
+                 build_dependent_pips=None, is_devel=True,
+                 need_lustre_rpms=False, need_collectd=False):
+        # The name of the plugin
+        self.cpt_plugin_name = plugin_name
+        # Whether the plugin is only for devel
+        self.cpt_is_devel = is_devel
+        # The RPMs needed to install before building
+        self.cpt_build_dependent_rpms = build_dependent_rpms
+        # Whether Lustre/E2fsprogs RPMs are needed in the ISO
+        self.cpt_need_lustre_rpms = need_lustre_rpms
+        # Whether Collectd RPMs are needed
+        self.cpt_need_collectd = need_collectd
+        if build_dependent_pips is None:
+            build_dependent_pips = []
+        # The pip packages to install before building
+        self.cpt_build_dependent_pips = build_dependent_pips
+
+    def cpt_install_build_dependency(self, log, workspace, host,
+                                     target_cpu, type_cache):
+        """
+        Install dependency before build
+        """
+        # pylint: disable=unused-argument,no-self-use
+        return 0
+
+    def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
+                  type_cache, iso_cache, packages_dir, extra_iso_fnames,
+                  extra_package_fnames, extra_rpm_names, collectd):
+        """
+        Build the plugin
+        """
+        # pylint: disable=unused-argument,no-self-use
+        return 0
+
+
+def coral_plugin_register(plugin):
+    """
+    Register a new plugin
+    """
+    plugin_name = plugin.cpt_plugin_name
+    if plugin_name in CORAL_PLUGIN_DICT:
+        logging.error("plugin [%s] has already been registered",
+                      plugin_name)
+        sys.exit(1)
+    if plugin.cpt_is_devel:
+        CORAL_DEVEL_PLUGIN_DICT[plugin_name] = plugin
+    else:
+        CORAL_RELEASE_PLUGIN_DICT[plugin_name] = plugin
+    CORAL_PLUGIN_DICT[plugin_name] = plugin
+
+
+def download_file(log, host, tarball_url, tarball_fpath,
+                  expected_sha1sum, output_fname=None):
+    """
+    Download file and check checksum after downloading.
+    Use existing file if checksum is expected.
+    If output_fname exists, need to add -O to wget because sometimes the URL
+    does not save the download file with expected fname.
+    """
+    # pylint: disable=too-many-arguments
+    target_dir = os.path.dirname(tarball_fpath)
+    exists = host.sh_path_exists(log, tarball_fpath)
+    if exists < 0:
+        log.cl_error("failed to check whether file [%s] exists on host [%s]",
+                     tarball_fpath, host.sh_hostname)
+        return -1
+
+    download = False
+    if not exists:
+        log.cl_info("file [%s] does not exist, downloading",
+                    tarball_fpath)
+        download = True
+    elif expected_sha1sum is None:
+        log.cl_info("do not know the checksum of [%s], downloading again",
+                    tarball_url)
+        download = True
+    else:
+        ret = host.sh_check_checksum(log, tarball_fpath, expected_sha1sum,
+                                     checksum_command="sha1sum")
+        if ret:
+            log.cl_warning("file [%s] does not have expected sha1sum, "
+                           "downloading", tarball_fpath)
+            command = "rm -f %s" % tarball_fpath
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+            download = True
+
+    if download:
+        if output_fname is not None:
+            output_str = " -O %s" % output_fname
+        else:
+            output_str = ""
+        command = ("mkdir -p %s && cd %s && wget %s%s" %
+                   (target_dir, target_dir, tarball_url, output_str))
+        log.cl_info("running command [%s] on host [%s]",
+                    command, host.sh_hostname)
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+    if expected_sha1sum is None:
+        return 0
+
+    ret = host.sh_check_checksum(log, tarball_fpath, expected_sha1sum,
+                                 checksum_command="sha1sum")
+    if ret:
+        log.cl_error("file [%s] does not have expected sha1sum [%s]",
+                     tarball_fpath, expected_sha1sum)
+        return -1
+
+    return 0
+
+
+def install_pip3_package_from_file(log, host, type_cache, tarball_url,
+                                   expected_sha1sum):
+    """
+    Install pip3 package and cache it for future usage
+    """
+    tarball_fname = os.path.basename(tarball_url)
+    tarball_fpath = type_cache + "/" + tarball_fname
+
+    ret = download_file(log, host, tarball_url, tarball_fpath,
+                        expected_sha1sum)
+    if ret:
+        log.cl_error("failed to download Pyinstaller")
+        return -1
+
+    command = "pip3 install %s" % (tarball_fpath)
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    return 0
+
+
+def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
+                          rpm_name_prefix):
+    """
+    Install the RPM if not installed
+    """
+    rpm_fname = None
+    for fname in extra_package_fnames:
+        if fname.startswith(rpm_name_prefix):
+            rpm_fname = fname
+            break
+    if rpm_fname is None:
+        log.cl_error("no [%s] RPM generated under dir [%s] of host [%s]",
+                     rpm_name_prefix, packages_dir, host.sh_hostname)
+        return -1
+    rpm_name = rpm_fname[:-4]
+    ret = host.sh_rpm_query(log, rpm_name)
+    if ret == 0:
+        log.cl_debug("%s is already installed on host [%s], skipping",
+                     rpm_name, host.sh_hostname)
+        return 0
+
+    ret = host.sh_rpm_find_and_uninstall(log, "grep %s" % rpm_name_prefix)
+    if ret:
+        log.cl_error("failed to uninstall RPM [%s] on host [%s]",
+                     rpm_name_prefix, host.sh_hostname)
+        return -1
+
+    command = "rpm -ivh %s/%s" % (packages_dir, rpm_fname)
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def packages_check_rpms(log, host, packages_dir, rpm_fnames):
+    """
+    Check whether RPMs exists and their integrity
+    """
+    for rpm_fname in rpm_fnames:
+        rpm_fpath = packages_dir + "/" + rpm_fname
+        ret = host.sh_path_exists(log, rpm_fpath)
+        if ret < 0 or ret == 0:
+            log.cl_info("RPM [%s] does not exist, need to build",
+                        rpm_fpath)
+            return -1
+
+        ret = host.sh_rpm_checksig(log, rpm_fpath)
+        if ret:
+            log.cl_info("RPM [%s] is broken, need to rebuild",
+                        rpm_fpath)
+            return -1
+    return 0
+
+
+def packages_add_rpms(log, host, rpm_dir, packages_dir, expected_rpm_fnames):
+    """
+    Copy the generated RPMs to the package dir
+    """
+    fnames = host.sh_get_dir_fnames(log, rpm_dir)
+    if fnames is None:
+        log.cl_error("failed to get the fnames under dir [%s] on host [%s]",
+                     rpm_dir, host.sh_hostname)
+        return -1
+
+    for expected_fname in expected_rpm_fnames:
+        if expected_fname not in fnames:
+            log.cl_error("failed to find expected RPM [%s] under dir [%s] "
+                         "on host [%s]",
+                         expected_fname, rpm_dir, host.sh_hostname)
+            return -1
+
+    for fname in fnames:
+        if fname not in expected_rpm_fnames:
+            log.cl_error("extra RPM [%s] is generated under dir [%s] "
+                         "on host [%s]",
+                         fname, rpm_dir, host.sh_hostname)
+            return -1
+
+        package_fpath = "%s/%s" % (packages_dir, fname)
+        command = "rm -f %s" % package_fpath
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        generated_fpath = "%s/%s" % (rpm_dir, fname)
+        command = ("/usr/bin/cp -f %s %s" %
+                   (generated_fpath, packages_dir))
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+    return 0
+
+
+def get_build_path():
+    """
+    Return the random build path
+    """
+    return ("coral_build_" +
+            time_util.local_strftime(time_util.utcnow(),
+                                     "%Y-%m-%d-%H_%M_%S-") +
+            utils.random_word(8))

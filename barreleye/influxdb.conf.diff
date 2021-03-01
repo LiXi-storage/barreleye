@@ -1,0 +1,64 @@
+--- /etc/influxdb/influxdb.conf.orig	2019-02-14 08:18:47.000000000 +0800
++++ influxdb.conf	2020-02-07 10:36:41.230760281 +0800
+@@ -23,7 +23,7 @@
+ 
+ [meta]
+   # Where the metadata/raft database is stored
+-  dir = "/var/lib/influxdb/meta"
++  dir = "BARRELE_INFLUXDB_PATH/meta"
+ 
+   # Automatically create a default retention policy when creating a database.
+   # retention-autocreate = true
+@@ -42,10 +42,10 @@
+ 
+ [data]
+   # The directory where the TSM storage engine stores TSM files.
+-  dir = "/var/lib/influxdb/data"
++  dir = "BARRELE_INFLUXDB_PATH/data"
+ 
+   # The directory where the TSM storage engine stores WAL files.
+-  wal-dir = "/var/lib/influxdb/wal"
++  wal-dir = "BARRELE_INFLUXDB_PATH/wal"
+ 
+   # The amount of time that a write will wait before fsyncing.  A duration
+   # greater than 0 can be used to batch up multiple fsync calls.  This is useful for slower
+@@ -57,7 +57,7 @@
+   # The type of shard index to use for new shards.  The default is an in-memory index that is
+   # recreated at startup.  A value of "tsi1" will use a disk based index that supports higher
+   # cardinality datasets.
+-  # index-version = "inmem"
++  index-version = "tsi1"
+ 
+   # Trace logging provides more verbose output around the tsm engine. Turning
+   # this on can provide more useful output for debugging tsm engine issues.
+@@ -120,7 +120,7 @@
+   # The maximum series allowed per database before writes are dropped.  This limit can prevent
+   # high cardinality issues at the database level.  This limit can be disabled by setting it to
+   # 0.
+-  # max-series-per-database = 1000000
++  max-series-per-database = 0
+ 
+   # The maximum number of tag values per tag that are allowed before writes are dropped.  This limit
+   # can prevent high cardinality tag values from being written to a measurement.  This limit can be
+@@ -349,7 +349,7 @@
+   # Determines which level of logs will be emitted. The available levels
+   # are error, warn, info, and debug. Logs that are equal to or above the
+   # specified level will be emitted.
+-  # level = "info"
++  level = "warn"
+ 
+   # Suppresses the logo output that is printed when the program is started.
+   # The logo is always suppressed if STDOUT is not a TTY.
+@@ -478,9 +478,9 @@
+ ###
+ 
+ [[opentsdb]]
+-  # enabled = false
+-  # bind-address = ":4242"
+-  # database = "opentsdb"
++  enabled = true
++  bind-address = ":4242"
++  database = "BARRELE_INFLUXDB_DATABASE_NAME"
+   # retention-policy = ""
+   # consistency-level = "one"
+   # tls-enabled = false

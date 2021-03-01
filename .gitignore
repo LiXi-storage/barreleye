@@ -1,0 +1,50 @@
+#
+# N.B.
+# This is the toplevel .gitignore file.
+# This is not the place for entries that are specific to
+# a subdirectory.  Instead add those files to the
+# .gitignore file in that subdirectory.
+#
+# N.B.
+# Please use 'git ls-files -i --exclude-standard'
+# command after changing this file, to see if there are
+# any tracked files which get ignored after the change.
+
+Makefile.in
+aclocal.m4
+autom4te.cache
+barrele.spec
+compile
+config.guess
+config.h
+config.h.in
+config.h.in~
+config.log
+config.status
+config.sub
+configure
+coral.spec
+coral_build_*
+depcomp
+dist
+install-sh
+libltdl
+libtool
+ltmain.sh
+missing
+nohup.out
+stamp-h1
+.deps
+*.python_checked
+*.checked
+*.pyc
+*.c_checked
+*.o
+
+#
+# Top level generated files specific to this top level dir
+#
+/Makefile
+/ISO
+/build
+/coral-*

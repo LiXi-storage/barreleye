@@ -1,0 +1,108 @@
+# CORAL specfile
+
+%bcond_with barrele
+
+# RHEL >= 7 comes with systemd
+%if 0%{?rhel} >= 7
+%define with_systemd 1
+%endif
+
+Name: @PACKAGE@
+Version: @VERSION@
+Prefix: %{_prefix}
+
+%{!?python_sitelib: %global python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")}
+
+Release: @CORAL_RELEASE@%{?dist}
+
+Summary: coral - Libraries for Coral
+License: MIT
+Group: Applications/System
+Source0: @PACKAGE@-%{version}.tar.gz
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+Provides: coral = %{version}-%{release}
+
+%description
+Coral is a solution for high availability features, easy installation,
+configuration, management, monitoring and diagnosis of Lustre file system.
+
+%if %{with barrele}
+%package barreleye
+Summary: Performance Monitoring System for Lustre file systems
+Provides: coral-barreleye = %{version}-%{release}
+%if %{with systemd}
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+BuildRequires: systemd
+%endif
+
+%description barreleye
+coral-barreleye is a performance monitoring system for Lustre file systems
+which collects and shows the statistics of the file system components
+including the file system services, clients, storages, networks and machines.
+%endif  # with barrele
+
+
+Generated using options: @ac_configure_args@
+
+%prep
+%setup -q -n @PACKAGE@-%{version}
+
+%build
+./configure @ac_configure_args@ %{?configure_flags:configure_flags} \
+	--sysconfdir=%{_sysconfdir} \
+	--mandir=%{_mandir} \
+	--libdir=%{_libdir} \
+	--includedir=%{_includedir} \
+	--prefix=%{_prefix}
+make
+#make check
+make exes
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make install DESTDIR=$RPM_BUILD_ROOT
+mkdir -p $RPM_BUILD_ROOT%{_bindir}
+mkdir -p $RPM_BUILD_ROOT%{_mandir}/man1
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral
+%if %{with systemd}
+    mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
+%endif
+mkdir -p $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
+
+%if %{with barrele}
+cp dist/barrele $RPM_BUILD_ROOT%{_bindir}
+cp example_configs/barreleye.toml \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye.conf.example
+install -g 0 -o 0 -m 0644 bash_completion/barrele \
+	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye-xmls
+cp barreleye/*.xml \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye-xmls
+cp barreleye/influxdb.conf.diff \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye/
+cp -a barreleye/grafana_dashboards \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye/grafana_dashboards
+%endif  # with barrele
+
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%if %{with barrele}
+%files barreleye
+%{_bindir}/barrele
+%{_sysconfdir}/coral/barreleye-xmls
+%{_sysconfdir}/coral/barreleye/influxdb.conf.diff
+%{_sysconfdir}/coral/barreleye/grafana_dashboards
+%{_sysconfdir}/coral/barreleye.conf.example
+%{_datadir}/bash-completion/completions/barrele
+%endif  # with barrele
+
+
+%changelog
+* Fri Feb 19 2021 Coralfs 2.0
+* Fri Mar 29 2019 Coralfs 1.0
+- Original version

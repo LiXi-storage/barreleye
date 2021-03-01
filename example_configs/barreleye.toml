@@ -1,0 +1,91 @@
+#
+# Configuration file of Barreleye (TOML format)
+#
+#
+
+# The interval seconds to collect datapoints.
+# Default value: 60
+collect_interval = 60
+
+# This option determines the interval of continuous queries. Barreleye uses
+# continuous queries of Influxdb to aggregate data. To calculate the interval
+# seconds of continuous queries, please multiply this number by the value of
+# the "collect_interval" option. If this number is "1", the interval of
+# continous queries would be "collect_interval" seconds. Usually, in order to
+# downsample the data and reduce performance impact, this value should be
+# larger than "1".
+# Default value: 4
+continuous_query_periods = 4
+
+# The job ID var used by the file system, which can be read by command
+# "lctl get_param jobid_var".
+# Default value: "unknown".
+jobid_var = "unknown"
+
+# The Lustre version to use, if the Lustre RPMs installed on the agent(s)
+# is not with the supported version.
+
+# Default value: "2.12"
+lustre_fallback_version = "2.12"
+
+# Whether Barreleye agents collect exp_md_stats_* metrics from Lustre MDT.
+# If there are many Lustre clients on the system, this option should be
+# disabled to avoid performance issues.
+# Default value: false
+enable_lustre_exp_mdt = false
+
+# Like enable_lustre_exp_mdt, this option determines Whether Barreleye
+# agents collect exp_ost_stats_* metrics from Lustre OST. If there are many
+# Lustre clients on the system, this option should be disabled to avoid
+# performance issues.
+# Default value: false
+enable_lustre_exp_ost = false
+
+# Barreleye agent information.
+[[agents]]
+# The host name list.
+# Valid: host[0-100], 101 hosts from host0 to host100.
+# Valid: host[001-010], 10 hosts from host001 to host010.
+hostname = "mds0[0-1]"
+# Whether to collect disk metrics from this agent. Default value: false.
+enable_disk = false
+# Whether to collect Infiniband metrics from this agent. Default value: false.
+enable_infiniband = false
+# Whether to collect Lustre client metrics from this agent. Default value: false.
+enable_lustre_client = false
+# Whether to collect Lustre MDS metrics from this agent. Default value: true.
+enable_lustre_mds = true
+# Whether to collect Lustre OSS metrics from this agent. Default value: true.
+enable_lustre_oss = false
+# The SSH key file used when using SSH command to login as root into the host.
+# If the default SSH identity file works, this option can be omitted
+ssh_identity_file = "/root/.ssh/id_rsa"
+
+# Information of SFAs on this agent.
+[[agents.sfas]]
+# The hostname/IP of the controller 0 of this SFA.
+controller0_host = "10.0.0.1"
+# The hostname/IP of the controller 1 of this SFA.
+controller1_host = "10.0.0.2"
+name = "SFA0"
+
+[[agents.sfas]]
+controller0_host = "10.0.0.3"
+controller1_host = "10.0.0.4"
+name = "SFA1"
+
+# Information of Barreleye server.
+[server]
+# The hostname of the Barreleye server.
+hostname = "server0"
+# Data  directory path on Barreleye server node. Barreleye will save
+# monitoring statistics into this directory.
+# Important: Please do not put any other files/directries under this directory,
+# because, part or all of the files/directries under that directory could be
+# removed when running commands of Barreleye.
+# Default value: "/var/log/coral/barreleye_data".
+data_path = "/var/log/coral/barreleye_data"
+# The SSH key file used when using SSH command to login as root into the host.
+# If the default SSH identity file works, this option can be omitted.
+# If the server is also an agent, the SSH keys configured should be consistent.
+ssh_identity_file = "/root/.ssh/id_rsa"
