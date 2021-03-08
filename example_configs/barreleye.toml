@@ -17,10 +17,21 @@ collect_interval = 60
 # Default value: 4
 continuous_query_periods = 4
 
-# The job ID var used by the file system, which can be read by command
-# "lctl get_param jobid_var".
+# The jobstat pattern configured in Lustre. This includes configuration of
+# jobid_var, jobid_name on the Lustre clients. Commands like
+# "lctl get_param jobid_var" and  "lctl get_param jobid_name" can be used to
+# check the configurations. Some patterns might also depend on other Lustre
+# configurations. Barreleye will parse the jobstats and enable some dashboards
+# or metrics based on the given pattern.
+#
+# A value of "unknown" should be specified if the pattern isn't clearly known,
+# or if the clients have mixed patterns.
+#
+# "procname_uid" can be specified if clients all have "jobid_var" configured
+# with value "procname_uid".
+#
 # Default value: "unknown".
-jobid_var = "unknown"
+jobstat_pattern = "unknown"
 
 # The Lustre version to use, if the Lustre RPMs installed on the agent(s)
 # is not with the supported version.

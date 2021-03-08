@@ -1,5 +1,5 @@
 SUBDIRS = pybuild
-SUBDIRS += barreleye bash_completion pycheck .
+SUBDIRS += barreleye pycheck bash_completion .
 
 build_dir = `pwd`/build
 rpmbuild_opt =

@@ -7,7 +7,6 @@ import os
 import traceback
 import json
 from http import HTTPStatus
-from pycoral import lustre
 from pycoral import utils
 from pybarreleye import barrele_constant
 from pybarreleye import barrele_influxdb
@@ -52,6 +51,10 @@ GRAFANA_DASHBOARD_DIR = (barrele_constant.BARRELE_CONFIG_DIR + "/" +
 TEMPLATE_COLLECT_INTERVAL = "$BARRELEYE_COLLECT_INTERVAL"
 # The key string to replace to collect interval in Grafana dashboard templates
 TEMPLATE_DATASOURCE_NAME = "$BARRELEYE_DATASOURCE_NAME"
+# Disabled Grafana folder
+GRAFANA_FOLDER_DISABLED = "Disabled"
+# Grafana folders
+GRAFANA_FOLDERS = [GRAFANA_FOLDER_DISABLED]
 
 
 def sed_replacement_escape(path):
@@ -61,19 +64,19 @@ def sed_replacement_escape(path):
     return path.replace("/", r"\/")
 
 
-def grafana_dashboard_check(log, name, dashboard):
+def grafana_dashboard_check(log, title_name, dashboard):
     """
     Check whether the dashboard is legal or not
     """
     if dashboard["id"] is not None:
         log.cl_error("Grafana dashabord [%s] is invalid, expected [id] to be "
                      "[null], but got [%s]",
-                     name, dashboard["id"])
+                     title_name, dashboard["id"])
         return -1
-    if dashboard["title"] != name:
+    if dashboard["title"] != title_name:
         log.cl_error("Grafana dashabord [%s] is invalid, expected [title] to be "
                      "[%s], but got [%s]",
-                     name, name, dashboard["title"])
+                     title_name, title_name, dashboard["title"])
         return -1
     return 0
 
@@ -104,6 +107,8 @@ class BarreleServer(object):
         self.bes_grafana_admin_password = "admin"
         # Port of Grafana
         self.bes_grafana_port = "3000"
+        # The folder id (not uid) of disabled
+        self.bes_disabled_folder_id = None
 
     def _bes_erase_influxdb(self, log):
         """
@@ -578,66 +583,233 @@ class BarreleServer(object):
                 return -1
         return 0
 
-    def _bes_grafana_has_dashboard(self, log, name):
+    def _bes_grafana_get_folders(self, log):
         """
-        Check whether Grafana has dashboard
-        Return 1 if has dashboard, return 0 if not, return -1 if error
+        Get all folders
         """
         # pylint: disable=bare-except
         headers = {"Content-type": "application/json",
                    "Accept": "application/json"}
 
-        url = self.bes_grafana_admin_url("/api/dashboards/db/%s" %
-                                         slugify.slugify(name))
+        url = self.bes_grafana_admin_url("/api/folders")
         try:
             response = requests.get(url, headers=headers)
         except:
-            log.cl_error("failed to get Grafana dashboard through [%s]: %s",
+            log.cl_error("failed to get all Grafana folders through [%s]: %s",
                          url, traceback.format_exc())
-            return -1
+            return None
         if response.status_code == HTTPStatus.OK:
-            return 1
-        elif response.status_code == HTTPStatus.NOT_FOUND:
-            return 0
-        log.error("got Grafana status [%d] when get dashboard",
-                  response.status_code)
-        return -1
+            return response.json()
+        log.cl_error("got Grafana status [%d] when get all folders",
+                     response.status_code)
+        return None
 
-    def _bes_grafana_dashboard_delete(self, log, name):
+    def _bes_grafana_folder_delete_uid(self, log, uid):
         """
-        Delete bashboard from Grafana
+        Delete folder with a uid from Grafana
         """
         # pylint: disable=bare-except
         headers = {"Content-type": "application/json",
                    "Accept": "application/json"}
 
-        url = self.bes_grafana_admin_url("/api/dashboards/db/%s" %
-                                         slugify.slugify(name))
+        url = self.bes_grafana_admin_url("/api/folders/%s" %
+                                         uid)
         try:
             response = requests.delete(url, headers=headers)
         except:
-            log.cl_error("failed to delete Grafana dashboard through [%s]: %s",
+            log.cl_error("failed to delete Grafana folder with uid [%s] "
+                         "through [%s]: %s",
                          url, traceback.format_exc())
             return -1
         if response.status_code != HTTPStatus.OK:
-            log.cl_error("got Grafana status [%d] when deleting dashboard",
+            log.cl_error("got Grafana status [%d] when deleting folder "
+                         "with uid [%s]",
                          response.status_code)
             return -1
         return 0
 
-    def _bes_grafana_dashboard_add(self, log, name, dashboard):
+    def _bes_grafana_delete_folder(self, log, title_name):
+        """
+        Delete folders with a title from Grafana
+        """
+        json_obj = self._bes_grafana_get_folders(log)
+        if json_obj is None:
+            log.cl_error("failed to get all bashboards and folders")
+            return -1
+        for item in json_obj:
+            if item['title'] != title_name:
+                continue
+            uid = item['uid']
+            ret = self._bes_grafana_folder_delete_uid(log, uid)
+            if ret:
+                log.cl_error("failed to delete folder with uid [%s] and "                         "title [%s]", uid, title_name)
+                return -1
+        return 0
+
+    def _bes_grafana_create_folder(self, log, title_name):
+        """
+        Create a Grafana folder with a title
+        """
+        # pylint: disable=bare-except
+        headers = {"Content-type": "application/json",
+                   "Accept": "application/json"}
+
+        data = {
+            "title": title_name,
+        }
+
+        headers = {"Content-type": "application/json",
+                   "Accept": "application/json"}
+
+        url = self.bes_grafana_admin_url("/api/folders")
+        try:
+            response = requests.post(url, json=data, headers=headers)
+        except:
+            log.cl_error("failed to create Grafana folder through [%s]: %s",
+                         url, traceback.format_exc())
+            return -1
+        if response.status_code != HTTPStatus.OK:
+            log.cl_error("got status [%d] when adding folder [%s] to "
+                         "Grafana",
+                         response.status_code, title_name)
+            return -1
+
+        if title_name == GRAFANA_FOLDER_DISABLED:
+            self.bes_disabled_folder_id = response.json()["id"]
+        return 0
+
+    def _bes_grafana_recreate_folder(self, log, title_name):
+        """
+        Recreate a Grafana folder with a title
+        """
+        ret = self._bes_grafana_delete_folder(log, title_name)
+        if ret:
+            log.cl_error("failed to delete folders with title [%s]",
+                         title_name)
+            return -1
+
+        ret = self._bes_grafana_create_folder(log, title_name)
+        if ret:
+            log.cl_error("failed to create folder with title [%s]",
+                         title_name)
+            return -1
+        return 0
+
+    def _bes_grafana_recreate_folders(self, log):
+        """
+        Recreate Grafana dashboards
+        """
+        # pylint: disable=too-many-locals
+        host = self.bes_server_host
+
+        log.cl_info("recreating Grafana folders on host [%s]",
+                    host.sh_hostname)
+        for folder_title in GRAFANA_FOLDERS:
+            ret = self._bes_grafana_recreate_folder(log, folder_title)
+            if ret:
+                log.cl_error("failed to replace Grafana folder with title "
+                             "[%s] on host [%s]",
+                             folder_title, host.sh_hostname)
+                return -1
+        return 0
+
+    def _bes_grafana_search_all(self, log):
+        """
+        Retrieving all folders and dashboards.
+        Return the json object of the response.
+        """
+        # pylint: disable=bare-except
+        headers = {"Content-type": "application/json",
+                   "Accept": "application/json"}
+
+        url = self.bes_grafana_admin_url("/api/search?query=%")
+        try:
+            response = requests.get(url, headers=headers)
+        except:
+            log.cl_error("failed to get all Grafana folders and dashboards "
+                         "through [%s]: %s",
+                         url, traceback.format_exc())
+            return None
+        if response.status_code == HTTPStatus.OK:
+            return response.json()
+        log.clerror("got status [%d] when getting all Grafana "
+                    "folders and dashboards",
+                    response.status_code)
+        return None
+
+    def _bes_grafana_has_dashboard(self, log, title_name):
+        """
+        Check whether Grafana has dashboard.
+        Return 1 if has dashboard, return 0 if not, return -1 if error.
+        """
+        json_obj = self._bes_grafana_search_all(log)
+        if json_obj is None:
+            log.cl_error("failed to get all bashboards and folders")
+            return -1
+        for item in json_obj:
+            if item['type'] == 'dash-db' and item['title'] == title_name:
+                return 1
+        return 0
+
+    def _bes_grafana_dashboard_delete_uid(self, log, uid):
+        """
+        Delete bashboard with a uid from Grafana
+        """
+        # pylint: disable=bare-except
+        headers = {"Content-type": "application/json",
+                   "Accept": "application/json"}
+
+        url = self.bes_grafana_admin_url("/api/dashboards/uid/%s" %
+                                         uid)
+        try:
+            response = requests.delete(url, headers=headers)
+        except:
+            log.cl_error("failed to delete Grafana dashboard with uid [%s] "
+                         "through [%s]: %s",
+                         url, traceback.format_exc())
+            return -1
+        if response.status_code != HTTPStatus.OK:
+            log.cl_error("got Grafana status [%d] when deleting dashboard "
+                         "with uid [%s]",
+                         response.status_code)
+            return -1
+        return 0
+
+    def _bes_grafana_dashboard_delete(self, log, title_name):
+        """
+        Delete bashboards with a title from Grafana
+        """
+        json_obj = self._bes_grafana_search_all(log)
+        if json_obj is None:
+            log.cl_error("failed to get all bashboards and folders")
+            return -1
+        for item in json_obj:
+            if item['type'] != 'dash-db':
+                continue
+            if item['title'] != title_name:
+                continue
+            uid = item['uid']
+            ret = self._bes_grafana_dashboard_delete_uid(log, uid)
+            if ret:
+                log.cl_error("failed to delete dashboard with uid [%s] and "                      "title [%s]", uid, title_name)
+                return -1
+        return 0
+
+    def _bes_grafana_create_dashboard(self, log, title_name, dashboard,
+                                      overwrite=False, folder_id=0):
         """
         Add dashboard of Grafana
         """
-        ret = grafana_dashboard_check(log, name, dashboard)
+        ret = grafana_dashboard_check(log, title_name, dashboard)
         if ret:
             log.cl_error("Grafana dashboard [%s] is illegal",
-                         name)
+                         title_name)
             return -1
 
         data = {
             "dashboard": dashboard,
-            "overwrite": False,
+            "overwrite": overwrite,
+            "folderId": folder_id,
         }
 
         headers = {"Content-type": "application/json",
@@ -653,47 +825,44 @@ class BarreleServer(object):
         if response.status_code != HTTPStatus.OK:
             log.cl_error("got status [%d] when adding dashbard [%s] to "
                          "Grafana",
-                         response.status_code, name)
+                         response.status_code, title_name)
             return -1
         return 0
 
-    def _bes_grafana_dashboard_replace(self, log, name, dashboard):
+    def _bes_grafana_recreate_dashboard(self, log, title_name, dashboard,
+                                        folder_id=0):
         """
         Replace a bashboard in Grafana
         """
         host = self.bes_server_host
-        ret = self._bes_grafana_has_dashboard(log, name)
-        if ret < 0:
-            log.cl_error("failed to check whether Grafana has "
-                         "dashboard [%s]",
-                         name, host.sh_hostname)
-            return -1
-        elif ret == 1:
-            ret = self._bes_grafana_dashboard_delete(log, name)
-            if ret:
-                log.cl_error("failed to delete Grafana dashboard [%s]",
-                             name)
-                return -1
-
-        ret = self._bes_grafana_dashboard_add(log, name, dashboard)
+        ret = self._bes_grafana_dashboard_delete(log, title_name)
         if ret:
-            log.cl_error("failed to add Grafana dashboard [%s]",
-                         name)
+            log.cl_error("failed to delete Grafana dashboard with title"
+                         "[%s] on host [%s]",
+                         title_name, host.sh_hostname)
+            return -1
+
+        ret = self._bes_grafana_create_dashboard(log, title_name, dashboard,
+                                                 overwrite=False,
+                                                 folder_id=folder_id)
+        if ret:
+            log.cl_error("failed to overwrite Grafana dashboard [%s]",
+                         title_name)
             return -1
         return 0
 
-    def _bes_grafana_reinstall_dashboards(self, log, barreleye_instance):
+    def _bes_grafana_recreate_dashboards(self, log, barreleye_instance):
         """
-        Reinstall Grafana dashboards
+        Recreate Grafana dashboards
         """
         # pylint: disable=too-many-locals
         host = self.bes_server_host
         collect_interval = str(barreleye_instance.bei_collect_interval)
         local_host = barreleye_instance.bei_local_host
         workspace = barreleye_instance.bei_workspace
-        jobid_var = barreleye_instance.bei_jobid_var
+        jobstat_pattern = barreleye_instance.bei_jobstat_pattern
 
-        log.cl_info("installing Grafana dashboards on host [%s]",
+        log.cl_info("recreating Grafana dashboards on host [%s]",
                     host.sh_hostname)
         for name, fname in GRAFANA_DASHBOARDS.items():
             dashboard_json_fpath = GRAFANA_DASHBOARD_DIR + "/" + fname
@@ -731,26 +900,15 @@ class BarreleServer(object):
             with open(dashboard_json_fpath) as json_file:
                 dashboard = json.load(json_file)
 
+            folder_id = 0
             if (name == DASHBOARD_NAME_LUSTRE_USER and
-                    jobid_var != lustre.JOB_ID_PROCNAME_UID):
-                # If Job ID var is not procename_uid, delete the
-                # Lustre User dashboard
-                ret = self._bes_grafana_has_dashboard(log, name)
-                if ret < 0:
-                    log.cl_error("failed to check whether Grafana has "
-                                 "dashboard [%s] on host [%s]",
-                                 name, host.sh_hostname)
-                    return -1
-                elif ret == 1:
-                    ret = self._bes_grafana_dashboard_delete(log, name)
-                    if ret:
-                        log.cl_error("failed to delete Grafana dashboard "
-                                     "[%s] on host [%s]",
-                                     name, host.sh_hostname)
-                        return -1
-                continue
+                    jobstat_pattern != barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
+                # If jobstat pattern is not procename_uid, put the
+                # Lustre User dashboard to "Disabled" folder
+                folder_id = self.bes_disabled_folder_id
 
-            ret = self._bes_grafana_dashboard_replace(log, name, dashboard)
+            ret = self._bes_grafana_recreate_dashboard(log, name, dashboard,
+                                                       folder_id)
             if ret:
                 log.cl_error("failed to replace Grafana dashboard "
                              "[%s] on host [%s]",
@@ -876,10 +1034,20 @@ class BarreleServer(object):
 
         ret = self._bes_grafana_install_plugins(log, barreleye_instance)
         if ret:
+            log.cl_error("failed to install Grafana plugins on host [%s]",
+                         host.sh_hostname)
             return ret
 
-        ret = self._bes_grafana_reinstall_dashboards(log, barreleye_instance)
+        ret = self._bes_grafana_recreate_folders(log)
         if ret:
+            log.cl_error("failed to recreate Grafana folders on host [%s]",
+                         host.sh_hostname)
+            return ret
+
+        ret = self._bes_grafana_recreate_dashboards(log, barreleye_instance)
+        if ret:
+            log.cl_error("failed to recreate Grafana dashboards on host [%s]",
+                         host.sh_hostname)
             return ret
 
         ret = self._bes_grafana_influxdb_datasource_remove_and_add(log)
@@ -1089,10 +1257,16 @@ class BarreleServer(object):
                                                    ["fs_name", "job_id"])
         continuous_queries.append(continuous_query)
 
-        if barreleye_instance.bei_jobid_var == lustre.JOB_ID_PROCNAME_UID:
+        if (barreleye_instance.bei_jobstat_pattern ==
+                barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
             continuous_query = InfluxdbContinuousQuery("mdt_jobstats_samples",
                                                        ["fs_name", "uid"])
             continuous_queries.append(continuous_query)
+        elif (barreleye_instance.bei_jobstat_pattern !=
+              barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
+            log.cl_error("unknown jobstat pattern [%s]",
+                         barreleye_instance.bei_jobstat_pattern)
+            return -1
         continuous_query = InfluxdbContinuousQuery("ost_stats_bytes",
                                                    ["fs_name", "optype",
                                                     "fqdn"])
@@ -1133,7 +1307,8 @@ class BarreleServer(object):
                                                    ["fs_name", "job_id",
                                                     "ost_index"],
                                                    where=where)
-        if barreleye_instance.bei_jobid_var == lustre.JOB_ID_PROCNAME_UID:
+        if (barreleye_instance.bei_jobstat_pattern ==
+                barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
             continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
                                                        ["fs_name", "uid",
                                                         "optype"])
@@ -1149,6 +1324,11 @@ class BarreleServer(object):
                                                         "ost_index"],
                                                        where=where)
             continuous_queries.append(continuous_query)
+        elif (barreleye_instance.bei_jobstat_pattern !=
+              barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
+            log.cl_error("unknown jobstat pattern [%s]",
+                         barreleye_instance.bei_jobstat_pattern)
+            return -1
         continuous_query = InfluxdbContinuousQuery("ost_brw_stats_rpc_bulk_samples",
                                                    ["field", "fs_name",
                                                     "size"])

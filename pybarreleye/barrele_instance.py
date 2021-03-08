@@ -17,8 +17,6 @@ from pybarreleye import barrele_agent
 BARRELE_COLLECT_INTERVAL = 60
 # Default continuous query periods
 BARRELE_CONTINUOUS_QUERY_PERIODS = 4
-# Unkown jobid var is configured in Lustre
-BARRELE_JOBID_VAR_UNKNOWN = "unknown"
 # The Lustre version to use, if the Lustre RPMs installed on the agent(s)
 # is not with the supported version.
 BARRELE_LUSTRE_FALLBACK_VERSION = lustre.LUSTRE_VERSION_NAME_2_12
@@ -33,7 +31,7 @@ class BarreleInstance(object):
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, workspace, config, config_fpath, log_to_file,
                  logdir_is_default, local_host, collect_interval,
-                 continuous_query_periods, jobid_var, lustre_fallback_version,
+                 continuous_query_periods, jobstat_pattern, lustre_fallback_version,
                  enable_lustre_exp_mdt, enable_lustre_exp_ost, host_dict,
                  agent_dict, barreleye_server):
         # pylint: disable=too-many-locals
@@ -51,8 +49,8 @@ class BarreleInstance(object):
         self.bei_collect_interval = collect_interval
         # Continuous query periods of Influxdb
         self.bei_continuous_query_periods = continuous_query_periods
-        # The jobid_var configured in Lustre
-        self.bei_jobid_var = jobid_var
+        # The jobstat pattern configured in Lustre
+        self.bei_jobstat_pattern = jobstat_pattern
         # The Lustre version to use, if the Lustre RPMs installed
         # is not with the supported version.
         self.bei_lustre_fallback_version = lustre_fallback_version
@@ -293,13 +291,18 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                      config_fpath, BARRELE_CONTINUOUS_QUERY_PERIODS)
         continuous_query_periods = BARRELE_CONTINUOUS_QUERY_PERIODS
 
-    jobid_var = utils.config_value(config, barrele_constant.BRL_JOBID_VAR)
-    if jobid_var is None:
+    jobstat_pattern = utils.config_value(config, barrele_constant.BRL_JOBSTAT_PATTERN)
+    if jobstat_pattern is None:
         log.cl_debug("no [%s] is configured in the config file [%s], "
                      "using default value [%s]",
-                     barrele_constant.BRL_JOBID_VAR,
-                     config_fpath, BARRELE_JOBID_VAR_UNKNOWN)
-        jobid_var = BARRELE_JOBID_VAR_UNKNOWN
+                     barrele_constant.BRL_JOBSTAT_PATTERN,
+                     config_fpath,
+                     barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN)
+        jobstat_pattern = barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN
+    if jobstat_pattern not in barrele_constant.BARRELE_JOBSTAT_PATTERNS:
+        log.cl_error("unsupported jobstat_pattern [%s], supported: %s",
+                     jobstat_pattern, barrele_constant.BARRELE_JOBSTAT_PATTERNS)
+        return None
 
     lustre_fallback_version_name = \
         utils.config_value(config,
@@ -373,7 +376,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
         ssh_identity_file = utils.config_value(agent_config,
                                                barrele_constant.BRL_SSH_IDENTITY_FILE)
 
-        enable_disk = utils.config_value(config,
+        enable_disk = utils.config_value(agent_config,
                                          barrele_constant.BRL_ENABLE_DISK)
         if enable_disk is None:
             log.cl_debug("no [%s] is configured in the config file [%s], "
@@ -382,7 +385,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                          config_fpath)
             enable_disk = False
 
-        enable_infiniband = utils.config_value(config,
+        enable_infiniband = utils.config_value(agent_config,
                                                barrele_constant.BRL_ENABLE_INFINIBAND)
         if enable_infiniband is None:
             log.cl_debug("no [%s] is configured in the config file [%s], "
@@ -391,7 +394,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                          config_fpath)
             enable_infiniband = False
 
-        enable_lustre_client = utils.config_value(config,
+        enable_lustre_client = utils.config_value(agent_config,
                                                   barrele_constant.BRL_ENABLE_LUSTRE_CLIENT)
         if enable_lustre_client is None:
             log.cl_debug("no [%s] is configured in the config file [%s], "
@@ -400,7 +403,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                          config_fpath)
             enable_lustre_client = False
 
-        enable_lustre_mds = utils.config_value(config,
+        enable_lustre_mds = utils.config_value(agent_config,
                                                barrele_constant.BRL_ENABLE_LUSTRE_MDS)
         if enable_lustre_mds is None:
             log.cl_debug("no [%s] is configured in the config file [%s], "
@@ -409,7 +412,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                          config_fpath)
             enable_lustre_mds = True
 
-        enable_lustre_oss = utils.config_value(config,
+        enable_lustre_oss = utils.config_value(agent_config,
                                                barrele_constant.BRL_ENABLE_LUSTRE_OSS)
         if enable_lustre_oss is None:
             log.cl_debug("no [%s] is configured in the config file [%s], "
@@ -440,7 +443,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
     local_host = ssh_host.get_local_host()
     instance = BarreleInstance(workspace, config, config_fpath, log_to_file,
                                logdir_is_default, local_host, collect_interval,
-                               continuous_query_periods, jobid_var,
+                               continuous_query_periods, jobstat_pattern,
                                lustre_fallback_version, enable_lustre_exp_mdt,
                                enable_lustre_exp_ost, host_dict,
                                agent_dict, barreleye_server)

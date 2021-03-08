@@ -46,7 +46,7 @@ BRL_ENABLE_LUSTRE_OSS = "enable_lustre_oss"
 BRL_ENABLE_LUSTRE_EXP_MDT = "enable_lustre_exp_mdt"
 BRL_ENABLE_LUSTRE_EXP_OST = "enable_lustre_exp_ost"
 BRL_HOSTNAME = "hostname"
-BRL_JOBID_VAR = "jobid_var"
+BRL_JOBSTAT_PATTERN = "jobstat_pattern"
 BRL_LUSTRE_FALLBACK_VERSION = "lustre_fallback_version"
 BRL_SERVER = "server"
 BRL_SSH_IDENTITY_FILE = "ssh_identity_file"
@@ -56,3 +56,11 @@ GRAFANA_PIECHART_PANEL = "grafana-piechart-panel"
 # All plugin names
 GRAFANA_PLUGINS = [GRAFANA_STATUS_PANEL,
                    GRAFANA_PIECHART_PANEL]
+
+# The jobstat pattern configured in Lustre is unknown.
+BARRELE_JOBSTAT_PATTERN_UNKNOWN = "unknown"
+# The jobstat configured in Lustre is "procname_uid". Some metrics of users
+# will be enabled.
+BARRELE_JOBSTAT_PATTERN_PROCNAME_UID = "procname_uid"
+BARRELE_JOBSTAT_PATTERNS = [BARRELE_JOBSTAT_PATTERN_UNKNOWN,
+                            BARRELE_JOBSTAT_PATTERN_PROCNAME_UID]

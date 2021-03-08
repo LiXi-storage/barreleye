@@ -3,7 +3,8 @@
 PIP3_PACKAGE_PATH = /usr/local/lib/python3.6/site-packages
 
 barrele:
-	PYTHONPATH=$(PIP3_PACKAGE_PATH) ../barrele -- --completion > barrele
+	PYTHONPATH=$(PIP3_PACKAGE_PATH) ../barrele -- --completion > barrele.tmp || exit 1; \
+	mv barrele.tmp barrele
 
 COMPLETIONS = barrele
 

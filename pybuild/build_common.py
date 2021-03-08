@@ -4,6 +4,8 @@ Common library for building
 import os
 import logging
 import sys
+import filelock
+from pycoral import constant
 from pycoral import utils
 from pycoral import time_util
 
@@ -14,6 +16,8 @@ CORAL_PLUGIN_DICT = {}
 CORAL_RELEASE_PLUGIN_DICT = {}
 # Key is plugin name, value is CoralPluginType()
 CORAL_DEVEL_PLUGIN_DICT = {}
+# Lock to prevent parallel RPM check/install
+RPM_INSTALL_LOCK = constant.CORAL_LOG_DIR + "/rpm_install"
 
 
 class CoralCommand(object):
@@ -205,20 +209,10 @@ def install_pip3_package_from_file(log, host, type_cache, tarball_url,
     return 0
 
 
-def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
-                          rpm_name_prefix):
+def reinstall_rpm(log, host, packages_dir, rpm_name_prefix, rpm_fname):
     """
-    Install the RPM if not installed
+    Reinstall RPM
     """
-    rpm_fname = None
-    for fname in extra_package_fnames:
-        if fname.startswith(rpm_name_prefix):
-            rpm_fname = fname
-            break
-    if rpm_fname is None:
-        log.cl_error("no [%s] RPM generated under dir [%s] of host [%s]",
-                     rpm_name_prefix, packages_dir, host.sh_hostname)
-        return -1
     rpm_name = rpm_fname[:-4]
     ret = host.sh_rpm_query(log, rpm_name)
     if ret == 0:
@@ -242,6 +236,43 @@ def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
                      retval.cr_exit_status,
                      retval.cr_stdout,
                      retval.cr_stderr)
+        return -1
+    return 0
+
+
+def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
+                          rpm_name_prefix):
+    """
+    Install the RPM if not installed
+    """
+    rpm_fname = None
+    for fname in extra_package_fnames:
+        if fname.startswith(rpm_name_prefix):
+            rpm_fname = fname
+            break
+    if rpm_fname is None:
+        log.cl_error("no [%s] RPM generated under dir [%s] of host [%s]",
+                     rpm_name_prefix, packages_dir, host.sh_hostname)
+        return -1
+
+    lock_file = RPM_INSTALL_LOCK + "-" + rpm_name_prefix + ".lock"
+    lock = filelock.FileLock(lock_file)
+    ret = 0
+    # Need to avoid confict of "rpm -ivh":
+    # package %s is already installed
+    try:
+        with lock.acquire(timeout=600):
+            ret = reinstall_rpm(log, host, packages_dir, rpm_name_prefix,
+                                rpm_fname)
+            lock.release()
+    except filelock.Timeout:
+        ret = -1
+        log.cl_error("someone else is holding lock of file [%s] for more "
+                     "than 10 minutes, aborting",
+                     lock_file)
+    if ret:
+        log.cl_error("failed to reinstall RPM [%s] on host [%s]",
+                     rpm_name_prefix, host.sh_hostname)
         return -1
     return 0
 

@@ -170,7 +170,7 @@ class BarreleAgent(object):
             interval = barreleye_instance.bei_collect_interval
         collectd_config = \
             barrele_collectd.CollectdConfig(self, interval,
-                                            barreleye_instance.bei_jobid_var)
+                                            barreleye_instance.bei_jobstat_pattern)
         if (self.bea_enable_lustre_oss or self.bea_enable_lustre_mds or
                 self.bea_enable_lustre_client):
             ret = collectd_config.cdc_plugin_lustre(log,

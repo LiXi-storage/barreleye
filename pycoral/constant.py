@@ -31,7 +31,7 @@ CORAL_LOG_DIR = "/var/log/coral"
 CORAL_BUILD_CACHE = CORAL_LOG_DIR + "/build_cache"
 # Dir to save ISO cache. The files under it will be put into ISO of Coral.
 ISO_CACHE_FNAME = "iso_cache"
-# File name to save OpenCoral cache.
+# File name to save build cache.
 CORAL_BUILD_CACHE_TYPE_OPEN = "open"
 # File name to save development cache.
 CORAL_BUILD_CACHE_TYPE_DEVEL = "devel"

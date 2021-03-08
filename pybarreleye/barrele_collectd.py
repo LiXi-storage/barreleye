@@ -84,7 +84,7 @@ class CollectdConfig(object):
     Each collectd config has an object of this type
     """
     # pylint: disable=too-many-public-methods,too-many-instance-attributes
-    def __init__(self, barreleye_agent, collect_internal, job_id_var):
+    def __init__(self, barreleye_agent, collect_internal, jobstat_pattern):
         self.cdc_configs = collections.OrderedDict()
         self.cdc_plugins = collections.OrderedDict()
         self.cdc_filedatas = collections.OrderedDict()
@@ -92,7 +92,7 @@ class CollectdConfig(object):
         self.cdc_post_cache_chain_rules = collections.OrderedDict()
         self.cdc_sfas = collections.OrderedDict()
         self.cdc_checks = []
-        self.cdc_job_id_var = job_id_var
+        self.cdc_jobstat_pattern = jobstat_pattern
         # On some hosts, Collectd might get an hostname that differs from the
         # output of command "hostname". Thus, fix the hostname in Collectd
         # by configuring it.
@@ -348,7 +348,7 @@ PostCacheChain "PostCache"
     def cdc_plugin_lustre(self, log, lustre_version, enable_lustre_oss=False,
                           enable_lustre_mds=False, enable_lustre_client=False,
                           enable_lustre_exp_ost=False, enable_lustre_exp_mdt=False):
-        # pylint: disable=too-many-arguments,too-many-branches
+        # pylint: disable=too-many-arguments,too-many-branches,too-many-statements
         """
         Config the Lustre plugin
         """
@@ -612,7 +612,8 @@ PostCacheChain "PostCache"
         Type "ost_recovery_status_evicted_clients"
     </Item>
 """
-            if self.cdc_job_id_var == lustre.JOB_ID_PROCNAME_UID:
+            if (self.cdc_jobstat_pattern ==
+                    barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
                 config += """
     <ItemType>
         Type "ost_jobstats"
@@ -633,6 +634,11 @@ PostCacheChain "PostCache"
         TsdbTags "procname=${extendfield:procname} uid=${extendfield:uid}"
     </ItemType>
 """
+            elif (self.cdc_jobstat_pattern !=
+                  barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
+                log.cl_error("unknown jobstat pattern [%s]",
+                             self.cdc_jobstat_pattern)
+                return -1
         if enable_lustre_exp_ost:
             config += """
     <Item>
@@ -854,7 +860,8 @@ PostCacheChain "PostCache"
         Type "mdt_filesfree"
     </Item>"""
 
-            if self.cdc_job_id_var == lustre.JOB_ID_PROCNAME_UID:
+            if (self.cdc_jobstat_pattern ==
+                    barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
                 config += """
     <ItemType>
         Type "mdt_jobstats"
@@ -875,6 +882,11 @@ PostCacheChain "PostCache"
         TsdbTags "procname=${extendfield:procname} uid=${extendfield:uid}"
     </ItemType>
 """
+            elif (self.cdc_jobstat_pattern !=
+                  barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
+                log.cl_error("unknown jobstat pattern [%s]",
+                             self.cdc_jobstat_pattern)
+                return -1
 
         config += """
     <Item>

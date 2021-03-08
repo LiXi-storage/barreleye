@@ -62,18 +62,6 @@ def download_dependent_rpms(log, host, packages_dir,
                      retval.cr_stderr)
         return -1
 
-    command = ("mkdir -p %s" % (packages_dir))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
     existing_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
     if existing_rpm_fnames is None:
         log.cl_error("failed to get fnames under dir [%s] on host [%s]",
@@ -230,7 +218,7 @@ def install_dependency(log, workspace, host, target_cpu, type_cache, plugins,
 
     # We need all Python depdendency for all plugins since no matter they
     # are needed or not, the Python codes will be checked.
-    for plugin in build_common.CORAL_RELEASE_PLUGIN_DICT.values():
+    for plugin in build_common.CORAL_PLUGIN_DICT.values():
         dependent_pips += plugin.cpt_build_dependent_pips
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
@@ -475,6 +463,18 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
                              origin_mirror=origin_mirror)
     if ret:
         log.cl_error("failed to install dependency for building")
+        return -1
+
+    command = ("mkdir -p %s" % (packages_dir))
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
 
     for plugin in plugins:

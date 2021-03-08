@@ -256,6 +256,7 @@ class LustreServiceInstance(object):
                              retval.cr_stderr)
                 return -1
 
+        mkfsoptions_string = ""
         if service.ls_service_type == LUSTRE_SERVICE_TYPE_MGT:
             type_argument = "--mgs"
             index_argument = ""
@@ -264,20 +265,25 @@ class LustreServiceInstance(object):
             type_argument = "--ost"
             index_argument = " --index=%s" % service.ls_index
             fsname_argument = " --fsname %s" % service.ls_lustre_fs.lf_fsname
+            if backfstype == BACKFSTYPE_LDISKFS:
+                mkfsoptions_string = ' --mkfsoptions="-O project"'
         elif service.ls_service_type == LUSTRE_SERVICE_TYPE_MDT:
             type_argument = "--mdt"
             if service.lmdt_is_mgs:
                 type_argument += " --mgs"
             index_argument = " --index=%s" % service.ls_index
             fsname_argument = " --fsname %s" % service.ls_lustre_fs.lf_fsname
+            if backfstype == BACKFSTYPE_LDISKFS:
+                mkfsoptions_string = ' --mkfsoptions="-O project"'
         else:
             log.cl_error("unsupported service type [%s]",
                          service.ls_service_type)
             return -1
         command = ("mkfs.lustre%s %s %s "
-                   "--reformat --backfstype=%s --mgsnode=%s%s" %
+                   "--reformat --backfstype=%s --mgsnode=%s%s%s" %
                    (fsname_argument, type_argument, service_string,
-                    backfstype, mgs_nid_string, index_argument))
+                    backfstype, mgs_nid_string, index_argument,
+                    mkfsoptions_string))
         command += " " + self.lsi_device
 
         retval = host.sh_run(log, command)
@@ -4861,7 +4867,7 @@ def lfs_path2fid(log, host, fpath):
 
     fid = retval.cr_stdout.strip()
     if len(fid) < 2 or fid[0] != '[' or fid[-1] != ']':
-        log.error("invalid fid [%s]", fid)
+        log.cl_error("invalid fid [%s]", fid)
         return None
     fid = fid[1:-1]
     return fid
