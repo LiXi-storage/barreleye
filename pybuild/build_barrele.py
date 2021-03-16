@@ -7,11 +7,12 @@ from pycoral import ssh_host
 from pybuild import build_common
 from pybarreleye import barrele_constant
 
-# The Git URL of collectd
+# The URL of Collectd tarball
 COLLECTD_URL = ("https://github.com/LiXi-storage/collectd/releases/download/"
-                "collectd-5.12.0.barreleye0/collectd-5.12.0.barreleye0.tar.bz2")
-# The Git branch of Collectd
-COLLECTD_SHA1SUM = "1d5e626b5ddfe99b199491cb0daa664db2650469"
+                "collectd-5.12.0.barreleye1/collectd-5.12.0.barreleye1.tar.bz2")
+# The sha1sum of Collectd tarball. Need to update together with
+# COLLECTD_URL
+COLLECTD_SHA1SUM = "7e19cfb97621d0d7d3fc078c224bcc1a8ad0c4d2"
 # The RPM names of Collectd to check
 COLLECTD_RPM_NAMES = ["collectd", "collectd-disk", "collectd-filedata",
                       "collectd-sensors", "collectd-ssh",
@@ -64,7 +65,6 @@ COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
                                  "libmemcached-devel",
                                  "libmicrohttpd-devel",
                                  "libmnl-devel",
-                                 "libmodbus-devel",
                                  "libnotify-devel",
                                  "libpcap-devel",
                                  "libssh2-devel",
@@ -86,7 +86,7 @@ COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
                                  "uthash-devel",
                                  "xfsprogs-devel",
                                  "yajl-devel",
-                                 "zeromq3-devel"]
+                                 "zeromq-devel"]
 # RPMs needed by building barreleye
 BARRELEYE_BUILD_DEPENDENT_RPMS = COLLECTD_BUILD_DEPENDENT_RPMS
 BARRELEYE_BUILD_DEPENDENT_PIPS = ["requests", "python-slugify"]
@@ -115,6 +115,9 @@ def check_collectd_rpms_integrity(log, rpm_fnames, distro_number, target_cpu,
         if collect_rpm_full not in rpm_fnames:
             if not quiet:
                 log.cl_error("RPM [%s] does not exist",
+                             collect_rpm_full)
+            else:
+                log.cl_debug("RPM [%s] does not exist",
                              collect_rpm_full)
             return -1
     return 0
@@ -280,7 +283,9 @@ def build_collectd_rpms(log, host, packages_dir, collectd_src_dir,
                '--without amqp --without gmond --without nut --without pinba '
                '--without ping --without varnish --without dpdkstat '
                '--without turbostat --without redis --without write_redis '
-               '--without gps --without lvm --define "_topdir %s" '
+               '--without gps --without lvm --without modbus --without mysql '
+               '--without ime '
+               '--define "_topdir %s" '
                '--define="rev %s" '
                '--define="dist .el%s" '
                'contrib/redhat/collectd.spec' %
@@ -333,9 +338,10 @@ def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
     distro = host.sh_distro(log)
     if distro == ssh_host.DISTRO_RHEL7:
         distro_number = "7"
+    elif distro == ssh_host.DISTRO_RHEL8:
+        distro_number = "8"
     else:
-        log.cl_error("build on distro [%s] is not supported yet, only "
-                     "support RHEL7/CentOS7", distro)
+        log.cl_error("build on distro [%s] is not supported yet", distro)
         return -1
 
     target_cpu = host.sh_target_cpu(log)
@@ -371,7 +377,8 @@ def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
                               tarball_fpath, distro_number,
                               target_cpu, collectd_version)
     if ret:
-        log.cl_error("failed to build Collectd RPMs")
+        log.cl_error("failed to build Collectd RPMs from src [%s]",
+                     collectd_src_dir)
         return -1
 
     existing_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
@@ -705,7 +712,7 @@ def build_grafana(log, host, packages_dir, extra_package_fnames):
     log.cl_info("downloading Grafana RPM")
     ret = build_common.download_file(log, host, url, fpath, expected_sha1sum)
     if ret:
-        log.cl_error("failed to download RPM of Influxdb")
+        log.cl_error("failed to download RPM of Grafana")
         return -1
     extra_package_fnames.append(fname)
     return 0
@@ -842,7 +849,7 @@ def build_barreleye(log, workspace, host, type_cache, iso_cache, packages_dir,
         log.cl_error("failed to download Influxdb")
         return -1
 
-    extra_rpm_names += barrele_constant.BARRELE_DEPENDENT_RPMS
+    extra_rpm_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_RPMS
     return 0
 
 
@@ -853,10 +860,15 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
     # pylint: disable=too-few-public-methods
     def __init__(self):
         super(CoralBarrelePlugin, self).__init__("barrele",
-                                                 BARRELEYE_BUILD_DEPENDENT_RPMS,
                                                  BARRELEYE_BUILD_DEPENDENT_PIPS,
                                                  is_devel=False,
                                                  need_collectd=True)
+
+    def cpt_build_dependent_rpms(self, distro):
+        """
+        Return the RPMs needed to install before building
+        """
+        return BARRELEYE_BUILD_DEPENDENT_RPMS
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,

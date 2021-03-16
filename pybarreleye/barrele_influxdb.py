@@ -5,7 +5,7 @@ import traceback
 import requests
 
 
-class BarreleInfluxdbClient(object):
+class BarreleInfluxdbClient():
     """
     The :class:`~.InfluxDBClient` object holds information necessary to
     connect to InfluxDB. Requests can be made to InfluxDB directly through
@@ -54,7 +54,7 @@ class BarreleInfluxdbClient(object):
         return response
 
 
-class InfluxdbContinuousQuery(object):
+class InfluxdbContinuousQuery():
     """
     Information about a countinous query
     """

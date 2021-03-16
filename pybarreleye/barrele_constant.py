@@ -23,12 +23,17 @@ BARRELE_AGENT_DEPENDENT_RPMS = ["libmnl",  # Needed by collectd
                                 "rsync",
                                 # Needed by collectd
                                 "yajl",
-                                # Needed by zeromq3
-                                "zeromq3"]
+                                # Needed by collectd-ssh
+                                "zeromq"]
+# RPMs needed to download for server
+BARRELE_SERVER_DOWNLOAD_DEPENDENT_RPMS = ["patch",  # Needed when patching influxdb.conf
+                                          "urw-base35-fonts"]  # Needed by Grafana
+# RPMs needed to download for Barreleye server and agent
+BARRELE_DOWNLOAD_DEPENDENT_RPMS = (BARRELE_SERVER_DOWNLOAD_DEPENDENT_RPMS +
+                                   BARRELE_AGENT_DEPENDENT_RPMS)
 # RPMS needed by Barreleye servers.
-BARRELE_SERVER_DEPENDENT_RPMS = ["influxdb", "grafana",
-                                 "patch",  # Needed when patching influxdb.conf
-                                 "urw-base35-fonts"]  # Needed by Grafana
+BARRELE_SERVER_DEPENDENT_RPMS = ["influxdb", "grafana"]
+BARRELE_SERVER_DEPENDENT_RPMS += BARRELE_DOWNLOAD_DEPENDENT_RPMS
 BARRELE_DEPENDENT_RPMS = BARRELE_AGENT_DEPENDENT_RPMS + BARRELE_SERVER_DEPENDENT_RPMS
 BARRELE_TEST_LOG_DIR_BASENAME = "barrele_test"
 
@@ -64,3 +69,35 @@ BARRELE_JOBSTAT_PATTERN_UNKNOWN = "unknown"
 BARRELE_JOBSTAT_PATTERN_PROCNAME_UID = "procname_uid"
 BARRELE_JOBSTAT_PATTERNS = [BARRELE_JOBSTAT_PATTERN_UNKNOWN,
                             BARRELE_JOBSTAT_PATTERN_PROCNAME_UID]
+
+# The Collectd/Influxdb service is active
+BARRELE_AGENT_ACTIVE = "active"
+# The Collectd/Influxdb service is inactive
+BARRELE_AGENT_INACTIVE = "inactive"
+
+# The host of agent is up
+BARRELE_AGENT_UP = "up"
+# The Collectd service is down
+BARRELE_AGENT_DOWN = "down"
+
+# The Grafana service is running
+BARRELE_AGENT_RUNNING = "running"
+# The Grafana service is stopped
+BARRELE_AGENT_STOPPED = "stopped"
+
+# The agent hostname
+BARRELE_FIELD_HOST = "Host"
+# The status of agent up
+BARRELE_FIELD_UP = "Up"
+# The status of agent collectd
+BARRELE_FIELD_COLLECTD = "Collectd"
+# The version of agent collectd
+BARRELE_FIELD_COLLECTD_VERSION = "Collectd Version"
+# The status of Grafana service
+BARRELE_FIELD_GRAFANA = "Grafana"
+# The version of Grafana
+BARRELE_FIELD_GRAFANA_VERSION = "Grafana Version"
+# The status of Influxdb service
+BARRELE_FIELD_INFLUXDB = "Influxdb"
+# The version of Influxdb
+BARRELE_FIELD_INFLUXDB_VERSION = "Influxdb Version"

@@ -10,7 +10,7 @@ CHECKS = $(PYTHON_CHECKS)
 
 # Somehow rpmbuild does not include pip3's library to Python3's sys.path
 # which will cause missing module. So add it explicitly here.
-PIP3_PACKAGE_PATH = /usr/local/lib/python3.6/site-packages
+PIP3_PACKAGE_PATH = /usr/local/lib/python3.6/site-packages:/usr/local/lib64/python3.6/site-packages
 
 %.python_checked: % ../.pylintrc
 	PYLINTRC=../.pylintrc PYTHONPATH=$(PIP3_PACKAGE_PATH) pylint-3 --disable=I $< || exit 1; \

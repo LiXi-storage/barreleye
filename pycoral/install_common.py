@@ -117,19 +117,18 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir):
         log.cl_error("failed to find ISO with pattern [%s] on local host [%s]",
                      iso_pattern, host.sh_hostname)
         return -1
-    elif len(fnames) > 1:
+    if len(fnames) > 1:
         log.cl_info("multiple ISOs found by pattern [%s] on local host [%s]",
                     iso_pattern, host.sh_hostname)
         return -1
-    else:
-        iso_path = fnames[0]
+    iso_path = fnames[0]
 
     is_dir = host.sh_path_isdir(log, iso_path)
     if is_dir < 0:
         log.cl_error("failed to check whether path [%s] is dir or not on host [%s]",
                      iso_path, host.sh_hostname)
         return -1
-    elif is_dir == 0:
+    if is_dir == 0:
         iso_dir = workspace + "/mnt/" + utils.random_word(8)
         command = ("mkdir -p %s && mount -o loop %s %s" %
                    (iso_dir, iso_path, iso_dir))
@@ -282,7 +281,7 @@ def coral_rpm_install(log, host, iso_path):
     return 0
 
 
-class CoralInstallationHost(object):
+class CoralInstallationHost():
     """
     Each host that needs installation has an object of this type
     """
@@ -651,7 +650,7 @@ def cluster_host_install(log, workspace, installation_host, repo_config_fpath):
     return 0
 
 
-class CoralInstallationCluster(object):
+class CoralInstallationCluster():
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """
     Installation cluster config.
@@ -751,10 +750,10 @@ def bootstrap_from_iso(log, workspace, local_host, rpms, missing_pips):
         return 0
 
     missing_string = ""
-    if len(missing_rpms):
+    if len(missing_rpms) > 0:
         missing_string = "RPMs %s" % missing_rpms
 
-    if len(missing_pips):
+    if len(missing_pips) > 0:
         if missing_string != "":
             missing_string += "and pip packages %s" % missing_pips
 
@@ -876,6 +875,7 @@ def command_missing_packages_rhel8():
     """
     Add the missing RPMs and pip packages for RHEL9
     """
+    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
     # pylint: disable=unused-variable
     missing_rpms = []
     missing_pips = []
@@ -933,6 +933,7 @@ def command_missing_packages_rhel7():
     """
     Add the missing RPMs and pip packages for RHEL7
     """
+    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
     # pylint: disable=unused-variable
     missing_rpms = []
     missing_pips = []
@@ -998,7 +999,7 @@ def download_pip3_packages(log, host, pip_dir, pip_packages):
     """
     if len(pip_packages) == 0:
         return 0
-    log.cl_info("downloading pip packages %s to dir [%s] on host [%s]",
+    log.cl_info("downloading pip3 packages %s to dir [%s] on host [%s]",
                 pip_packages, pip_dir, host.sh_hostname)
     ret = yum_install_rpm_from_internet(log, host, ["python3-pip"])
     if ret:

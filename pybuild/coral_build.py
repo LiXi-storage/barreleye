@@ -1,9 +1,8 @@
 """
 Library for building Coral
 """
-import os
 import re
-
+import filelock
 # pylint: disable=unused-import
 # Local libs
 from pycoral import ssh_host
@@ -15,7 +14,6 @@ from pybuild import build_constant
 from pybuild import build_barrele
 from pybuild import build_common
 from pybuild import build_version
-import filelock
 
 # The url of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_SHA1SUM
@@ -41,7 +39,7 @@ def merge_list(list_x, list_y):
     return merged_list
 
 
-def download_dependent_rpms(log, host, packages_dir,
+def download_dependent_rpms(log, host, distro, packages_dir,
                             filter_rpm_fnames, extra_rpm_names):
     """
     Download dependent RPMs
@@ -50,17 +48,19 @@ def download_dependent_rpms(log, host, packages_dir,
     # pylint: disable=too-many-branches,too-many-statements
     # The yumdb might be broken, so sync
     log.cl_info("downloading dependency RPMs")
-    command = "yumdb sync"
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
+    # yumdb has been removed for RHEL8
+    if distro == ssh_host.DISTRO_RHEL7:
+        command = "yumdb sync"
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
 
     existing_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
     if existing_rpm_fnames is None:
@@ -77,7 +77,13 @@ def download_dependent_rpms(log, host, packages_dir,
                      host.sh_hostname)
         return -1
 
-    command = "repotrack -a %s -p %s" % (target_cpu, packages_dir)
+    if distro == ssh_host.DISTRO_RHEL7:
+        command = "repotrack -a %s -p %s" % (target_cpu, packages_dir)
+    else:
+        assert distro == ssh_host.DISTRO_RHEL8
+        command = ("dnf download --resolve --alldeps --destdir %s" %
+                   (packages_dir))
+
     for rpm_name in dependent_rpms:
         command += " " + rpm_name
 
@@ -92,12 +98,34 @@ def download_dependent_rpms(log, host, packages_dir,
                      retval.cr_stderr)
         return -1
 
-    exist_pattern = (r"^%s/(?P<rpm_fname>\S+) already exists and appears to be "
-                     "complete$" % (packages_dir))
+    if distro == ssh_host.DISTRO_RHEL7:
+        exist_pattern = (r"^%s/(?P<rpm_fname>\S+) already exists and appears to be "
+                         "complete$" % (packages_dir))
+        download_pattern = (r"^Downloading (?P<rpm_fname>\S+)$")
+    else:
+        assert distro == ssh_host.DISTRO_RHEL8
+        exist_pattern = r"^\[SKIPPED\] (?P<rpm_fname>\S+): Already downloaded$"
+        download_pattern = r"^.+: (?P<rpm_fname>\S+)\d+.+$"
     exist_regular = re.compile(exist_pattern)
-    download_pattern = (r"^Downloading (?P<rpm_fname>\S+)$")
     download_regular = re.compile(download_pattern)
     lines = retval.cr_stdout.splitlines()
+    if distro == ssh_host.DISTRO_RHEL8:
+        if len(lines) == 0:
+            log.cl_error("no line of command [%s] on host "
+                         "[%s], stdout = [%s]",
+                         host.sh_hostname, command,
+                         retval.cr_stdout)
+            return -1
+        first_line = lines[0]
+        expected_prefix = "Last metadata expiration check:"
+        if not first_line.startswith(expected_prefix):
+            log.cl_error("unexpected first line [%s] of command [%s] on host "
+                         "[%s], stdout = [%s], expected prefix [%s]",
+                         first_line, host.sh_hostname, command,
+                         retval.cr_stdout,
+                         expected_prefix)
+            return -1
+        lines = lines[1:]
     for line in lines:
         match = exist_regular.match(line)
         if match:
@@ -107,9 +135,10 @@ def download_dependent_rpms(log, host, packages_dir,
             if match:
                 rpm_fname = match.group("rpm_fname")
             else:
-                log.cl_error("unknown output [%s] of repotrack on host "
+                log.cl_error("unknown stdout line [%s] of command [%s] on host "
                              "[%s], stdout = [%s]",
-                             line, host.sh_hostname, retval.cr_stdout)
+                             line, host.sh_hostname, command,
+                             retval.cr_stdout)
                 return -1
         if rpm_fname in existing_rpm_fnames:
             existing_rpm_fnames.remove(rpm_fname)
@@ -167,8 +196,8 @@ def install_pyinstaller(log, host, type_cache):
     return 0
 
 
-def install_dependency(log, workspace, host, target_cpu, type_cache, plugins,
-                       pip_dir, origin_mirror=False):
+def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
+                       plugins, pip_dir, origin_mirror=False):
     """
     Install the dependency of building Coral
     """
@@ -202,23 +231,30 @@ def install_dependency(log, workspace, host, target_cpu, type_cache, plugins,
                      command, host.sh_hostname)
         return -1
 
+    dependent_pips = []
     dependent_rpms = ["createrepo",  # To create the repo in ISO
                       "e2fsprogs-devel",  # Needed for ./configure
                       "genisoimage",  # Generate the ISO image
                       "git",  # Needed by building anything from Git repository.
                       "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
-                      "python36-pylint",  # Needed for Python codes check
-                      "python-pep8",  # Needed for Python codes check
-                      "python36-psutil",  # Used by Python codes
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
                       "wget"]  # Needed by downloading from web
-    dependent_pips = []
-    for plugin in plugins:
-        dependent_rpms += plugin.cpt_build_dependent_rpms
 
-    # We need all Python depdendency for all plugins since no matter they
-    # are needed or not, the Python codes will be checked.
+    if distro == ssh_host.DISTRO_RHEL7:
+        dependent_rpms += ["python36-pylint",  # Needed for Python codes check
+                           "python-pep8",  # Needed for Python codes check
+                           "python36-psutil"]  # Used by Python codes
+    else:
+        assert distro == ssh_host.DISTRO_RHEL8
+        dependent_rpms += ["python3-pylint",  # Needed for Python codes check
+                           "python3-psutil"]  # Used by Python codes
+        dependent_pips += ["pep8"]  # Needed for Python codes check
+
+    # We need all depdendency for all plugins since no matter they
+    # are needed or not, the Python codes will be checked, and the Python
+    # codes might depend on the RPMs.
     for plugin in build_common.CORAL_PLUGIN_DICT.values():
+        dependent_rpms += plugin.cpt_build_dependent_rpms(distro)
         dependent_pips += plugin.cpt_build_dependent_pips
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
@@ -309,7 +345,8 @@ def sync_shared_build_cache(log, host, private_cache, shared_parent):
     return ret
 
 
-def build(log, cache=constant.CORAL_BUILD_CACHE,
+def build(log, source_dir, workspace,
+          cache=constant.CORAL_BUILD_CACHE,
           lustre_rpms_dir=None,
           e2fsprogs_rpms_dir=None,
           collectd=None,
@@ -380,9 +417,8 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
 
     local_host = ssh_host.get_local_host(ssh=False)
     distro = local_host.sh_distro(log)
-    if distro != ssh_host.DISTRO_RHEL7:
-        log.cl_error("build on distro [%s] is not supported yet, only "
-                     "support RHEL7/CentOS7", distro)
+    if distro not in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        log.cl_error("build on distro [%s] is not supported yet", distro)
         return -1
 
     shared_cache = cache.rstrip("/")
@@ -399,8 +435,6 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
     if enable_zfs:
         enable_zfs_string = ", ZFS support disabled"
 
-    source_dir = os.getcwd()
-    workspace = source_dir + "/" + build_common.get_build_path()
     type_cache = workspace + "/" + type_fname
     build_pip_dir = type_cache + "/" + constant.BUILD_PIP
     iso_cache = type_cache + "/" + constant.ISO_CACHE_FNAME
@@ -458,7 +492,7 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
                      local_host.sh_hostname)
         return -1
 
-    ret = install_dependency(log, workspace, local_host, target_cpu,
+    ret = install_dependency(log, workspace, local_host, distro, target_cpu,
                              type_cache, plugins, build_pip_dir,
                              origin_mirror=origin_mirror)
     if ret:
@@ -488,7 +522,7 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = download_dependent_rpms(log, local_host, packages_dir,
+    ret = download_dependent_rpms(log, local_host, distro, packages_dir,
                                   extra_package_fnames,
                                   extra_rpm_names)
     if ret:
@@ -496,6 +530,18 @@ def build(log, cache=constant.CORAL_BUILD_CACHE,
         return -1
 
     pip_dir = iso_cache + "/" + constant.BUILD_PIP
+    command = ("mkdir -p %s" % (pip_dir))
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
     ret = install_common.download_pip3_packages(log, local_host, pip_dir,
                                                 constant.CORAL_DEPENDENT_PIPS)
     if ret:

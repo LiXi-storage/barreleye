@@ -71,7 +71,7 @@ def find_caller(src_file):
     return ret
 
 
-class CoralLogs(object):
+class CoralLogs():
     """
     Global log object to track what logs have been allocated
     """
@@ -247,7 +247,7 @@ FMT_FULL = ("[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)s] "
 DATE_FMT = "%Y/%m/%d-%H:%M:%S"
 
 
-class CoralLogRecord(object):
+class CoralLogRecord():
     """
     A record save in CoralLog
     """
@@ -287,7 +287,7 @@ def rpc_dict2log_record(log, rpc_dict):
     return record
 
 
-class CoralLog(object):
+class CoralLog():
     """
     Log the ouput of a command
     """
@@ -353,7 +353,7 @@ class CoralLog(object):
         Config the log
         """
         # pylint: disable=too-many-locals,too-many-statements
-        # pylint: disable=redefined-variable-type,too-many-branches
+        # pylint: disable=too-many-branches,bad-option-value,redefined-variable-type
         resultsdir = self.cl_resultsdir
         name = self.cl_name
         console_format = self.cl_console_format

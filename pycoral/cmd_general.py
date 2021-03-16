@@ -8,12 +8,12 @@ import os
 import time
 import socket
 
-from pycoral import clog
-from pycoral import time_util
-from pycoral import utils
 import prettytable
 import toml
 import yaml
+from pycoral import clog
+from pycoral import time_util
+from pycoral import utils
 
 
 def get_identity():
@@ -363,7 +363,7 @@ def parse_parameter(log, param):
         if status == PTP_INIT:
             if char == " ":
                 continue
-            elif char.isalnum() or char == "_":
+            if char.isalnum() or char == "_":
                 status = PTP_KEY
                 key += char
             else:
@@ -419,10 +419,9 @@ def parse_parameter(log, param):
                 if escape:
                     escape = False
                     continue
-                else:
-                    log.cl_error("invalid [%s]: multiple lines",
-                                 param)
-                    return None
+                log.cl_error("invalid [%s]: multiple lines",
+                             param)
+                return None
 
             if escape:
                 value += "\\"
@@ -643,7 +642,7 @@ def run_test(log, workspace, only_test_names, first_test_names,
             table.add_row([test_name, "Failed", "%f seconds" % duration_time])
             exit_status = -1
             continue
-        elif ret == TEST_SKIPPED:
+        if ret == TEST_SKIPPED:
             log.cl_warning("test [%s] skipped, duration %f seconds", test_name,
                            duration_time)
             table.add_row([test_name, "Skipped", "%f seconds" % duration_time])
@@ -823,15 +822,15 @@ def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
     if isinstance(field_string, bool):
         print_all_fields(log, all_fields)
         return 0
-    else:
-        field_names = parse_field_string(log, field_string, quick_fields,
-                                         table_fields, all_fields,
-                                         print_status=print_status,
-                                         print_table=print_table)
-        if field_names is None:
-            log.cl_error("invalid field string [%s]",
-                         field_string)
-            return -1
+
+    field_names = parse_field_string(log, field_string, quick_fields,
+                                     table_fields, all_fields,
+                                     print_status=print_status,
+                                     print_table=print_table)
+    if field_names is None:
+        log.cl_error("invalid field string [%s]",
+                     field_string)
+        return -1
 
     if print_table:
         table = prettytable.PrettyTable()

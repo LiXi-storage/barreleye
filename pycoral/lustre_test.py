@@ -29,7 +29,7 @@ def check_file_executable(log, host, fpath):
     return 0
 
 
-class Multiop(object):
+class Multiop():
     """
     multiop process on a host
     """

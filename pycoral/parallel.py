@@ -10,7 +10,7 @@ import time
 from pycoral import utils
 
 
-class ParallelThread(object):
+class ParallelThread():
     """
     There are multiple threads for each ParallelExecute
     Each thread has this object
@@ -119,7 +119,7 @@ class ParallelThread(object):
         self.pt_log = None
 
 
-class ParallelExecute(object):
+class ParallelExecute():
     """
     Each execute instance has an object of this type
     """

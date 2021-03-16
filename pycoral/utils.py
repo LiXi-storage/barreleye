@@ -88,7 +88,7 @@ def nuke_subprocess(subproc):
     return 0
 
 
-class CommandResult(object):
+class CommandResult():
     """
     All command will return a command result of this class
     """
@@ -112,7 +112,7 @@ class CommandResult(object):
         self.cr_exit_status = None
 
 
-class CommandJob(object):
+class CommandJob():
     """
     Each running of a command has an object of this class
     """
@@ -461,23 +461,22 @@ def file_type2string(inode_type):
     """
     if inode_type == stat.S_IFDIR:
         return "directory"
-    elif inode_type == stat.S_IFCHR:
+    if inode_type == stat.S_IFCHR:
         return "character_device"
-    elif inode_type == stat.S_IFBLK:
+    if inode_type == stat.S_IFBLK:
         return "block_device"
-    elif inode_type == stat.S_IFREG:
+    if inode_type == stat.S_IFREG:
         return "regular_file"
-    elif inode_type == stat.S_IFIFO:
+    if inode_type == stat.S_IFIFO:
         return "fifo"
-    elif inode_type == stat.S_IFLNK:
+    if inode_type == stat.S_IFLNK:
         return "symbolic_link"
-    elif inode_type == stat.S_IFSOCK:
+    if inode_type == stat.S_IFSOCK:
         return "socket"
-    else:
-        return None
+    return None
 
 
-class LimitResource(object):
+class LimitResource():
     """
     A resource shared by multiple threads
     """

@@ -13,7 +13,7 @@ def email_send(log, subject, content, sender_addr, recipient_addrs,
     """
     Send a message to a email address
     """
-    # pylint: disable=too-many-arguments,redefined-variable-type
+    # pylint: disable=too-many-arguments,bad-option-value,redefined-variable-type
     text = MIMEText(content, 'plain')
     text['From'] = sender_addr
     text['To'] = ", ".join(recipient_addrs)

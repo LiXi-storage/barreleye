@@ -102,7 +102,7 @@ def version_value(major, minor, patch):
     return value
 
 
-class LustreServiceInstanceSort(object):
+class LustreServiceInstanceSort():
     """
     For sorting the instances by load
     """
@@ -112,7 +112,7 @@ class LustreServiceInstanceSort(object):
         self.lsis_load = load
 
 
-class LustreServiceInstance(object):
+class LustreServiceInstance():
     """
     A Lustre services might has multiple instances on multiple hosts,
     which are usually for HA
@@ -333,7 +333,7 @@ class LustreServiceInstance(object):
                         "imported on host [%s]",
                         zpool_name, service_name, hostname)
             return 0
-        elif ret == 0 and export:
+        if ret == 0 and export:
             log.cl_info("zpool [%s] of Lustre service [%s] is not "
                         "import on host [%s]",
                         zpool_name, service_name, hostname)
@@ -352,19 +352,19 @@ class LustreServiceInstance(object):
             elif exit_status == constant.CSM_EINVAL:
                 log.cl_error("invalid command [%s]", command)
                 return -1
-            elif exit_status == constant.CSM_UNSUPPORTED:
+            if exit_status == constant.CSM_UNSUPPORTED:
                 log.cl_error("unsupported MMP feature on zpool [%s]",
                              service.ls_zpool_name)
                 return -1
-            elif exit_status == constant.CSM_AGAIN:
+            if exit_status == constant.CSM_AGAIN:
                 log.cl_error("temporary failure when checking whether zpool [%s] can be mounted",
                              service.ls_zpool_name)
                 return -1
-            elif exit_status == constant.CSM_OCCUPIED:
+            if exit_status == constant.CSM_OCCUPIED:
                 log.cl_error("wll not be able to import zpool [%s] because it is occupied",
                              service.ls_zpool_name)
                 return -1
-            elif exit_status != constant.CSM_MOUNTABLE:
+            if exit_status != constant.CSM_MOUNTABLE:
                 log.cl_error("unexpected exit value of command [%s] on host [%s], "
                              "ret = [%d], stdout = [%s], stderr = [%s]",
                              command,
@@ -541,7 +541,7 @@ class LustreServiceInstance(object):
             if match:
                 continue
 
-            if device == real_device or device == self.lsi_device:
+            if device in (real_device, self.lsi_device):
                 if mount_point != self.lsi_mnt:
                     log.cl_error("Lustre service device [%s] is mounted on "
                                  "host [%s], but on mount point [%s], not "
@@ -571,8 +571,8 @@ class LustreServiceInstance(object):
                                  device, mount_point, hostname)
                     ret = 1
                     break
-            elif (service_type == LUSTRE_SERVICE_TYPE_OST or
-                  service_type == LUSTRE_SERVICE_TYPE_MDT):
+            elif (service_type in (LUSTRE_SERVICE_TYPE_OST,
+                                   LUSTRE_SERVICE_TYPE_MDT)):
                 fsname = service.ls_lustre_fs.lf_fsname
                 match = service_regular.match(label)
                 if match:
@@ -623,7 +623,7 @@ class LustreServiceInstance(object):
         output = retval.cr_stderr.strip()
         if retval.cr_exit_status and output.endswith("no such pool"):
             return 0
-        elif retval.cr_exit_status:
+        if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command, hostname,
@@ -634,7 +634,7 @@ class LustreServiceInstance(object):
         return 1
 
 
-class LustreService(object):
+class LustreService():
     """
     Lustre service parent class for MDT/MGS/OST
     """
@@ -867,15 +867,15 @@ class LustreService(object):
                 if not quiet:
                     log.cl_stdout(constant.MSG_ALREADY_MOUNTED_NO_NEWLINE)
                 return 0
+
+            ret = instance.lsi_umount(log)
+            if ret == 0:
+                log.cl_debug("umounted service [%s] on host [%s]",
+                             self.ls_service_name, hostname)
             else:
-                ret = instance.lsi_umount(log)
-                if ret == 0:
-                    log.cl_debug("umounted service [%s] on host [%s]",
-                                 self.ls_service_name, hostname)
-                else:
-                    log.cl_error("failed to umount service [%s] on host [%s]",
-                                 self.ls_service_name, hostname)
-                    return -1
+                log.cl_error("failed to umount service [%s] on host [%s]",
+                             self.ls_service_name, hostname)
+                return -1
 
         if len(instances) == 0:
             self._ls_complain_no_mountable(log, exclude_dict)
@@ -935,9 +935,8 @@ class LustreService(object):
 
         if len(mounted_instances) == 0:
             return None
-        else:
-            assert len(mounted_instances) == 1
-            return mounted_instances[0]
+        assert len(mounted_instances) == 1
+        return mounted_instances[0]
 
     def ls_mounted_instance(self, log):
         """
@@ -979,9 +978,8 @@ class LustreService(object):
 
         if len(imported_instances) == 0:
             return None
-        else:
-            assert len(imported_instances) == 1
-            return imported_instances[0]
+        assert len(imported_instances) == 1
+        return imported_instances[0]
 
     def ls_umount(self, log):
         """
@@ -998,9 +996,8 @@ class LustreService(object):
                 return ret
             log.cl_debug("umounted service [%s]", service_name)
             return 0
-        else:
-            log.cl_info("service [%s] is not mounted on any host",
-                        self.ls_service_name)
+        log.cl_info("service [%s] is not mounted on any host",
+                    self.ls_service_name)
 
         if self.ls_backfstype == BACKFSTYPE_ZFS:
             instance = self.ls_zpool_imported_instance(log)
@@ -1089,7 +1086,7 @@ class LustreMGSInstance(LustreServiceInstance):
                 raise Exception(reason)
 
 
-class LustreFilesystem(object):
+class LustreFilesystem():
     """
     Information about Lustre file system
     """
@@ -1194,9 +1191,8 @@ class LustreFilesystem(object):
         if self.lf_mgs_mdt is None:
             assert self.lf_mgs is not None
             return self.lf_mgs.ls_nids()
-        else:
-            assert self.lf_mgs is None
-            return self.lf_mgs_mdt.ls_nids()
+        assert self.lf_mgs is None
+        return self.lf_mgs_mdt.ls_nids()
 
     def lf_set_jobid_var(self, log, jobid_var):
         """
@@ -1410,7 +1406,7 @@ class LustreMDTInstance(LustreServiceInstance):
                          self.lsi_host.sh_hostname,
                          retval.cr_stderr)
             return -1
-        elif retval.cr_stdout == expected_output:
+        if retval.cr_stdout == expected_output:
             return 0
 
         command = ("lctl set_param mdt.%s-%s.hsm_control=enabled" %
@@ -1446,7 +1442,7 @@ class LustreMDTInstance(LustreServiceInstance):
                         mdt.ls_lustre_fs.lf_fsname,
                         self.lsi_host.sh_hostname, retval.cr_stderr)
             return 1
-        elif retval.cr_stdout == expected_output:
+        if retval.cr_stdout == expected_output:
             return 0
 
         command = ("lctl set_param mdt.%s-%s.hsm."
@@ -1611,7 +1607,7 @@ class LustreOST(LustreService):
             raise Exception(reason)
 
 
-class LustreClient(object):
+class LustreClient():
     """
     Lustre client
     """
@@ -1807,7 +1803,7 @@ LUSTRE_REQUIRED_RPM_TYPES = [RPM_KERNEL, RPM_KMOD, RPM_OSD_LDISKFS_MOUNT,
                              RPM_TESTS_KMOD, RPM_TESTS]
 
 
-class LustreVersion(object):
+class LustreVersion():
     """
     RPM version of Lustre
     """
@@ -1977,7 +1973,7 @@ def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False):
     return matched_versions[0], matched_rpm_type_dicts[0]
 
 
-class LustreTest(object):
+class LustreTest():
     """
     Test of Lustre
     """
@@ -2164,7 +2160,7 @@ class LustreTest(object):
         return 0, next_subtest
 
 
-class LustreSubtestResult(object):
+class LustreSubtestResult():
     """
     Result of subtest
     """
@@ -2354,7 +2350,7 @@ def lustre_subtest_title_format(subtest_title):
     return new_title
 
 
-class LustreSubtest(object):
+class LustreSubtest():
     """
     Subtest in test script
     """
@@ -2469,13 +2465,13 @@ class LustreSubtest(object):
             return -1
         if status == LustreSubtestResult.STATUS_STARTED:
             return self.lst_set_status_started(log, timestamp=timestamp)
-        elif status == LustreSubtestResult.STATUS_FAILED:
+        if status == LustreSubtestResult.STATUS_FAILED:
             return self.lst_set_status_failed(log, fail_reason=fail_reason,
                                               timestamp=timestamp)
-        elif status == LustreSubtestResult.STATUS_SKIPPED:
+        if status == LustreSubtestResult.STATUS_SKIPPED:
             return self.lst_set_status_skipped(log, skip_reason=skip_reason,
                                                timestamp=timestamp)
-        elif status == LustreSubtestResult.STATUS_PASSED:
+        if status == LustreSubtestResult.STATUS_PASSED:
             return self.lst_set_status_passed(log, timestamp=timestamp)
 
         log.cl_error("not able to set invalid status [%s] of subtest [%s/%s]",
@@ -2557,7 +2553,7 @@ class LustreSubtest(object):
         for subtest_result in self.lst_subtest_results:
             if subtest_result.lstr_subtest_status == LustreSubtestResult.STATUS_FAILED:
                 return False
-            elif subtest_result.lstr_subtest_status == LustreSubtestResult.STATUS_PASSED:
+            if subtest_result.lstr_subtest_status == LustreSubtestResult.STATUS_PASSED:
                 has_passed = True
         return has_passed
 
@@ -2682,7 +2678,7 @@ def parse_test_script(log, local_host, logdir, test_name):
                              "subtest title in test [%s]",
                              line, test_name)
                 return None
-            elif line[-1] == "\\":
+            if line[-1] == "\\":
                 subtest_title += line[:-1]
             else:
                 subtest_title += line[:-1]
@@ -2749,7 +2745,7 @@ def parse_test_script(log, local_host, logdir, test_name):
     return lustre_test
 
 
-class LustreDistribution(object):
+class LustreDistribution():
     """
     Lustre Distribution, including Lustre, kernel, e2fsprogs RPMs
     """
@@ -2872,9 +2868,9 @@ class LustreDistribution(object):
         missing_rpms = []
         for rpm_name in self.ldis_lustre_version.lv_rpm_pattern_dict:
             if rpm_name not in self.ldis_lustre_rpm_dict:
-                if rpm_name == RPM_OSD_LDISKFS or rpm_name == RPM_OSD_LDISKFS_MOUNT:
+                if rpm_name in (RPM_OSD_LDISKFS, RPM_OSD_LDISKFS_MOUNT):
                     ldiskfs_disable_reasons.append(rpm_name)
-                elif rpm_name == RPM_OSD_ZFS or rpm_name == RPM_OSD_ZFS_MOUNT:
+                elif rpm_name in (RPM_OSD_ZFS, RPM_OSD_ZFS_MOUNT):
                     zfs_disable_reasons.append(rpm_name)
                 else:
                     missing_rpms.append(rpm_name)
@@ -4014,7 +4010,7 @@ class LustreHost(ssh_host.SSHHost):
                              uefi_centos_based_config,
                              self.sh_hostname)
                 return -1
-            elif bios_based_config_exists:
+            if bios_based_config_exists:
                 config = bios_based_config
             elif uefi_based_config_exists:
                 config = uefi_based_config
@@ -4388,7 +4384,7 @@ class LustreHost(ssh_host.SSHHost):
         load = len(service_instance_dict)
 
         if has_remainder:
-            if load != load_per_host and load != load_per_host + 1:
+            if load not in (load_per_host, load_per_host + 1):
                 log.cl_debug("balanced load of host [%s] should be either [%s] or [%s], got [%s]",
                              hostname, load_per_host, load_per_host + 1, load)
                 return 0
@@ -4426,9 +4422,9 @@ class LustreHost(ssh_host.SSHHost):
         healthy = retval.cr_stdout.strip()
         if healthy == "healthy":
             return LustreHost.LSH_HEALTHY
-        elif healthy == "NOT HEALTHY":
+        if healthy == "NOT HEALTHY":
             return LustreHost.LSH_UNHEALTHY
-        elif healthy == "LBUG":
+        if healthy == "LBUG":
             return LustreHost.LSH_LBUG
         log.cl_error("unexpected output of command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -4688,7 +4684,7 @@ def lustre_unlink(log, path, host=None):
     return 0
 
 
-class HSMState(object):
+class HSMState():
     """
     The HSM state
     """
@@ -4873,7 +4869,7 @@ def lfs_path2fid(log, host, fpath):
     return fid
 
 
-class LustreFID(object):
+class LustreFID():
     """
     FID
     """
@@ -4999,7 +4995,7 @@ def check_lustre_source(log, host, source_path):
             log.cl_error("failed to check whether [%s] exists on host [%s]",
                          path, host.sh_hostname)
             return -1
-        elif ret == 0:
+        if ret == 0:
             log.cl_error("path [%s] does not exist on host [%s]",
                          path, host.sh_hostname)
             return -1

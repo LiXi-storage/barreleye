@@ -138,7 +138,7 @@ def ssh_run(hostname, command, login_name="root", timeout=None,
                      quit_func=quit_func, flush_tee=flush_tee)
 
 
-class SSHHost(object):
+class SSHHost():
     """
     Each SSH host has an object of SSHHost
     """
@@ -290,25 +290,23 @@ class SSHHost(object):
                              retval.cr_stdout,
                              retval.cr_stderr)
                 return None
-            else:
-                if "el7" in retval.cr_stdout:
-                    self.sh_cached_distro = DISTRO_RHEL7
-                    return DISTRO_RHEL7
-                elif "el8" in retval.cr_stdout:
-                    self.sh_cached_distro = DISTRO_RHEL8
-                    return DISTRO_RHEL8
-                elif "el6" in retval.cr_stdout:
-                    self.sh_cached_distro = DISTRO_RHEL6
-                    return DISTRO_RHEL6
-                else:
-                    log.cl_error("unexpected output of command [%s] on host [%s], "
-                                 "ret = [%d], stdout = [%s], stderr = [%s]",
-                                 command,
-                                 self.sh_hostname,
-                                 retval.cr_exit_status,
-                                 retval.cr_stdout,
-                                 retval.cr_stderr)
-                    return None
+            if "el7" in retval.cr_stdout:
+                self.sh_cached_distro = DISTRO_RHEL7
+                return DISTRO_RHEL7
+            if "el8" in retval.cr_stdout:
+                self.sh_cached_distro = DISTRO_RHEL8
+                return DISTRO_RHEL8
+            if "el6" in retval.cr_stdout:
+                self.sh_cached_distro = DISTRO_RHEL6
+                return DISTRO_RHEL6
+            log.cl_error("unexpected output of command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
 
         command = "lsb_release -s -i"
         retval = self.sh_run(log, command)
@@ -336,37 +334,36 @@ class SSHHost(object):
             return None
         version = retval.cr_stdout.strip('\n')
 
-        if (name == "RedHatEnterpriseServer" or
-                name == "ScientificSL" or
-                name == "CentOS"):
+        if (name in ("RedHatEnterpriseServer", "ScientificSL", "CentOS")):
             if version.startswith("7"):
                 self.sh_cached_distro = DISTRO_RHEL7
                 return DISTRO_RHEL7
-            elif version.startswith("6"):
+            if version.startswith("6"):
                 self.sh_cached_distro = DISTRO_RHEL6
                 return DISTRO_RHEL6
-            else:
-                log.cl_error("unsupported version [%s] of [%s] on host [%s]",
-                             version, "rhel", self.sh_hostname)
-                return None
-        elif name == "EnterpriseEnterpriseServer":
+            if version.startswith("8"):
+                self.sh_cached_distro = DISTRO_RHEL8
+                return DISTRO_RHEL8
+            log.cl_error("unsupported version [%s] of [%s] on host [%s]",
+                         version, "rhel", self.sh_hostname)
+            return None
+        if name == "EnterpriseEnterpriseServer":
             log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                          version, "oel", self.sh_hostname)
             return None
-        elif name == "SUSE LINUX":
+        if name == "SUSE LINUX":
             # PATCHLEVEL=$(sed -n -e 's/^PATCHLEVEL = //p' /etc/SuSE-release)
             # version="${version}.$PATCHLEVEL"
             log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                          version, "sles", self.sh_hostname)
             return None
-        elif name == "Fedora":
+        if name == "Fedora":
             log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                          version, "fc", self.sh_hostname)
             return None
-        else:
-            log.cl_error("unsupported version [%s] of [%s] on host [%s]",
-                         version, name, self.sh_hostname)
-            return None
+        log.cl_error("unsupported version [%s] of [%s] on host [%s]",
+                     version, name, self.sh_hostname)
+        return None
 
     def sh_prepare_user(self, log, name, uid, gid):
         """
@@ -558,9 +555,8 @@ class SSHHost(object):
         if is_local:
             return ["\"%s\"%s" % (sh_escape(path), pattern)
                     for pattern in patterns]
-        else:
-            return [scp_remote_escape(path) + pattern
-                    for pattern in patterns]
+        return [scp_remote_escape(path) + pattern
+                for pattern in patterns]
 
     def sh_make_scp_cmd(self, sources, dest):
         """
@@ -1121,17 +1117,15 @@ class SSHHost(object):
                              retval.cr_stderr)
                 return -1
             return 0
-        elif retval.cr_exit_status == 1:
+        if retval.cr_exit_status == 1:
             return 0
-        else:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     self.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
 
     def sh_device_umount_all(self, log, device):
@@ -1210,9 +1204,7 @@ class SSHHost(object):
                                  "[%s] with type [%s], not [%s]", device,
                                  tmp_mount_point, self.sh_hostname,
                                  tmp_fstype, fstype)
-                    return -1
-                else:
-                    return 1
+                return -1
         return 0
 
     def sh_device_mounted(self, log, device):
@@ -1248,7 +1240,7 @@ class SSHHost(object):
         ret = self.sh_filesystem_mounted(log, device, fstype, mount_point)
         if ret == 1:
             return 0
-        elif ret < 0:
+        if ret < 0:
             return -1
 
         option_string = ""
@@ -1437,8 +1429,7 @@ class SSHHost(object):
             for character in line[pointer:]:
                 if character != " ":
                     break
-                else:
-                    pointer += 1
+                pointer += 1
 
             value = line[pointer:]
             info_dict[name] = value
@@ -1600,8 +1591,7 @@ class SSHHost(object):
             return retval.cr_exit_status
         if written == size:
             return 0
-        else:
-            return self.sh_truncate(log, fpath, size)
+        return self.sh_truncate(log, fpath, size)
 
     def sh_rpm_query(self, log, rpm_name):
         """
@@ -1846,7 +1836,7 @@ class SSHHost(object):
             return -1
 
         status = self.sh_selinux_status(log)
-        if status == "Disabled" or status == "Permissive":
+        if status in ("Disabled", "Permissive"):
             log.cl_debug("SELinux is already [%s] on host [%s]",
                          status, self.sh_hostname)
             return 0
@@ -1863,7 +1853,7 @@ class SSHHost(object):
             return -1
 
         status = self.sh_selinux_status(log)
-        if status != "Disabled" and status != "Permissive":
+        if status not in ("Disabled", "Permissive"):
             log.cl_error("SELinux still has [%s] status on host [%s] after "
                          "command running [%s]",
                          status, self.sh_hostname, command)
@@ -2081,7 +2071,7 @@ class SSHHost(object):
             log.cl_error("failed to check whether host [%s] is local host",
                          self.sh_hostname)
             return -1
-        elif ret:
+        if ret:
             log.cl_error("will not reboot host [%s], because it is local host",
                          self.sh_hostname)
             return -1
@@ -2127,12 +2117,11 @@ class SSHHost(object):
                 log.cl_error("failed to issue force reboot on host [%s]",
                              self.sh_hostname)
                 return -1
-            else:
-                log.cl_info("failed to issue force reboot on host [%s], but "
-                            "none-force reboot was issued successfully, "
-                            "waiting again in case reboot takes longer than "
-                            "expected",
-                            self.sh_hostname)
+            log.cl_info("failed to issue force reboot on host [%s], but "
+                        "none-force reboot was issued successfully, "
+                        "waiting again in case reboot takes longer than "
+                        "expected",
+                        self.sh_hostname)
 
         if self.sh_wait_reboot(log, uptime):
             log.cl_error("reboot of host [%s] failed",
@@ -2508,7 +2497,7 @@ class SSHHost(object):
         retval = self.sh_run(log, command)
         if retval.cr_stdout == "unknown\n":
             return 0
-        elif retval.cr_exit_status and retval.cr_stderr != "":
+        if retval.cr_exit_status and retval.cr_stderr != "":
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
@@ -2517,18 +2506,18 @@ class SSHHost(object):
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
-        else:
-            command = ("systemctl disable %s" % (service_name))
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status and retval.cr_stderr != "":
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
+
+        command = ("systemctl disable %s" % (service_name))
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status and retval.cr_stderr != "":
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
         return 0
 
     def sh_service_enable(self, log, service_name):
@@ -2681,7 +2670,7 @@ class SSHHost(object):
         output = retval.cr_stderr.strip()
         if retval.cr_exit_status == 0:
             return 1
-        elif output.endswith("No such file or directory"):
+        if output.endswith("No such file or directory"):
             return 0
         log.cl_error("failed to run [%s] on host [%s], ret = [%d], "
                      "stdout = [%s], stderr = [%s]", command,
@@ -2815,8 +2804,7 @@ class SSHHost(object):
                 return -1
 
             return stat_result.st_size
-        else:
-            return self.sh_get_file_blocks(log, path)
+        return self.sh_get_file_blocks(log, path)
 
     def sh_pcs_resources(self, log):
         """
@@ -2960,7 +2948,7 @@ class SSHHost(object):
         retval = self.sh_run(log, command)
         if retval.cr_exit_status == 2:
             return []
-        elif retval.cr_exit_status < 0:
+        if retval.cr_exit_status < 0:
             if not quiet:
                 log.cl_error("failed to run command [%s] on host [%s], "
                              "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -3611,6 +3599,62 @@ class SSHHost(object):
                          retval.cr_stderr)
             return -1
         return 0
+
+    def sh_rpm_version(self, log, rpm_keyword):
+        """
+        Return the RPM version. The rpm_keyword will be used to filter the
+        installed RPMs. And a series of RPMs could be matched. The series of
+        RPMs should share the same version. And the version number should start
+        with a number. And the number should follows a "-".
+
+        collectd-filedata-5.12.0.barreleye0-1.el7.x86_64
+        collectd-5.12.0.barreleye0-1.el7.x86_64
+
+        kmod-lustre-client-2.12.6_ddn14_874_g59b0328-1.el7.x86_64
+        lustre-client-2.12.6_ddn14_874_g59b0328-1.el7.x86_64
+        """
+        command = "rpm -qa | grep %s" % rpm_keyword
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
+        rpm_names = retval.cr_stdout.splitlines()
+        if len(rpm_names) == 0:
+            log.cl_error("unexpected stdout of command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
+        version = None
+        for rpm_name in rpm_names:
+            minus_index = -1
+            for current_index in range(len(rpm_name) - 1):
+                if (rpm_name[current_index] == "-" and
+                        rpm_name[current_index + 1].isdigit()):
+                    minus_index = current_index
+                    break
+            if minus_index == -1:
+                log.cl_error("RPM [%s] on host [%s] does not have expected format",
+                             rpm_name, self.sh_hostname)
+                return None
+            rpm_version = rpm_name[minus_index + 1:]
+            if version is None:
+                version = rpm_version
+            elif rpm_version != version:
+                log.cl_error("RPM [%s] on host [%s] has unexpected version "
+                             "[%s],  expected [%s]", rpm_name, rpm_version,
+                             version)
+                return None
+        return version
 
 
 def get_local_host(ssh=True):

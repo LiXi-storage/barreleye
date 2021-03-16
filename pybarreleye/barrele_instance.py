@@ -24,7 +24,7 @@ BARRELE_LUSTRE_FALLBACK_VERSION = lustre.LUSTRE_VERSION_NAME_2_12
 BARRELE_DATA_DIR = "/var/log/coral/barreleye_data"
 
 
-class BarreleInstance(object):
+class BarreleInstance():
     """
     This instance saves the global Barreleye information.
     """
@@ -228,6 +228,40 @@ class BarreleInstance(object):
         log.cl_info("please login by [%s:%s] for administrating",
                     server.bes_grafana_admin_login,
                     server.bes_grafana_admin_password)
+        return 0
+
+    def bei_stop_agents(self, log, hostnames):
+        """
+        Stop agents
+        """
+        for hostname in hostnames:
+            if hostname not in self.bei_agent_dict:
+                log.cl_error("host [%s] is not configured as Barreleye agent",
+                             hostname)
+                return -1
+            agent = self.bei_agent_dict[hostname]
+            ret = agent.bea_collectd_stop(log)
+            if ret:
+                log.cl_error("failed to stop Barreleye agent on host [%s]",
+                             hostname)
+                return -1
+        return 0
+
+    def bei_start_agents(self, log, hostnames):
+        """
+        Start agents
+        """
+        for hostname in hostnames:
+            if hostname not in self.bei_agent_dict:
+                log.cl_error("host [%s] is not configured as Barreleye agent",
+                             hostname)
+                return -1
+            agent = self.bei_agent_dict[hostname]
+            ret = agent.bea_collectd_start(log)
+            if ret:
+                log.cl_error("failed to start Barreleye agent on host [%s]",
+                             hostname)
+                return -1
         return 0
 
 

@@ -53,6 +53,7 @@ def main():
     """
     main routine
     """
+    # pylint: disable=bad-option-value,import-outside-toplevel
     build_bootstrap()
 
     from pybuild import coral_command

@@ -7,11 +7,11 @@ import os
 import traceback
 import json
 from http import HTTPStatus
+from slugify import slugify
+import requests
 from pycoral import utils
 from pybarreleye import barrele_constant
 from pybarreleye import barrele_influxdb
-import requests
-import slugify
 
 
 # The Influxdb config fpath
@@ -81,7 +81,7 @@ def grafana_dashboard_check(log, title_name, dashboard):
     return 0
 
 
-class BarreleServer(object):
+class BarreleServer():
     """
     Barreleye server object
     """
@@ -455,7 +455,7 @@ class BarreleServer(object):
             return -1
         if response.status_code == HTTPStatus.OK:
             return 1
-        elif response.status_code == HTTPStatus.NOT_FOUND:
+        if response.status_code == HTTPStatus.NOT_FOUND:
             return 0
         log.cl_error("got grafana status [%d] when get datasource of influxdb",
                      response.status_code)
@@ -525,7 +525,7 @@ class BarreleServer(object):
         ret = self._bes_grafana_has_influxdb_datasource(log)
         if ret < 0:
             return -1
-        elif ret:
+        if ret:
             ret = self._bes_grafana_influxdb_datasource_delete(log)
             if ret:
                 return -1
@@ -978,7 +978,7 @@ class BarreleServer(object):
                    "Accept": "application/json"}
 
         url = self.bes_grafana_admin_url("/api/users/lookup?loginOrEmail=%s" %
-                                         (slugify.slugify(name)))
+                                         (slugify(name)))
         try:
             response = requests.get(url, headers=headers)
         except:
@@ -987,7 +987,7 @@ class BarreleServer(object):
             return -1, None
         if response.status_code == HTTPStatus.OK:
             return 1, response.json()
-        elif response.status_code == HTTPStatus.NOT_FOUND:
+        if response.status_code == HTTPStatus.NOT_FOUND:
             return 0, None
         log.cl_error("got status [%d] when getting user info from Grafana",
                      response.status_code)
@@ -1002,7 +1002,7 @@ class BarreleServer(object):
         ret, json_info = self._bes_grafana_user_info(log, "viewer")
         if ret < 0:
             return -1
-        elif ret == 1:
+        if ret == 1:
             user_id = json_info["id"]
             log.cl_debug("Grafana user [%s] exists with id [%d], deleting it",
                          name, user_id)
@@ -1369,3 +1369,65 @@ class BarreleServer(object):
                              continuous_query.icq_measurement)
                 return -1
         return 0
+
+    def bes_grafana_running(self, log):
+        """
+        Check whether the grafana is running.
+        Return 1 if running. Return -1 if failure.
+        """
+        command = "systemctl is-active grafana-server"
+        retval = self.bes_server_host.sh_run(log, command)
+        if retval.cr_stdout == "active\n":
+            return 1
+        if retval.cr_stdout == "unknown\n":
+            return 0
+        log.cl_error("unexpected stdout of command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     self.bes_server_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    def bes_influxdb_running(self, log):
+        """
+        Check whether the influxdb is running.
+        Return 1 if running. Return -1 if failure.
+        """
+        command = "systemctl is-active influxdb"
+        retval = self.bes_server_host.sh_run(log, command)
+        if retval.cr_stdout == "active\n":
+            return 1
+        if retval.cr_stdout == "unknown\n":
+            return 0
+        log.cl_error("unexpected stdout of command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     self.bes_server_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    def bes_influxdb_version(self, log):
+        """
+        Return the Influxdb version, e.g. 1.8.4-1.x86_64
+        """
+        host = self.bes_server_host
+        version = host.sh_rpm_version(log, "influxdb-")
+        if version is None:
+            log.cl_error("failed to get the Collectd RPM version on host [%s]",
+                         host.sh_hostname)
+        return version
+
+    def bes_grafana_version(self, log):
+        """
+        Return the Grafana version, e.g. 7.3.7-1.x86_64
+        """
+        host = self.bes_server_host
+        version = host.sh_rpm_version(log, "grafana-")
+        if version is None:
+            log.cl_error("failed to get the Collectd RPM version on host [%s]",
+                         host.sh_hostname)
+        return version

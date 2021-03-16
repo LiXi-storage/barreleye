@@ -79,7 +79,7 @@ def support_lustre_client(lustre_version):
     return True
 
 
-class CollectdConfig(object):
+class CollectdConfig():
     """
     Each collectd config has an object of this type
     """
@@ -269,7 +269,7 @@ PostCacheChain "PostCache"
         """
         Config the syslog plugin
         """
-        if log_level != "err" and log_level != "info" and log_level != "debug":
+        if log_level not in ("err", "info", "debug"):
             return -1
         config = ('<Plugin "syslog">\n'
                   '    LogLevel %s\n'

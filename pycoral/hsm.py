@@ -16,7 +16,7 @@ COMMAND_HSM_REMOVER = "hsm_remover"
 COMMAND_LSHMTOOL_POSIX = "lhsmtool_posix"
 
 
-class HSMCopytool(object):
+class HSMCopytool():
     """
     Each SSH host has an object of this type
     """
@@ -118,7 +118,6 @@ class HSMCopytool(object):
 
         log.cl_debug("thread of copytool [%s] is exiting",
                      self.hc_copytool_id)
-        return
 
     def hc_thread_start(self, log):
         """
@@ -140,7 +139,7 @@ class HSMCopytool(object):
             self.hc_thread.join()
 
 
-class HSMRemover(object):
+class HSMRemover():
     """
     Each SSH host has an object of this type
     """

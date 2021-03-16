@@ -217,7 +217,7 @@ def parse_testlist_argument(log, argument):
     # pylint: disable=too-many-branches,too-many-arguments
     if argument is None:
         return 0, None
-    elif isinstance(argument, tuple):
+    if isinstance(argument, tuple):
         substrings = list(argument)
         test_names = []
         for substring in substrings:
@@ -227,7 +227,7 @@ def parse_testlist_argument(log, argument):
                 return -1, None
             test_names += new_names
         return 0, test_names
-    elif isinstance(argument, str):
+    if isinstance(argument, str):
         if argument == "":
             return 0, []
         test_names = []
@@ -239,7 +239,6 @@ def parse_testlist_argument(log, argument):
                 return -1, None
             test_names += new_names
         return 0, test_names
-    else:
-        log.cl_error("invalid test list type [%s]",
-                     type(argument).__name__)
-        return -1, None
+    log.cl_error("invalid test list type [%s]",
+                 type(argument).__name__)
+    return -1, None

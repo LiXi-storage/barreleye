@@ -10,7 +10,7 @@ from pycoral import ssh_host
 from pybarreleye import barrele_collectd
 
 
-class BarreleAgent(object):
+class BarreleAgent():
     """
     Each agent has an object of this type
     """
@@ -130,7 +130,7 @@ class BarreleAgent(object):
                         lustre_fallback_version.lv_name)
             self.bea_lustre_version = lustre_fallback_version
             return 0
-        elif retval.cr_exit_status:
+        if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
@@ -415,3 +415,60 @@ class BarreleAgent(object):
                          host.sh_hostname)
             return -1
         return 0
+
+    def bea_collectd_running(self, log):
+        """
+        Check whether the Collectd is running.
+        Return 1 if running. Return -1 if failure.
+        """
+        command = "systemctl is-active collectd"
+        retval = self.bea_host.sh_run(log, command)
+        if retval.cr_stdout == "active\n":
+            return 1
+        if retval.cr_stdout == "unknown\n":
+            return 0
+        log.cl_error("unexpected stdout of command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     self.bea_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    def bea_collectd_stop(self, log):
+        """
+        Stop Collectd service.
+        """
+        service_name = "collectd"
+        host = self.bea_host
+        ret = host.sh_service_stop(log, service_name)
+        if ret:
+            log.cl_error("failed to stop [%s] service on agent host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        return 0
+
+    def bea_collectd_start(self, log):
+        """
+        Start Collectd service.
+        """
+        service_name = "collectd"
+        host = self.bea_host
+        ret = host.sh_service_start(log, service_name)
+        if ret:
+            log.cl_error("failed to start [%s] service on agent host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        return 0
+
+    def bea_collectd_version(self, log):
+        """
+        Return the Collectd version, e.g. 5.12.0.barreleye0-1.el7.x86_64
+        """
+        host = self.bea_host
+        version = host.sh_rpm_version(log, "collectd-")
+        if version is None:
+            log.cl_error("failed to get the Collectd RPM version on host [%s]",
+                         host.sh_hostname)
+        return version

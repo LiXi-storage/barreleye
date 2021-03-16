@@ -20,19 +20,24 @@ CORAL_DEVEL_PLUGIN_DICT = {}
 RPM_INSTALL_LOCK = constant.CORAL_LOG_DIR + "/rpm_install"
 
 
-class CoralCommand(object):
+class CoralCommand():
     """
     The command line utility for building Coral.
     :param debug: Whether to dump debug logs into files, default: False
     """
     # pylint: disable=too-few-public-methods
-    _cc_cmds = []
-
     def __init__(self, debug=False):
         # pylint: disable=protected-access
         self._cc_log_to_file = debug
-        for command in self._cc_cmds:
-            command._init(debug)
+        for attr_name in dir(self):
+            # My own attrs, ignore.
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(self, attr_name)
+            # Registered commands, do not need to init
+            if callable(attr):
+                continue
+            attr._init(debug)
 
 
 def coral_command_register(command_name, obj):
@@ -46,20 +51,18 @@ def coral_command_register(command_name, obj):
     setattr(CoralCommand, command_name, obj)
 
 
-class CoralPluginType(object):
+class CoralPluginType():
     """
     Each resource has this type
     """
     # pylint: disable=too-few-public-methods
-    def __init__(self, plugin_name, build_dependent_rpms,
+    def __init__(self, plugin_name,
                  build_dependent_pips=None, is_devel=True,
                  need_lustre_rpms=False, need_collectd=False):
         # The name of the plugin
         self.cpt_plugin_name = plugin_name
         # Whether the plugin is only for devel
         self.cpt_is_devel = is_devel
-        # The RPMs needed to install before building
-        self.cpt_build_dependent_rpms = build_dependent_rpms
         # Whether Lustre/E2fsprogs RPMs are needed in the ISO
         self.cpt_need_lustre_rpms = need_lustre_rpms
         # Whether Collectd RPMs are needed
@@ -68,6 +71,13 @@ class CoralPluginType(object):
             build_dependent_pips = []
         # The pip packages to install before building
         self.cpt_build_dependent_pips = build_dependent_pips
+
+    def cpt_build_dependent_rpms(self, distro):
+        """
+        Return the RPMs needed to install before building
+        """
+        # pylint: disable=unused-argument,no-self-use
+        return []
 
     def cpt_install_build_dependency(self, log, workspace, host,
                                      target_cpu, type_cache):

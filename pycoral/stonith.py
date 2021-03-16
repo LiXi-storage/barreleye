@@ -13,7 +13,7 @@ LONGEST_TIME_POWER_OFF = 60
 LONGEST_TIME_POWER_ON = 60
 
 
-class StonithHost(object):
+class StonithHost():
     """
     General class of stonith for each host
     """
@@ -175,13 +175,13 @@ class KVMStonithHost(StonithHost):
         state = server_host.sh_virsh_dominfo_state(log, self.ksh_domain_name)
         if state == "running":
             return StonithHost.SH_POWER_ON
-        elif state == "shut off":
+        if state == "shut off":
             return StonithHost.SH_POWER_OFF
-        elif state == "in shutdown":
+        if state == "in shutdown":
             return StonithHost.SH_POWER_IN_SHUTDOWN
-        elif state == "paused":
+        if state == "paused":
             return StonithHost.SH_POWER_PAUSED
-        elif state is None:
+        if state is None:
             log.cl_error("failed to get power status of KVM guest [%s]",
                          guest_hostname)
             return -1
