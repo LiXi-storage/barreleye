@@ -875,8 +875,13 @@ class BarreleServer():
                 return -1
             if ret:
                 dashboard_json_fpath = (workspace + "/" + fname)
-                lines = open(dashboard_template_fpath).readlines()
-                json_file = open(dashboard_json_fpath, 'w')
+                template_file = open(dashboard_template_fpath, 'r',
+                                     encoding='utf-8')
+                lines = template_file.readlines()
+                template_file.close()
+
+                json_file = open(dashboard_json_fpath, 'w',
+                                 encoding='utf-8')
                 for line in lines:
                     line = line.replace(TEMPLATE_COLLECT_INTERVAL,
                                         collect_interval)
@@ -897,7 +902,7 @@ class BarreleServer():
                                  host.sh_hostname)
                     return -1
 
-            with open(dashboard_json_fpath) as json_file:
+            with open(dashboard_json_fpath, "r", encoding='utf-8') as json_file:
                 dashboard = json.load(json_file)
 
             folder_id = 0
