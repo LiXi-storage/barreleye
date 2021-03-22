@@ -1,15 +1,11 @@
 """
 Barreleye is a performance monitoring system for Lustre
 """
-import inspect
 from fire import Fire
 from pycoral import parallel
-from pycoral import ssh_host
 from pycoral import cmd_general
-from pycoral import test_common
 from pycoral import version
 from pycoral import clog
-from pybarreleye import barrele_test
 from pybarreleye import barrele_instance
 from pybarreleye import barrele_constant
 
@@ -32,96 +28,6 @@ def init_env(config_fpath, logdir, log_to_file):
         log.cl_error("failed to init Barreleye instance")
         cmd_general.cmd_exit(log, 1)
     return log, barreleye_instance
-
-
-class BarreleSelfTestCommand():
-    """
-    Commands to test the functionality of Barreleye itself.
-    """
-    # pylint: disable=too-few-public-methods
-    def _init(self, config, logdir, log_to_file, iso):
-        # pylint: disable=attribute-defined-outside-init
-        self._bstc_config_fpath = config
-        self._bstc_logdir = logdir
-        self._bstc_log_to_file = log_to_file
-        self._bstc_iso = iso
-
-    def run(self, host=None, ssh_identity_file=None, only=None,
-            first=None, reverse_order=False, start=None, stop=None):
-        """
-        Run tests of Barreleye.
-        If only is specified together with start/stop, start/stop option will
-        be ignored.
-        :param host: Host to trigger the test, default: localhost.
-        :param ssh_identity_file: The path to the private key to use
-        to SSH into the host.
-        :param only: Test names to run, seperated by comma.
-        :param first: Test names to run first, seperated by comma.
-        :param reverse_order: run the test cases in reverse order (the basic
-            test case will still be run first). The order in the first test
-            cases will not be reversed. The order in the only test cases will
-            not be reversed either.
-        :param start: The test name to start at (include).
-            Default: the first test.
-         :param stop: The test name to stop at (include).
-             Default: the last test.
-        """
-        # pylint: disable=too-many-arguments,too-many-branches
-        log, barreleye_instance = init_env(self._bstc_config_fpath,
-                                           self._bstc_logdir,
-                                           self._bstc_log_to_file)
-        cmd_general.check_argument_types(log, "only", only,
-                                         allow_none=True,
-                                         allow_tuple=True, allow_str=True,
-                                         allow_bool=False)
-        cmd_general.check_argument_types(log, "first", first,
-                                         allow_none=True,
-                                         allow_tuple=True, allow_str=True,
-                                         allow_bool=False)
-        cmd_general.check_argument_bool(log, "reverse_order", reverse_order)
-        if ssh_identity_file is not None:
-            cmd_general.check_argument_str(log, "ssh_identity_file",
-                                           ssh_identity_file)
-        if host is None:
-            install_server = ssh_host.get_local_host()
-        else:
-            cmd_general.check_argument_str(log, "host", host)
-            install_server = ssh_host.SSHHost(host,
-                                              identity_file=ssh_identity_file)
-
-        ret, only_test_names = test_common.parse_testlist_argument(log, only)
-        if ret:
-            log.cl_error("failed to parse arugment [%s] of --only", only)
-            cmd_general.cmd_exit(log, -1)
-
-        ret, first_test_names = test_common.parse_testlist_argument(log, first)
-        if ret:
-            log.cl_error("failed to parse arugment [%s] of --first", first)
-            cmd_general.cmd_exit(log, -1)
-
-        rc = barrele_test.barreleye_test(log, self._bstc_logdir,
-                                         barreleye_instance,
-                                         install_server, only_test_names,
-                                         first_test_names, self._bstc_iso,
-                                         reverse_order, start, stop)
-        cmd_general.cmd_exit(log, rc)
-
-    def ls(self, full=False):
-        """
-        List test names of Barreleye.
-        :param full: Print introductions of the tests.
-        """
-        log, _ = init_env(self._bstc_config_fpath, self._bstc_logdir,
-                          self._bstc_log_to_file)
-        cmd_general.check_argument_bool(log, "full", full)
-        for test_func in barrele_test.BARRELEYE_TESTS:
-            log.cl_stdout("%s", test_func.__name__)
-            if full:
-                docstring = inspect.getdoc(test_func)
-                lines = docstring.splitlines()
-                for line in lines:
-                    log.cl_stdout("    %s", line)
-        cmd_general.cmd_exit(log, 0)
 
 
 class BarreleClusterCommand():
@@ -816,7 +722,6 @@ class BarreleCommand():
     """
     # pylint: disable=too-few-public-methods
     cluster = BarreleClusterCommand()
-    self_test = BarreleSelfTestCommand()
     version = barrele_version
     agent = BarreleAgentCommand()
     server = BarreleServerCommand()
@@ -833,7 +738,6 @@ class BarreleCommand():
         if iso is not None:
             cmd_general.check_iso_fpath(iso)
         self.cluster._init(config, log, debug, iso)
-        self.self_test._init(config, log, debug, iso)
         self.agent._init(config, log, debug, iso)
         self.server._init(config, log, debug, iso)
 

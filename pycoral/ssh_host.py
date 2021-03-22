@@ -16,6 +16,7 @@ import stat
 import socket
 import traceback
 import getpass
+import datetime
 
 # local libs
 from pycoral import utils
@@ -1602,6 +1603,33 @@ class SSHHost():
         if retval.cr_exit_status:
             return -1
         return 0
+
+    def sh_rpm_install_time(self, log, rpm_name):
+        """
+        Return the installation time of a RPM
+        """
+        command = "rpm -q --queryformat '%%{installtime:day}' %s" % rpm_name
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
+        try:
+            install_time = datetime.datetime.strptime(retval.cr_stdout,
+                                                      "%a %b %d %Y")
+        except:
+            log.cl_error("invalid output [%s] of command [%s] on host [%s] "
+                         "for date: %s",
+                         retval.cr_stdout, command,
+                         self.sh_hostname,
+                         traceback.format_exc())
+            return None
+        return install_time
 
     def sh_rpm_checksig(self, log, rpm_fpath):
         """

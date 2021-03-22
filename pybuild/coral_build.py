@@ -1,6 +1,7 @@
 """
 Library for building Coral
 """
+import os
 import re
 import filelock
 # pylint: disable=unused-import
@@ -21,6 +22,12 @@ PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/releases/d
 # The sha1sum of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_URL
 PYINSTALLER_TARBALL_SHA1SUM = "bac8d46737876468d7be607a44b90debd60422b5"
+# The url of pdsh tarball. Need to update together with
+# PDSH_TARBALL_SHA1SUM
+PDSH_TARBALL_URL = "https://github.com/chaos/pdsh/releases/download/pdsh-2.34/pdsh-2.34.tar.gz"
+# The sha1sum of pdsh tarball. Need to update together with
+# PDSH_TARBALL_URL
+PDSH_TARBALL_SHA1SUM = "c7bdd20c5ba211b0ae80339c671c602d6a3a5a66"
 
 
 def merge_list(list_x, list_y):
@@ -39,13 +46,270 @@ def merge_list(list_x, list_y):
     return merged_list
 
 
-def download_dependent_rpms(log, host, distro, packages_dir,
-                            filter_rpm_fnames, extra_rpm_names):
+def download_dependent_rpms_rhel7(log, host, target_cpu, packages_dir,
+                                  dependent_rpms, extra_package_fnames):
+    """
+    Download dependent RPMs for RHEL7
+    """
+    # pylint: disable=too-many-locals
+    command = "repotrack -a %s -p %s" % (target_cpu, packages_dir)
+    for rpm_name in dependent_rpms:
+        command += " " + rpm_name
+
+    log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
+    retval = host.sh_watched_run(log, command, None, None,
+                                 return_stdout=True,
+                                 return_stderr=False)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], ret = [%d]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status)
+        return -1
+
+    exist_pattern = (r"^%s/(?P<rpm_fname>\S+) already exists and appears to be "
+                     "complete$" % (packages_dir))
+    download_pattern = (r"^Downloading (?P<rpm_fname>\S+)$")
+    exist_regular = re.compile(exist_pattern)
+    download_regular = re.compile(download_pattern)
+    lines = retval.cr_stdout.splitlines()
+    for line in lines:
+        match = exist_regular.match(line)
+        if match:
+            rpm_fname = match.group("rpm_fname")
+        else:
+            match = download_regular.match(line)
+            if match:
+                rpm_fname = match.group("rpm_fname")
+            else:
+                log.cl_error("unknown stdout line [%s] of command [%s] on host "
+                             "[%s], stdout = [%s]",
+                             line, host.sh_hostname, command,
+                             retval.cr_stdout)
+                return -1
+        extra_package_fnames.append(rpm_fname)
+    return 0
+
+
+def build_pdsh(log, workspace, host, target_cpu, type_cache,
+               packages_dir, extra_package_fnames):
+    """
+    Build pdsh since RHEL8 does not have pdsh in EPEL.
+
+    Building process is quick, so no need to cache the RPMs.
+    """
+    # pylint: disable=too-many-locals
+    tarball_url = PDSH_TARBALL_URL
+    tarball_fname = os.path.basename(tarball_url)
+    package_dirname = tarball_fname[:-7]
+    tarball_fpath = type_cache + "/" + tarball_fname
+    src_dir = workspace + "/" + package_dirname
+    ret = build_common.download_file(log, host, tarball_url, tarball_fpath,
+                                     PDSH_TARBALL_SHA1SUM)
+    if ret:
+        log.cl_error("failed to download PDSH sourcecode tarball")
+        return -1
+
+    # pdsh-2.34.tar.gz has two problems:
+    #
+    # 1. File README.QsNet is missing.
+    # 2. The file name should be rebaned to pdsh-2.34-1.tar.gz from
+    #    pdsh-2.34.tar.gz. Otherwise rpmbuild will fail.
+    #
+    # Not sure whether other versions have the same problem.
+    spec_file = src_dir + "/pdsh.spec"
+    build_tarball_fpath = src_dir + "-1.tar.gz"
+    build_dir = workspace + "/pdsh_build"
+    cmds = ["rm -f %s/pdsh-*" % packages_dir,
+            "cd %s && tar xzf %s" % (workspace, tarball_fpath),
+            "sed -i 's/ README.QsNet//g' %s" % spec_file,
+            "cd %s && tar czf %s %s" %
+            (workspace, build_tarball_fpath, package_dirname),
+            "mkdir -p %s" % build_dir,
+            'rpmbuild -ta %s --define="_topdir %s"' %
+            (build_tarball_fpath, build_dir)]
+    for command in cmds:
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+    rpm_dir = build_dir + "/RPMS/" + target_cpu
+    rpm_fnames = host.sh_get_dir_fnames(log, rpm_dir)
+    if rpm_fnames is None:
+        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                     rpm_dir,
+                     host.sh_hostname)
+        return -1
+
+    for rpm_fname in rpm_fnames:
+        rpm_fpath = rpm_dir + "/" + rpm_fname
+        command = "cp -a %s %s" % (rpm_fpath, packages_dir)
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+    extra_package_fnames += rpm_fnames
+
+    return 0
+
+
+def download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
+                                  packages_dir, type_cache, dependent_rpms,
+                                  extra_package_fnames):
+    """
+    Download dependent RPMs for RHEL8
+    """
+    # pylint: disable=too-many-locals
+    ret = build_pdsh(log, workspace, host, target_cpu, type_cache,
+                     packages_dir, extra_package_fnames)
+    if ret:
+        log.cl_error("failed to build PDSH")
+        return -1
+
+    command = ("dnf download --resolve --alldeps --destdir %s" %
+               (packages_dir))
+
+    for rpm_name in dependent_rpms:
+        if rpm_name == "pdsh":
+            continue
+        command += " " + rpm_name
+
+    log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
+    retval = host.sh_watched_run(log, command, None, None,
+                                 return_stdout=False,
+                                 return_stderr=False)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], ret = [%d]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status)
+        return -1
+
+    # Run twice. The first time might download some RPMs, and the
+    # output looks like:
+    #
+    # (256/400): net-snmp-agent-libs-5.8-18.el8_3.1.x 2.6 MB/s | 747 kB     00:00
+    #
+    # As we can see part of the file name is omitted.
+    #
+    # In the second time, all the packages are already downloaded, and the output
+    # looks like:
+    #
+    # [SKIPPED] net-snmp-libs-5.8-18.el8_3.1.x86_64.rpm: Already downloaded
+    #
+    # It always has full file name.
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    exist_pattern = r"^\[SKIPPED\] (?P<rpm_fname>\S+): Already downloaded"
+    exist_regular = re.compile(exist_pattern)
+    lines = retval.cr_stdout.splitlines()
+    if len(lines) == 0:
+        log.cl_error("no line of command [%s] on host [%s], stdout = [%s]",
+                     host.sh_hostname, command,
+                     retval.cr_stdout)
+        return -1
+    first_line = lines[0]
+    expected_prefix = "Last metadata expiration check:"
+    if not first_line.startswith(expected_prefix):
+        log.cl_error("unexpected first line [%s] of command [%s] on host "
+                     "[%s], stdout = [%s], expected prefix [%s]",
+                     first_line, host.sh_hostname, command,
+                     retval.cr_stdout,
+                     expected_prefix)
+        return -1
+    lines = lines[1:]
+    for line in lines:
+        match = exist_regular.match(line)
+        if match:
+            rpm_fname = match.group("rpm_fname")
+        else:
+            log.cl_error("unknown stdout line [%s] of command [%s] on host "
+                         "[%s], stdout = [%s]",
+                         line, host.sh_hostname, command,
+                         retval.cr_stdout)
+            return -1
+        extra_package_fnames.append(rpm_fname)
+    return 0
+
+
+def check_package_rpms(log, host, packages_dir, dependent_rpms,
+                       extra_package_fnames):
+    """
+    Check the package dir has nessary RPMs and does not have any buggage.
+    """
+    # pylint: disable=too-many-locals
+    existing_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
+    if existing_rpm_fnames is None:
+        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                     packages_dir, host.sh_hostname)
+        return -1
+
+    useless_rpm_fnames = existing_rpm_fnames[:]
+    # RPMs saved in the building or downloading steps
+    for rpm_fname in extra_package_fnames:
+        if rpm_fname in useless_rpm_fnames:
+            useless_rpm_fnames.remove(rpm_fname)
+
+    for fname in useless_rpm_fnames:
+        fpath = packages_dir + "/" + fname
+        log.cl_info("found unnecessary file [%s] under directory [%s], "
+                    "removing it", fname, packages_dir)
+        ret = host.sh_remove_file(log, fpath)
+        if ret:
+            log.cl_error("failed to remove useless file [%s] on host [%s]",
+                         fpath, host.sh_hostname)
+            return -1
+
+    for rpm_name in dependent_rpms:
+        rpm_pattern = (r"^%s.*\.rpm$" % rpm_name)
+        rpm_regular = re.compile(rpm_pattern)
+        match = False
+        for rpm_fname in existing_rpm_fnames:
+            match = rpm_regular.match(rpm_fname)
+            if match:
+                break
+        if not match:
+            log.cl_error("RPM [%s] is needed but not downloaded in directory [%s]",
+                         rpm_name, packages_dir)
+            return -1
+
+    for fname in extra_package_fnames:
+        if fname not in existing_rpm_fnames:
+            log.cl_error("RPM [%s] is recorded as extra file, but not found in "
+                         "directory [%s] of host [%s]",
+                         fname, packages_dir, host.sh_hostname)
+            return -1
+    return 0
+
+
+def download_dependent_rpms(log, workspace, host, distro, target_cpu,
+                            packages_dir, type_cache, extra_package_fnames,
+                            extra_rpm_names):
     """
     Download dependent RPMs
     """
-    # pylint: disable=too-many-locals,too-many-return-statements
-    # pylint: disable=too-many-branches,too-many-statements
     # The yumdb might be broken, so sync
     log.cl_info("downloading dependency RPMs")
     # yumdb has been removed for RHEL8
@@ -62,118 +326,29 @@ def download_dependent_rpms(log, host, distro, packages_dir,
                          retval.cr_stderr)
             return -1
 
-    existing_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
-    if existing_rpm_fnames is None:
-        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
-                     packages_dir, host.sh_hostname)
-        return -1
-
     dependent_rpms = merge_list(constant.CORAL_DEPENDENT_RPMS,
                                 extra_rpm_names)
 
-    target_cpu = host.sh_target_cpu(log)
-    if target_cpu is None:
-        log.cl_error("failed to get target cpu on host [%s]",
+    if distro == ssh_host.DISTRO_RHEL7:
+        ret = download_dependent_rpms_rhel7(log, host, target_cpu,
+                                            packages_dir, dependent_rpms,
+                                            extra_package_fnames)
+    elif distro == ssh_host.DISTRO_RHEL8:
+        ret = download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
+                                            packages_dir, type_cache,
+                                            dependent_rpms,
+                                            extra_package_fnames)
+    if ret:
+        log.cl_error("failed to download dependent RPMs on host [%s]",
                      host.sh_hostname)
         return -1
 
-    if distro == ssh_host.DISTRO_RHEL7:
-        command = "repotrack -a %s -p %s" % (target_cpu, packages_dir)
-    else:
-        assert distro == ssh_host.DISTRO_RHEL8
-        command = ("dnf download --resolve --alldeps --destdir %s" %
-                   (packages_dir))
-
-    for rpm_name in dependent_rpms:
-        command += " " + rpm_name
-
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
+    ret = check_package_rpms(log, host, packages_dir, dependent_rpms,
+                             extra_package_fnames)
+    if ret:
+        log.cl_error("unexpected files in package dir [%s]",
+                     packages_dir)
         return -1
-
-    if distro == ssh_host.DISTRO_RHEL7:
-        exist_pattern = (r"^%s/(?P<rpm_fname>\S+) already exists and appears to be "
-                         "complete$" % (packages_dir))
-        download_pattern = (r"^Downloading (?P<rpm_fname>\S+)$")
-    else:
-        assert distro == ssh_host.DISTRO_RHEL8
-        exist_pattern = r"^\[SKIPPED\] (?P<rpm_fname>\S+): Already downloaded$"
-        download_pattern = r"^.+: (?P<rpm_fname>\S+)\d+.+$"
-    exist_regular = re.compile(exist_pattern)
-    download_regular = re.compile(download_pattern)
-    lines = retval.cr_stdout.splitlines()
-    if distro == ssh_host.DISTRO_RHEL8:
-        if len(lines) == 0:
-            log.cl_error("no line of command [%s] on host "
-                         "[%s], stdout = [%s]",
-                         host.sh_hostname, command,
-                         retval.cr_stdout)
-            return -1
-        first_line = lines[0]
-        expected_prefix = "Last metadata expiration check:"
-        if not first_line.startswith(expected_prefix):
-            log.cl_error("unexpected first line [%s] of command [%s] on host "
-                         "[%s], stdout = [%s], expected prefix [%s]",
-                         first_line, host.sh_hostname, command,
-                         retval.cr_stdout,
-                         expected_prefix)
-            return -1
-        lines = lines[1:]
-    for line in lines:
-        match = exist_regular.match(line)
-        if match:
-            rpm_fname = match.group("rpm_fname")
-        else:
-            match = download_regular.match(line)
-            if match:
-                rpm_fname = match.group("rpm_fname")
-            else:
-                log.cl_error("unknown stdout line [%s] of command [%s] on host "
-                             "[%s], stdout = [%s]",
-                             line, host.sh_hostname, command,
-                             retval.cr_stdout)
-                return -1
-        if rpm_fname in existing_rpm_fnames:
-            existing_rpm_fnames.remove(rpm_fname)
-
-    # RPMs saved in the other downloading steps
-    for rpm_fname in filter_rpm_fnames:
-        if rpm_fname in existing_rpm_fnames:
-            existing_rpm_fnames.remove(rpm_fname)
-
-    for fname in existing_rpm_fnames:
-        fpath = packages_dir + "/" + fname
-        log.cl_debug("found unnecessary file [%s] under directory [%s], "
-                     "removing it", fname, packages_dir)
-        ret = host.sh_remove_file(log, fpath)
-        if ret:
-            return -1
-
-    # Check the wanted RPMs are all downloaded
-    new_rpm_fnames = host.sh_get_dir_fnames(log, packages_dir)
-    if new_rpm_fnames is None:
-        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
-                     packages_dir, host.sh_hostname)
-        return -1
-    for rpm_name in dependent_rpms:
-        rpm_pattern = (r"^%s.*\.rpm$" % rpm_name)
-        rpm_regular = re.compile(rpm_pattern)
-        match = False
-        for new_rpm_fname in new_rpm_fnames:
-            match = rpm_regular.match(new_rpm_fname)
-            if match:
-                break
-        if not match:
-            log.cl_error("RPM [%s] is needed but not downloaded in directory [%s]",
-                         rpm_name, packages_dir)
-            return -1
     return 0
 
 
@@ -522,9 +697,9 @@ def build(log, source_dir, workspace,
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = download_dependent_rpms(log, local_host, distro, packages_dir,
-                                  extra_package_fnames,
-                                  extra_rpm_names)
+    ret = download_dependent_rpms(log, workspace, local_host, distro,
+                                  target_cpu, packages_dir, type_cache,
+                                  extra_package_fnames, extra_rpm_names)
     if ret:
         log.cl_error("failed to download dependent rpms")
         return -1

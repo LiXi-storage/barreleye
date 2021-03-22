@@ -5,7 +5,7 @@ SOURCES =
 
 SOURCES += ../pycoral/version.py
 
-check_clean-local:
+clean-local:
 	rm -f $(SOURCES)
 
 all: $(SOURCES) all-am

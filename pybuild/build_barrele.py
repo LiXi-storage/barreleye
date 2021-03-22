@@ -165,7 +165,7 @@ def get_and_clean_collectd_rpms(log, host, packages_dir,
                              retval.cr_exit_status,
                              retval.cr_stdout,
                              retval.cr_stderr)
-                return -1
+                return None
             continue
         collectd_fnames.append(rpm_fname)
     return collectd_fnames

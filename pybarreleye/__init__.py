@@ -7,5 +7,4 @@ __all__ = ["barrele",
            "barrele_constant",
            "barrele_influxdb",
            "barrele_instance",
-           "barrele_server",
-           "barrele_test"]
+           "barrele_server"]

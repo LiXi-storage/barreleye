@@ -1,5 +1,6 @@
 # CORAL specfile
 
+%global debug_package %{nil}
 %bcond_with barrele
 
 # RHEL >= 7 comes with systemd
@@ -43,8 +44,6 @@ which collects and shows the statistics of the file system components
 including the file system services, clients, storages, networks and machines.
 %endif  # with barrele
 
-
-Generated using options: @ac_configure_args@
 
 %prep
 %setup -q -n @PACKAGE@-%{version}

@@ -40,6 +40,12 @@ CORAL_BUILD_CACHE_TYPE_RELEASE = "release"
 # Dir to save development cache.
 CORAL_BUILD_CACHE_DEVEL_DIR = (CORAL_BUILD_CACHE + "/" +
                                CORAL_BUILD_CACHE_TYPE_DEVEL)
+# Dir to save open cache.
+CORAL_BUILD_CACHE_OPEN_DIR = (CORAL_BUILD_CACHE + "/" +
+                              CORAL_BUILD_CACHE_TYPE_OPEN)
+# Dir to save release cache.
+CORAL_BUILD_CACHE_RELEASE_DIR = (CORAL_BUILD_CACHE + "/" +
+                                 CORAL_BUILD_CACHE_TYPE_RELEASE)
 # Dir to save pip packages needed when coral command bootstrap from Internet
 CORAL_BUILD_CACHE_PIP_DIR = CORAL_BUILD_CACHE_DEVEL_DIR + "/" + BUILD_PIP
 
@@ -67,7 +73,7 @@ CORAL_DEPENDENT_RPMS = ["git",  # For build anything from Git repository
                         "libyaml",  # For loading config, needed by lctl too.
                         "rsync",  # For syncing files
                         "bash-completion",  # For bash completion
-                        "unzip",  # For unpacking consul
+                        "unzip",  # For unpacking tarballs
                         "attr",  # Needed by Lustre test RPM
                         "bc",  # Needed by Lustre test RPM
                         "dbench",  # Needed by Lustre test RPM

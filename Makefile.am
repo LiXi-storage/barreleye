@@ -30,14 +30,19 @@ EXTRA_DIST = \
 
 CHECKS =
 
-check_clean-local:
+clean-local:
 	rm -f $(CHECKS)
-
-check-local: $(CHECKS)
-
-check:
-	make check_clean
-	make
+	rm -fr ISO
+	rm -f coral-*.iso
+	rm -f coral-*.md5
+	rm -fr dist
+	rm -fr build
+	rm -f coral-*.tar.bz2
+	rm -f coral-*.tar.gz
+	for exec in $(EXECS); do \
+		rm -f $$exec.spec; \
+	done
+	rm -fr coral_build_*
 
 all: all-am $(CHECKS)
 
