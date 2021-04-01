@@ -72,13 +72,13 @@ def check_iso_fpath(iso):
 
 
 def init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                      identity=None):
+                      prefix="", identity=None):
     """
     Init log and workspace for commands that needs it
     """
     # pylint: disable=too-many-branches
     if identity is None:
-        identity = get_identity()
+        identity = prefix + get_identity()
     else:
         if (not isinstance(identity, bool)) and isinstance(identity, int):
             identity = str(identity)
@@ -135,12 +135,12 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
 
 
 def init_env(config_fpath, logdir, log_to_file, logdir_is_default,
-             identity=None):
+             prefix="", identity=None):
     """
     Init log, workspace and config for commands that needs it
     """
     log, workspace = init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                                       identity=identity)
+                                       prefix=prefix, identity=identity)
     if (not isinstance(config_fpath, bool)) and isinstance(config_fpath, int):
         config_fpath = str(config_fpath)
     if not isinstance(config_fpath, str):

@@ -4,15 +4,20 @@ Library for building Barreleye
 import os
 import stat
 from pycoral import ssh_host
+from pycoral import clog
+from pycoral import cmd_general
 from pybuild import build_common
 from pybarreleye import barrele_constant
 
+PACAKGE_URL_DICT = {}
 # The URL of Collectd tarball
 COLLECTD_URL = ("https://github.com/LiXi-storage/collectd/releases/download/"
                 "collectd-5.12.0.barreleye1/collectd-5.12.0.barreleye1.tar.bz2")
 # The sha1sum of Collectd tarball. Need to update together with
 # COLLECTD_URL
 COLLECTD_SHA1SUM = "7e19cfb97621d0d7d3fc078c224bcc1a8ad0c4d2"
+PACAKGE_URL_DICT["collectd"] = COLLECTD_URL
+
 # The RPM names of Collectd to check
 COLLECTD_RPM_NAMES = ["collectd", "collectd-disk", "collectd-filedata",
                       "collectd-sensors", "collectd-ssh",
@@ -22,6 +27,7 @@ INFLUXDB_RPM_URL_X86_64 = "https://dl.influxdata.com/influxdb/releases/influxdb-
 # The sha1sum of Influxdb RPM for x86_64. Need to update together with
 # INFLUXDB_RPM_URL_X86_64
 INFLUXDB_RPM_SHA1SUM_X86_64 = "26832ce558b8a79beb3bfda1799eb7394d5c13cd"
+PACAKGE_URL_DICT["influxdb"] = INFLUXDB_RPM_URL_X86_64
 # The URL of Grafana RPM for x86_64
 GRAFANA_RPM_URL_X86_64 = "https://dl.grafana.com/oss/release/grafana-7.3.7-1.x86_64.rpm"
 # The sha1sum of Grafana RPM for x86_64. Need to update together with
@@ -32,6 +38,7 @@ GRAFANA_RPM_URL_AARCH64 = "https://dl.grafana.com/oss/release/grafana-7.3.7-1.aa
 # The sha1sum of Grafana RPM for ARM. Need to update together with
 # GRAFANA_RPM_URL_X86_64
 GRAFANA_RPM_SHA1SUM_AARCH64 = "8356a324acefcd788cb0711b9bc5bd8689774be1"
+PACAKGE_URL_DICT["grafana"] = GRAFANA_RPM_URL_X86_64
 
 # The URL of Grafana status panel plugin
 GRAFANA_STATUS_PANEL_URL = ("https://github.com/Vonage/Grafana_Status_panel/"
@@ -44,6 +51,7 @@ GRAFANA_STATUS_PANEL_UNZIPPED_FNAME = "Grafana_Status_panel-1.0.10"
 # The sha1sum of Grafana status panel plugin. Need to update together with
 # GRAFANA_STATUS_PANEL_URL
 GRAFANASTATUS_PANEL_SHA1SUM = "e46fb5cb8f30d9ea743e0fda67402c0504a39690"
+PACAKGE_URL_DICT["grafana_status_panel"] = GRAFANA_STATUS_PANEL_URL
 # The URL of Grafana piechart panel plugin
 GRAFANA_PIECHART_PANEL_URL = ("https://github.com/grafana/piechart-panel/"
                               "releases/download/v1.6.1/"
@@ -51,6 +59,7 @@ GRAFANA_PIECHART_PANEL_URL = ("https://github.com/grafana/piechart-panel/"
 # The sha1sum of Grafana piechart panel plugin. Need to update together with
 # GRAFANA_PIECHART_PANEL_URL
 GRAFANA_PIECHART_PANEL_SHA1SUM = "2b3c33afd865af4575d87a83e3d45e61acf8273a"
+PACAKGE_URL_DICT["grafana_piechart_panel"] = GRAFANA_PIECHART_PANEL_URL
 # RPMs needed by building collectd
 COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
                                  "ganglia-devel",
@@ -497,8 +506,8 @@ def download_and_build_collectd(log, workspace, host, type_cache, packages_dir,
                 collectd_url, host.sh_hostname)
     tarball_fname = os.path.basename(collectd_url)
     tarball_fpath = type_cache + "/" + tarball_fname
-    ret = build_common.download_file(log, host, collectd_url, tarball_fpath,
-                                     expected_sha1sum)
+    ret = host.sh_download_file(log, collectd_url, tarball_fpath,
+                                expected_sha1sum)
     if ret:
         log.cl_error("failed to download Collectd sourcecode tarball")
         return -1
@@ -658,7 +667,7 @@ def download_influxdb_x86_64(log, host, packages_dir, extra_package_fnames):
     fname = os.path.basename(url)
     fpath = packages_dir + "/" + fname
     log.cl_info("downloading Influxdb RPM")
-    ret = build_common.download_file(log, host, url, fpath, expected_sha1sum)
+    ret = host.sh_download_file(log, url, fpath, expected_sha1sum)
     if ret:
         log.cl_error("failed to download RPM of Influxdb")
         return -1
@@ -710,7 +719,7 @@ def build_grafana(log, host, packages_dir, extra_package_fnames):
     fname = os.path.basename(url)
     fpath = packages_dir + "/" + fname
     log.cl_info("downloading Grafana RPM")
-    ret = build_common.download_file(log, host, url, fpath, expected_sha1sum)
+    ret = host.sh_download_file(log, url, fpath, expected_sha1sum)
     if ret:
         log.cl_error("failed to download RPM of Grafana")
         return -1
@@ -729,9 +738,9 @@ def download_grafana_status_panel_plugin(log, host, type_cache, iso_cache,
     expected_sha1sum = GRAFANASTATUS_PANEL_SHA1SUM
 
     log.cl_info("downloading Grafana Status Panel plugin")
-    ret = build_common.download_file(log, host, tarball_url, tarball_fpath,
-                                     expected_sha1sum,
-                                     output_fname=tarball_fname)
+    ret = host.sh_download_file(log, tarball_url, tarball_fpath,
+                                expected_sha1sum,
+                                output_fname=tarball_fname)
     if ret:
         log.cl_error("failed to download Grafana Status Panel plugin")
         return -1
@@ -780,8 +789,8 @@ def download_grafana_piechart_panel_plugin(log, host, type_cache, iso_cache,
     expected_sha1sum = GRAFANA_PIECHART_PANEL_SHA1SUM
 
     log.cl_info("downloading Grafana Piechart panel")
-    ret = build_common.download_file(log, host, tarball_url, tarball_fpath,
-                                     expected_sha1sum)
+    ret = host.sh_download_file(log, tarball_url, tarball_fpath,
+                                expected_sha1sum)
     if ret:
         log.cl_error("failed to download Grafana Piechart panel plugin")
         return -1
@@ -886,4 +895,26 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
             return -1
         return 0
 
+
+class CoralBarreleCommand():
+    """
+    Commands to for building Barreleye plugin.
+    """
+    # pylint: disable=too-few-public-methods
+    def _init(self, log_to_file):
+        # pylint: disable=attribute-defined-outside-init
+        self._cbc_log_to_file = log_to_file
+
+    def urls(self):
+        """
+        Print the URLs to download dependency packages.
+        """
+        # pylint: disable=no-self-use
+        log = clog.get_log(console_format=clog.FMT_NORMAL, overwrite=True)
+        for package, url in PACAKGE_URL_DICT.items():
+            log.cl_stdout("%s: %s", package, url)
+        cmd_general.cmd_exit(log, 0)
+
+
+build_common.coral_command_register("barrele", CoralBarreleCommand())
 build_common.coral_plugin_register(CoralBarrelePlugin())

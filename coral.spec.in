@@ -1,12 +1,13 @@
+#
 # CORAL specfile
+#
+# Supported distributions:
+#  * CentOS7/RHEL7
+#  * CentOS8/RHEL8
+#
 
 %global debug_package %{nil}
 %bcond_with barrele
-
-# RHEL >= 7 comes with systemd
-%if 0%{?rhel} >= 7
-%define with_systemd 1
-%endif
 
 Name: @PACKAGE@
 Version: @VERSION@
@@ -31,12 +32,6 @@ configuration, management, monitoring and diagnosis of Lustre file system.
 %package barreleye
 Summary: Performance Monitoring System for Lustre file systems
 Provides: coral-barreleye = %{version}-%{release}
-%if %{with systemd}
-Requires(post): systemd
-Requires(preun): systemd
-Requires(postun): systemd
-BuildRequires: systemd
-%endif
 
 %description barreleye
 coral-barreleye is a performance monitoring system for Lustre file systems
@@ -65,9 +60,7 @@ make install DESTDIR=$RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT%{_bindir}
 mkdir -p $RPM_BUILD_ROOT%{_mandir}/man1
 mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral
-%if %{with systemd}
-    mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
-%endif
+mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 
 %if %{with barrele}

@@ -110,6 +110,18 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir):
     """
     Sync the files in the iso to the directory
     """
+    # pylint: disable=too-many-branches
+    # Just to check ssh to local host works well
+    retval = host.sh_run(log, "true", timeout=60)
+    if retval.cr_exit_status:
+        log.cl_error("failed to ssh to local host [%s] using user [%s], "
+                     "stdout = [%s], stderr = [%s]",
+                     host.sh_hostname,
+                     host.sh_login_name,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
     if not iso_pattern.startswith("/"):
         iso_pattern = os.getcwd() + "/" + iso_pattern
     fnames = host.sh_resolve_path(log, iso_pattern, quiet=True)
@@ -146,44 +158,37 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir):
         iso_dir = iso_path
 
     ret = 0
-    command = "rsync --delete -a %s/ %s" % (iso_dir, dest_iso_dir)
     log.cl_info("syncing ISO to [%s] on host [%s]",
                 dest_iso_dir, host.sh_hostname)
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        ret = -1
+    cmds = ["mkdir -p %s" % dest_iso_dir,
+            "rsync --delete -a %s/ %s" % (iso_dir, dest_iso_dir)]
+    for command in cmds:
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            ret = -1
+            break
 
     if iso_dir != iso_path:
-        command = ("umount %s" % (iso_dir))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            ret = -1
-
-        command = ("rmdir %s" % (iso_dir))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            ret = -1
+        cmds = ["umount %s" % iso_dir,
+                "rmdir %s" % iso_dir]
+        for command in cmds:
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                ret = -1
     return ret
 
 
@@ -254,20 +259,16 @@ def localhost_install_dependency(log, workspace, local_host, iso_dir, missing_rp
     return 0
 
 
-def coral_rpm_install(log, host, iso_path):
+def coral_rpm_reinstall(log, host, iso_path):
     """
     Reinstall the Coral RPMs
     """
     log.cl_info("reinstalling Coral RPMs on host [%s]", host.sh_hostname)
-    ret = host.sh_rpm_find_and_uninstall(log, "egrep 'coral'")
-    if ret:
-        log.cl_error("failed to uninstall Coral rpm on host [%s]",
-                     host.sh_hostname)
-        return -1
-
     package_dir = iso_path + "/" + constant.BUILD_PACKAGES
 
-    command = ("rpm -ivh %s/coral-*.rpm --nodeps" % (package_dir))
+    # Use RPM upgrade so that the running services will be restarted by RPM
+    # scripts.
+    command = ("rpm -Uvh %s/coral-*.rpm --force" % (package_dir))
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -596,7 +597,7 @@ class CoralInstallationHost():
             return -1
 
         if coral_reinstall:
-            ret = coral_rpm_install(log, host, self.cih_iso_dir)
+            ret = coral_rpm_reinstall(log, host, self.cih_iso_dir)
             if ret:
                 log.cl_error("failed to install Coral RPMs or the "
                              "dependencies on host [%s]", hostname)

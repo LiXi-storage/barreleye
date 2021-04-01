@@ -145,7 +145,7 @@ class SSHHost():
     """
     # pylint: disable=too-many-public-methods,too-many-instance-attributes
     def __init__(self, hostname, identity_file=None, local=False,
-                 ssh_for_local=True):
+                 ssh_for_local=True, login_name="root"):
         # The host has been checked to be local or not
         self.sh_cached_is_local = None
         if local:
@@ -156,6 +156,7 @@ class SSHHost():
         self.sh_identity_file = identity_file
         # If the host is inited as local, then it is local for sure
         self.sh_inited_as_local = local
+        # The cached distro of the host
         self.sh_cached_distro = None
         # Key: command name, Value: True/False
         self.sh_cached_has_commands = {}
@@ -168,6 +169,8 @@ class SSHHost():
         self.sh_cached_lscpu_dict = None
         # Use ssh to run command even the host is local
         self.sh_ssh_for_local = ssh_for_local
+        # The login name to user for ssh
+        self.sh_login_name = login_name
 
     def sh_is_up(self, log, timeout=60):
         """
@@ -888,7 +891,7 @@ class SSHHost():
             return -1
         return 0
 
-    def sh_run(self, log, command, silent=False, login_name="root",
+    def sh_run(self, log, command, silent=False,
                timeout=LONGEST_SIMPLE_COMMAND_TIME, stdout_tee=None,
                stderr_tee=None, stdin=None, return_stdout=True,
                return_stderr=True, quit_func=None, flush_tee=False):
@@ -896,11 +899,10 @@ class SSHHost():
         Run a command on the host
         """
         # pylint: disable=too-many-arguments
+        login_name = self.sh_login_name
         if not silent:
             log.cl_debug("starting [%s] on host [%s]", command,
                          self.sh_hostname)
-        if self.sh_inited_as_local:
-            login_name = getpass.getuser()
         if self.sh_inited_as_local and not self.sh_ssh_for_local:
             ret = utils.run(command, timeout=timeout, stdout_tee=stdout_tee,
                             stderr_tee=stderr_tee, stdin=stdin,
@@ -924,8 +926,8 @@ class SSHHost():
         return ret
 
     def sh_run_with_logs(self, log, command, stdout_fpath, stderr_fpath,
-                         silent=False, login_name="root",
-                         timeout=LONGEST_SIMPLE_COMMAND_TIME, stdin=None,
+                         silent=False, timeout=LONGEST_SIMPLE_COMMAND_TIME,
+                         stdin=None,
                          quit_func=None):
         """
         Run a command on the host and saving the stdout/stderr to log files
@@ -941,7 +943,6 @@ class SSHHost():
                              stdout_tee=stdout_fd,
                              stderr_tee=stderr_fd,
                              silent=silent,
-                             login_name=login_name,
                              timeout=timeout,
                              stdin=stdin,
                              quit_func=quit_func,
@@ -1604,30 +1605,32 @@ class SSHHost():
             return -1
         return 0
 
-    def sh_rpm_install_time(self, log, rpm_name):
+    def sh_rpm_install_time(self, log, rpm_name, quiet=False):
         """
         Return the installation time of a RPM
         """
         command = "rpm -q --queryformat '%%{installtime:day}' %s" % rpm_name
         retval = self.sh_run(log, command)
         if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+            if not quiet:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
             return None
         try:
             install_time = datetime.datetime.strptime(retval.cr_stdout,
                                                       "%a %b %d %Y")
         except:
-            log.cl_error("invalid output [%s] of command [%s] on host [%s] "
-                         "for date: %s",
-                         retval.cr_stdout, command,
-                         self.sh_hostname,
-                         traceback.format_exc())
+            if not quiet:
+                log.cl_error("invalid output [%s] of command [%s] on host [%s] "
+                             "for date: %s",
+                             retval.cr_stdout, command,
+                             self.sh_hostname,
+                             traceback.format_exc())
             return None
         return install_time
 
@@ -2565,6 +2568,37 @@ class SSHHost():
             return -1
         return 0
 
+    def sh_service_start_enable(self, log, service_name, restart=False):
+        """
+        Start and enable a service
+        """
+        if restart:
+            ret = self.sh_service_restart(log, service_name)
+            command = "restart"
+        else:
+            ret = self.sh_service_start(log, service_name)
+            command = "start"
+        if ret:
+            log.cl_error("failed to %s service [%s] on host [%s]",
+                         command, service_name, self.sh_hostname)
+            return -1
+
+        ret = self.sh_service_enable(log, service_name)
+        if ret:
+            log.cl_error("failed to enable service [%s] on host [%s]",
+                         service_name, self.sh_hostname)
+            return -1
+
+        command = ("systemctl status %s" % service_name)
+        ret = self.sh_wait_update(log, command, diff_exit_status=0,
+                                  timeout=5, quiet=True)
+        if ret:
+            # Still active after timeout
+            return 0
+        log.cl_error("service [%s] is not active on host [%s]",
+                     service_name, self.sh_hostname)
+        return -1
+
     def sh_create_inode(self, log, inode_path, inode_type=stat.S_IFREG,
                         major=None, minor=None, path=None):
         """
@@ -2625,9 +2659,9 @@ class SSHHost():
         return 0
 
     def sh_watched_run(self, log, command, stdout_file, stderr_file,
-                       silent=False, login_name="root",
-                       timeout=None, stdin=None, return_stdout=True,
-                       return_stderr=True, quit_func=None, flush_tee=False,
+                       silent=False, timeout=None, stdin=None,
+                       return_stdout=True, return_stderr=True, quit_func=None,
+                       flush_tee=False,
                        stdout_watch_func=watched_io.log_watcher_stdout_simplified,
                        stderr_watch_func=watched_io.log_watcher_stderr_simplified,
                        console_format=clog.FMT_QUIET):
@@ -2654,8 +2688,8 @@ class SSHHost():
                                                args)
         retval = self.sh_run(log, command, stdout_tee=stdout_fd,
                              stderr_tee=stderr_fd, silent=silent,
-                             login_name=login_name, timeout=timeout,
-                             stdin=stdin, return_stdout=return_stdout,
+                             timeout=timeout, stdin=stdin,
+                             return_stdout=return_stdout,
                              return_stderr=return_stderr, quit_func=quit_func,
                              flush_tee=flush_tee)
         if origin_console_format != console_format:
@@ -2728,7 +2762,7 @@ class SSHHost():
             return -1
         return stat.S_ISDIR(stat_result.st_mode)
 
-    def sh_stat(self, log, path):
+    def sh_stat(self, log, path, quiet=False):
         """
         Stat file, return os.stat_result. Return None on error
         """
@@ -2743,24 +2777,27 @@ class SSHHost():
         command = "stat -c '%f %i %D %h %u %g %s %X %Y %Z' " + path
         retval = self.sh_run(log, command)
         if retval.cr_exit_status != 0:
-            log.cl_error("failed to run [%s] on host [%s], ret = [%d], "
-                         "stdout = [%s], stderr = [%s]", command,
-                         self.sh_hostname, retval.cr_exit_status,
-                         retval.cr_stdout, retval.cr_stderr)
+            if not quiet:
+                log.cl_error("failed to run [%s] on host [%s], ret = [%d], "
+                             "stdout = [%s], stderr = [%s]", command,
+                             self.sh_hostname, retval.cr_exit_status,
+                             retval.cr_stdout, retval.cr_stderr)
             return None
 
         lines = retval.cr_stdout.splitlines()
         if len(lines) != 1:
-            log.cl_error("unexpected stat result of path [%s] on host [%s], "
-                         "stdout = [%s]",
-                         path, self.sh_hostname, retval.cr_stdout)
+            if not quiet:
+                log.cl_error("unexpected stat result of path [%s] on host [%s], "
+                             "stdout = [%s]",
+                             path, self.sh_hostname, retval.cr_stdout)
             return None
 
         fields = lines[0].split()
         if len(fields) != 10:
-            log.cl_error("unexpected field number of stat result for "
-                         "path [%s] on host [%s], stdout = [%s]",
-                         path, self.sh_hostname, retval.cr_stdout)
+            if not quiet:
+                log.cl_error("unexpected field number of stat result for "
+                             "path [%s] on host [%s], stdout = [%s]",
+                             path, self.sh_hostname, retval.cr_stdout)
             return None
 
         args = []
@@ -2771,10 +2808,11 @@ class SSHHost():
             try:
                 args.append(int(field, base))
             except ValueError:
-                log.cl_error("unexpected field [%d] with value [%s] for path "
-                             "[%s] on host [%s], stdout = [%s]",
-                             field_number, field, path, self.sh_hostname,
-                             retval.cr_stdout)
+                if not quiet:
+                    log.cl_error("unexpected field [%d] with value [%s] for path "
+                                 "[%s] on host [%s], stdout = [%s]",
+                                 field_number, field, path, self.sh_hostname,
+                                 retval.cr_stdout)
                 return None
             field_number += 1
         return os.stat_result(tuple(args))
@@ -2931,6 +2969,14 @@ class SSHHost():
         """
         Check whether the file's checksum is expected
         """
+        exists = self.sh_path_exists(log, path)
+        if exists < 0:
+            log.cl_error("failed to check whether file [%s] exists on host [%s]",
+                         path, self.sh_hostname)
+            return -1
+        if exists == 0:
+            return -1
+
         command = "%s %s" % (checksum_command, path)
         retval = self.sh_run(log, command)
         if retval.cr_exit_status:
@@ -2961,8 +3007,8 @@ class SSHHost():
         if expected_checksum != calculated_checksum:
             log.cl_error("unexpected [%s] checksum [%s] of file [%s] on "
                          "host [%s], expected [%s]",
-                         checksum_command, expected_checksum, path,
-                         self.sh_hostname, calculated_checksum)
+                         checksum_command, calculated_checksum, path,
+                         self.sh_hostname, expected_checksum)
             return -1
         return 0
 
@@ -3684,13 +3730,91 @@ class SSHHost():
                 return None
         return version
 
+    def sh_ip_addresses(self, log):
+        """
+        Return the IPs of the host.
+        """
+        command = "hostname --all-ip-addresses"
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
+
+        return retval.cr_stdout.split()
+
+    def sh_download_file(self, log, url, fpath, expected_sha1sum,
+                         output_fname=None, checksum_command="sha1sum"):
+        """
+        Download file and check checksum after downloading.
+        Use existing file if checksum is expected.
+        If output_fname exists, need to add -O to wget because sometimes the URL
+        does not save the download file with expected fname.
+        """
+        # pylint: disable=too-many-arguments
+        target_dir = os.path.dirname(fpath)
+        ret = self.sh_check_checksum(log, fpath, expected_sha1sum,
+                                     checksum_command=checksum_command)
+        if ret:
+            log.cl_info("downloading file [%s] from [%s]", fpath, url)
+            # Cleanup the file
+            command = "rm -f %s" % fpath
+            retval = self.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+
+            if output_fname is not None:
+                output_str = " -O %s" % output_fname
+            else:
+                output_str = ""
+            command = ("mkdir -p %s && cd %s && wget %s%s" %
+                       (target_dir, target_dir, url, output_str))
+            log.cl_info("running command [%s] on host [%s]",
+                        command, self.sh_hostname)
+            retval = self.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+
+        if expected_sha1sum is None:
+            return 0
+
+        ret = self.sh_check_checksum(log, fpath, expected_sha1sum,
+                                     checksum_command=checksum_command)
+        if ret:
+            log.cl_error("file [%s] does not have expected sha1sum [%s]",
+                         fpath, expected_sha1sum)
+            return -1
+
+        return 0
+
 
 def get_local_host(ssh=True):
     """
     Return local host
     """
     local_hostname = socket.gethostname()
-    local_host = SSHHost(local_hostname, local=True, ssh_for_local=ssh)
+    login_name = getpass.getuser()
+    local_host = SSHHost(local_hostname, local=True, ssh_for_local=ssh,
+                         login_name=login_name)
     return local_host
 
 

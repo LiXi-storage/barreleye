@@ -67,12 +67,14 @@ class BarreleClusterCommand():
 
 def barrele_version(barrele_command):
     """
-    Print Barreleye version on local host.
+    Print Barreleye version on local host and exit.
     """
-    # pylint: disable=unused-argument,
-    log, _ = init_env(barrele_command.bc_config_fpath,
-                      barrele_command.bc_logdir,
-                      barrele_command.bc_log_to_file)
+    # pylint: disable=unused-argument,protected-access
+    logdir = barrele_command._bec_logdir
+    log_to_file = barrele_command._bec_log_to_file
+    logdir_is_default = (logdir == barrele_constant.BARRELE_LOG_DIR)
+    log, _ = cmd_general.init_env_noconfig(logdir, log_to_file,
+                                           logdir_is_default)
     log.cl_stdout(version.CORAL_VERSION)
     cmd_general.cmd_exit(log, 0)
 
@@ -731,10 +733,10 @@ class BarreleCommand():
                  debug=False,
                  iso=None):
         # pylint: disable=protected-access,unused-argument
-        self.bc_config_fpath = config
-        self.bc_logdir = log
-        self.bc_log_to_file = debug
-        self.bc_iso = iso
+        self._bec_config_fpath = config
+        self._bec_logdir = log
+        self._bec_log_to_file = debug
+        self._bec_iso = iso
         if iso is not None:
             cmd_general.check_iso_fpath(iso)
         self.cluster._init(config, log, debug, iso)

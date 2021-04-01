@@ -22,13 +22,18 @@ EXTRA_DIST = \
 	.pylintrc \
 	coral.spec \
 	detect-distro.sh \
+	doc \
 	example_configs/barreleye.toml \
 	pybarreleye/*.py \
 	pybuild/*.py \
 	pycoral/*.py \
 	version
 
-CHECKS =
+doc.checked: pybuild/build_doc.py
+	PYTHONPATH=$(PIP3_PACKAGE_PATH) ./coral doc check || exit 1; \
+	touch $@
+
+CHECKS = doc.checked
 
 clean-local:
 	rm -f $(CHECKS)

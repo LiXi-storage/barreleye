@@ -3,7 +3,7 @@ Library for Barreleye.
 Barreleye is a performance monitoring system for Lustre.
 """
 from pycoral import utils
-from pycoral import lustre
+from pycoral import lustre_version
 from pycoral import constant
 from pycoral import install_common
 from pycoral import ssh_host
@@ -19,7 +19,7 @@ BARRELE_COLLECT_INTERVAL = 60
 BARRELE_CONTINUOUS_QUERY_PERIODS = 4
 # The Lustre version to use, if the Lustre RPMs installed on the agent(s)
 # is not with the supported version.
-BARRELE_LUSTRE_FALLBACK_VERSION = lustre.LUSTRE_VERSION_NAME_2_12
+BARRELE_LUSTRE_FALLBACK_VERSION = lustre_version.LUSTRE_VERSION_NAME_2_12
 # Default dir of Barreleye data
 BARRELE_DATA_DIR = "/var/log/coral/barreleye_data"
 
@@ -348,14 +348,14 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                      config_fpath, BARRELE_LUSTRE_FALLBACK_VERSION)
         lustre_fallback_version_name = BARRELE_LUSTRE_FALLBACK_VERSION
 
-    if lustre_fallback_version_name not in lustre.LUSTRE_VERSION_DICT:
+    if lustre_fallback_version_name not in lustre_version.LUSTRE_VERSION_DICT:
         log.cl_error("unsupported Lustre version [%s] is configured in the "
                      "config file [%s]", lustre_fallback_version_name,
                      config_fpath)
         return None
 
     lustre_fallback_version = \
-        lustre.LUSTRE_VERSION_DICT[lustre_fallback_version_name]
+        lustre_version.LUSTRE_VERSION_DICT[lustre_fallback_version_name]
 
     enable_lustre_exp_mdt = utils.config_value(config,
                                                barrele_constant.BRL_ENABLE_LUSTRE_EXP_MDT)

@@ -4,7 +4,7 @@ Library for generating collectd config
 # pylint: disable=too-many-lines
 import re
 import collections
-from pycoral import lustre
+from pycoral import lustre_version
 from pybarreleye import barrele_constant
 
 LIBCOLLECTDCLIENT_TYPE_NAME = "libcollectdclient"
@@ -34,19 +34,19 @@ SUPPORTED_ZFS_XML_FNAMES = [XML_FNAME_ES3, XML_FNAME_ES4,
                             XML_FNAME_ES5_2, XML_FNAME_2_13]
 
 
-def lustre_version_xml_fname(log, lustre_version):
+def lustre_version_xml_fname(log, version):
     """
     Return the XML file of this Lustre version
     """
-    if lustre_version.lv_name == lustre.LUSTRE_VERSION_NAME_2_12:
+    if version.lv_name == lustre_version.LUSTRE_VERSION_NAME_2_12:
         xml_fname = XML_FNAME_2_12
-    elif lustre_version.lv_name == lustre.LUSTRE_VERSION_NAME_ES5_1:
+    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_1:
         xml_fname = XML_FNAME_ES5_1
-    elif lustre_version.lv_name == lustre.LUSTRE_VERSION_NAME_ES5_2:
+    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_2:
         xml_fname = XML_FNAME_ES5_2
     else:
         log.cl_error("unsupported Lustre version of [%s]",
-                     lustre_version.lv_name)
+                     version.lv_name)
         return None
     return xml_fname
 
@@ -60,21 +60,21 @@ def support_zfs(xml_fname):
     return False
 
 
-def support_acctgroup_acctproject(lustre_version):
+def support_acctgroup_acctproject(version):
     """
     Whether this Lustre version supports acctgroup and acctproject
     """
-    if lustre_version.lv_name == "es2":
+    if version.lv_name == "es2":
         return False
     return True
 
 
-def support_lustre_client(lustre_version):
+def support_lustre_client(version):
     """
     Whether this Lustre version supports client_stats_*
     """
-    if (lustre_version.lv_name == "es2" or
-            lustre_version.lv_name == lustre.LUSTRE_VERSION_NAME_2_12):
+    if (version.lv_name == "es2" or
+            version.lv_name == lustre_version.LUSTRE_VERSION_NAME_2_12):
         return False
     return True
 
@@ -345,14 +345,14 @@ PostCacheChain "PostCache"
             self.cdc_checks.append(self.cdc_plugin_cpu_check)
         return 0
 
-    def cdc_plugin_lustre(self, log, lustre_version, enable_lustre_oss=False,
+    def cdc_plugin_lustre(self, log, version, enable_lustre_oss=False,
                           enable_lustre_mds=False, enable_lustre_client=False,
                           enable_lustre_exp_ost=False, enable_lustre_exp_mdt=False):
         # pylint: disable=too-many-arguments,too-many-branches,too-many-statements
         """
         Config the Lustre plugin
         """
-        xml_fname = lustre_version_xml_fname(log, lustre_version)
+        xml_fname = lustre_version_xml_fname(log, version)
         if xml_fname is None:
             return -1
         xml_fpath = barrele_constant.BARRELE_XML_DIR + "/" + xml_fname
@@ -410,7 +410,7 @@ PostCacheChain "PostCache"
     <Item>
         Type "zfs_ost_acctuser"
     </Item>"""
-            if support_acctgroup_acctproject(lustre_version):
+            if support_acctgroup_acctproject(version):
                 config += """
     <Item>
         Type "ost_acctgroup"
@@ -649,7 +649,7 @@ PostCacheChain "PostCache"
     </Item>
     # The other exp_ost_stats_* items are not enabled here
 """
-        if enable_lustre_client and support_lustre_client(lustre_version):
+        if enable_lustre_client and support_lustre_client(version):
             config += """
     # Client stats
     <Item>
@@ -766,7 +766,7 @@ PostCacheChain "PostCache"
     <Item>
         Type "zfs_mdt_acctuser"
     </Item>"""
-            if support_acctgroup_acctproject(lustre_version):
+            if support_acctgroup_acctproject(version):
                 config += """
     <Item>
         Type "mdt_acctgroup"

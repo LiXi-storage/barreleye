@@ -308,7 +308,7 @@ class BarreleServer():
 
     def _bes_influxdb_create_database(self, log, drop_database=False):
         """
-        Drop Barreleye database of Influxdb
+        Create Barreleye database of Influxdb
         """
         # The service might have not fully started now, so wait a little bit
         host = self.bes_server_host
@@ -337,28 +337,12 @@ class BarreleServer():
         """
         host = self.bes_server_host
         service_name = "influxdb"
-
-        ret = host.sh_service_start(log, service_name)
+        ret = host.sh_service_start_enable(log, service_name)
         if ret:
-            log.cl_error("failed to start service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
+            log.cl_error("failed to start and enable service [%s] on "
+                         "host [%s]", service_name, host.sh_hostnmae)
             return -1
-
-        ret = host.sh_service_enable(log, service_name)
-        if ret:
-            log.cl_error("failed to start service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
-            return -1
-
-        command = ("systemctl status influxd")
-        ret = host.sh_wait_update(log, command, diff_exit_status=0,
-                                  timeout=5, quiet=True)
-        if ret:
-            # Still ative after imeout
-            return 0
-        log.cl_error("service Influxdb is not active on host [%s]",
-                     host.sh_hostname)
-        return -1
+        return 0
 
     def bes_grafana_url(self):
         """
@@ -400,7 +384,7 @@ class BarreleServer():
                          traceback.format_exc())
             return -1
         if response.status_code != HTTPStatus.OK:
-            log.cl_debug("got status [%s] when acessing Grafana url [%s]",
+            log.cl_error("got status [%s] when acessing Grafana url [%s]",
                          response.status_code, url)
             # Quick way to abort without waiting
             self.bes_grafana_fatal = True
@@ -1386,6 +1370,8 @@ class BarreleServer():
             return 1
         if retval.cr_stdout == "unknown\n":
             return 0
+        if retval.cr_stdout == "inactive\n":
+            return 0
         log.cl_error("unexpected stdout of command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",
                      command,
@@ -1405,6 +1391,8 @@ class BarreleServer():
         if retval.cr_stdout == "active\n":
             return 1
         if retval.cr_stdout == "unknown\n":
+            return 0
+        if retval.cr_stdout == "inactive\n":
             return 0
         log.cl_error("unexpected stdout of command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",

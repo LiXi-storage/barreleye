@@ -5,7 +5,7 @@ Barreleye is a performance monitoring system for Lustre.
 import json
 from http import HTTPStatus
 from pycoral import utils
-from pycoral import lustre
+from pycoral import lustre_version
 from pycoral import ssh_host
 from pybarreleye import barrele_collectd
 
@@ -144,8 +144,9 @@ class BarreleAgent():
         for rpm_name in rpm_names:
             rpm_fnames.append(rpm_name + ".rpm")
 
-        version, _ = lustre.match_lustre_version_from_rpms(log, rpm_fnames,
-                                                           skip_kernel=True)
+        version, _ = lustre_version.match_lustre_version_from_rpms(log,
+                                                                   rpm_fnames,
+                                                                   skip_kernel=True)
         if version is None:
             log.cl_info("failed to match Lustre version according to RPM "
                         "names on host [%s], using default [%s]",
@@ -414,6 +415,13 @@ class BarreleAgent():
             log.cl_error("failed to restart Barreleye agent on host [%s]",
                          host.sh_hostname)
             return -1
+
+        ret = host.sh_service_enable(log, service_name)
+        if ret:
+            log.cl_error("failed to enable service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+
         return 0
 
     def bea_collectd_running(self, log):
@@ -426,6 +434,8 @@ class BarreleAgent():
         if retval.cr_stdout == "active\n":
             return 1
         if retval.cr_stdout == "unknown\n":
+            return 0
+        if retval.cr_stdout == "inactive\n":
             return 0
         log.cl_error("unexpected stdout of command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",

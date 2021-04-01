@@ -113,83 +113,6 @@ def coral_plugin_register(plugin):
     CORAL_PLUGIN_DICT[plugin_name] = plugin
 
 
-def download_file(log, host, tarball_url, tarball_fpath,
-                  expected_sha1sum, output_fname=None):
-    """
-    Download file and check checksum after downloading.
-    Use existing file if checksum is expected.
-    If output_fname exists, need to add -O to wget because sometimes the URL
-    does not save the download file with expected fname.
-    """
-    # pylint: disable=too-many-arguments
-    target_dir = os.path.dirname(tarball_fpath)
-    exists = host.sh_path_exists(log, tarball_fpath)
-    if exists < 0:
-        log.cl_error("failed to check whether file [%s] exists on host [%s]",
-                     tarball_fpath, host.sh_hostname)
-        return -1
-
-    download = False
-    if not exists:
-        log.cl_info("file [%s] does not exist, downloading",
-                    tarball_fpath)
-        download = True
-    elif expected_sha1sum is None:
-        log.cl_info("do not know the checksum of [%s], downloading again",
-                    tarball_url)
-        download = True
-    else:
-        ret = host.sh_check_checksum(log, tarball_fpath, expected_sha1sum,
-                                     checksum_command="sha1sum")
-        if ret:
-            log.cl_warning("file [%s] does not have expected sha1sum, "
-                           "downloading", tarball_fpath)
-            command = "rm -f %s" % tarball_fpath
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-            download = True
-
-    if download:
-        if output_fname is not None:
-            output_str = " -O %s" % output_fname
-        else:
-            output_str = ""
-        command = ("mkdir -p %s && cd %s && wget %s%s" %
-                   (target_dir, target_dir, tarball_url, output_str))
-        log.cl_info("running command [%s] on host [%s]",
-                    command, host.sh_hostname)
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-    if expected_sha1sum is None:
-        return 0
-
-    ret = host.sh_check_checksum(log, tarball_fpath, expected_sha1sum,
-                                 checksum_command="sha1sum")
-    if ret:
-        log.cl_error("file [%s] does not have expected sha1sum [%s]",
-                     tarball_fpath, expected_sha1sum)
-        return -1
-
-    return 0
-
-
 def install_pip3_package_from_file(log, host, type_cache, tarball_url,
                                    expected_sha1sum):
     """
@@ -198,8 +121,8 @@ def install_pip3_package_from_file(log, host, type_cache, tarball_url,
     tarball_fname = os.path.basename(tarball_url)
     tarball_fpath = type_cache + "/" + tarball_fname
 
-    ret = download_file(log, host, tarball_url, tarball_fpath,
-                        expected_sha1sum)
+    ret = host.sh_download_file(log, tarball_url, tarball_fpath,
+                                expected_sha1sum)
     if ret:
         log.cl_error("failed to download Pyinstaller")
         return -1

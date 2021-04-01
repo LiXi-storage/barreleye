@@ -8,13 +8,13 @@ import filelock
 # Local libs
 from pycoral import ssh_host
 from pycoral import constant
-from pycoral import lustre as lustre_lib
 from pycoral import install_common
 from pycoral import cmd_general
 from pybuild import build_constant
 from pybuild import build_barrele
 from pybuild import build_common
 from pybuild import build_version
+from pybuild import build_doc
 
 # The url of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_SHA1SUM
@@ -104,8 +104,8 @@ def build_pdsh(log, workspace, host, target_cpu, type_cache,
     package_dirname = tarball_fname[:-7]
     tarball_fpath = type_cache + "/" + tarball_fname
     src_dir = workspace + "/" + package_dirname
-    ret = build_common.download_file(log, host, tarball_url, tarball_fpath,
-                                     PDSH_TARBALL_SHA1SUM)
+    ret = host.sh_download_file(log, tarball_url, tarball_fpath,
+                                PDSH_TARBALL_SHA1SUM)
     if ret:
         log.cl_error("failed to download PDSH sourcecode tarball")
         return -1
@@ -723,34 +723,11 @@ def build(log, source_dir, workspace,
         log.cl_error("failed to download pip3 packages")
         return -1
 
+    lustre_distribution = None
     if need_lustre_rpms:
-        lustre_distribution = lustre_lib.get_lustre_dist(log, local_host,
-                                                         lustre_rpms_dir,
-                                                         e2fsprogs_rpms_dir)
         if lustre_distribution is None:
-            log.cl_error("invalid Lustre RPMs [%s] or e2fsprogs RPMs [%s]",
-                         lustre_rpms_dir, e2fsprogs_rpms_dir)
+            log.cl_error("Lustre distribution is needed unexpectedly")
             return -1
-
-        if lustre_rpms_dir != default_lustre_rpms_dir:
-            ret = local_host.sh_sync_two_dirs(log, lustre_rpms_dir, iso_cache)
-            if ret:
-                log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
-                             "on host [%s]", lustre_rpms_dir, iso_cache,
-                             local_host.sh_hostname)
-                return -1
-
-        if e2fsprogs_rpms_dir != default_e2fsprogs_rpms_dir:
-            ret = local_host.sh_sync_two_dirs(log, e2fsprogs_rpms_dir,
-                                              iso_cache)
-            if ret:
-                log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
-                             "on host [%s]", e2fsprogs_rpms_dir, iso_cache,
-                             local_host.sh_hostname)
-                return -1
-
-        extra_iso_fnames.append(constant.LUSTRE_RPM_DIR_BASENAME)
-        extra_iso_fnames.append(constant.E2FSPROGS_RPM_DIR_BASENAME)
 
     contents = ([constant.BUILD_PACKAGES, constant.BUILD_PIP] +
                 extra_iso_fnames)
