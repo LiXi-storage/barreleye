@@ -1,3 +1,5 @@
+English | [简体中文](./README.zh-CN.md)
+
 # Overview
 
 :tropical_fish:Barreleye is a performance monitoring system for Lustre file system. It has the following features:
