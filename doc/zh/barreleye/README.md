@@ -156,3 +156,5 @@ INFO: please login by [admin:admin] for administrating
 ```
 
 至此，监控系统安装完成，后续可通过Grafana界面查看各指标。
+
+[MIT © 李希](./LICENSE)

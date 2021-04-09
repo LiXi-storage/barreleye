@@ -72,7 +72,8 @@ def check_iso_fpath(iso):
 
 
 def init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                      prefix="", identity=None):
+                      prefix="", identity=None, force_stdout_color=False,
+                      force_stderr_color=False):
     """
     Init log and workspace for commands that needs it
     """
@@ -85,9 +86,6 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
         elif not isinstance(identity, str):
             print("ERROR: invalid identity [%s]" %
                   (identity), file=sys.stderr)
-            sys.exit(1)
-        if len(identity) == 0:
-            print("ERROR: empty identity", file=sys.stderr)
             sys.exit(1)
 
     if (not isinstance(logdir, bool)) and isinstance(logdir, int):
@@ -127,9 +125,21 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
     else:
         resultsdir = None
 
+    if force_stdout_color:
+        stdout_color = True
+    else:
+        stdout_color = None
+
+    if force_stderr_color:
+        stderr_color = True
+    else:
+        stderr_color = None
+
     log = clog.get_log(resultsdir=resultsdir, overwrite=True,
                        console_level=logging.INFO,
-                       console_format=clog.FMT_NORMAL)
+                       console_format=clog.FMT_NORMAL,
+                       stdout_color=stdout_color,
+                       stderr_color=stderr_color)
 
     return log, workspace
 

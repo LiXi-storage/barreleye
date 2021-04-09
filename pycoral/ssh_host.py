@@ -592,7 +592,10 @@ class SSHHost():
         """
         if escape:
             paths = [scp_remote_escape(path) for path in paths]
-        return 'root@%s:"%s"' % (self.sh_hostname, " ".join(paths))
+        if self.sh_inited_as_local and not self.sh_ssh_for_local:
+            return '"%s"' % (" ".join(paths))
+        else:
+            return 'root@%s:"%s"' % (self.sh_hostname, " ".join(paths))
 
     def sh_set_umask_perms(self, dest):
         """
@@ -710,17 +713,21 @@ class SSHHost():
         pre-encoded.
         """
         # pylint: disable=no-self-use
-        ssh_cmd = make_ssh_command(identity_file=self.sh_identity_file)
+        if self.sh_inited_as_local and not self.sh_ssh_for_local:
+            ssh_option = ""
+        else:
+            ssh_cmd = make_ssh_command(identity_file=self.sh_identity_file)
+            ssh_option = " --rsh='%s'" % ssh_cmd
         if delete_dest:
-            delete_flag = "--delete"
+            delete_flag = " --delete"
         else:
             delete_flag = ""
         if preserve_symlinks:
             symlink_flag = ""
         else:
-            symlink_flag = "-L"
-        command = "rsync %s %s --timeout=1800 --rsh='%s' -az %s %s"
-        return command % (symlink_flag, delete_flag, ssh_cmd,
+            symlink_flag = " -L"
+        command = "rsync%s%s --timeout=1800%s -az %s %s"
+        return command % (symlink_flag, delete_flag, ssh_option,
                           " ".join(sources), dest)
 
     def sh_has_command(self, log, command):
@@ -3748,18 +3755,32 @@ class SSHHost():
 
         return retval.cr_stdout.split()
 
-    def sh_download_file(self, log, url, fpath, expected_sha1sum,
-                         output_fname=None, checksum_command="sha1sum"):
+    def sh_download_file(self, log, url, fpath, expected_checksum,
+                         output_fname=None, checksum_command="sha1sum",
+                         use_curl=False):
         """
         Download file and check checksum after downloading.
         Use existing file if checksum is expected.
         If output_fname exists, need to add -O to wget because sometimes the URL
         does not save the download file with expected fname.
         """
-        # pylint: disable=too-many-arguments
+        # pylint: disable=too-many-arguments,too-many-branches
         target_dir = os.path.dirname(fpath)
-        ret = self.sh_check_checksum(log, fpath, expected_sha1sum,
-                                     checksum_command=checksum_command)
+        fname = os.path.basename(fpath)
+        url_fname = os.path.basename(url)
+        if output_fname is None:
+            if fname != url_fname:
+                log.cl_error("url [%s] and fpath [%s] are not consistent",
+                             url, fpath)
+                return -1
+        elif fname != output_fname:
+            log.cl_error("url [%s] and output fname [%s] are not consistent",
+                         url, output_fname)
+            return -1
+        ret = -1
+        if expected_checksum is not None:
+            ret = self.sh_check_checksum(log, fpath, expected_checksum,
+                                         checksum_command=checksum_command)
         if ret:
             log.cl_info("downloading file [%s] from [%s]", fpath, url)
             # Cleanup the file
@@ -3775,12 +3796,20 @@ class SSHHost():
                              retval.cr_stderr)
                 return -1
 
-            if output_fname is not None:
-                output_str = " -O %s" % output_fname
+            if output_fname is None:
+                if use_curl:
+                    download_command = "curl -O %s" % url
+                else:
+                    download_command = "wget %s" % url
             else:
-                output_str = ""
-            command = ("mkdir -p %s && cd %s && wget %s%s" %
-                       (target_dir, target_dir, url, output_str))
+                if use_curl:
+                    download_command = ("curl %s -o %s" %
+                                        (url, output_fname))
+                else:
+                    download_command = ("wget %s -O %s" %
+                                        (url, output_fname))
+            command = ("mkdir -p %s && cd %s && %s" %
+                       (target_dir, target_dir, download_command))
             log.cl_info("running command [%s] on host [%s]",
                         command, self.sh_hostname)
             retval = self.sh_run(log, command)
@@ -3794,14 +3823,14 @@ class SSHHost():
                              retval.cr_stderr)
                 return -1
 
-        if expected_sha1sum is None:
+        if expected_checksum is None:
             return 0
 
-        ret = self.sh_check_checksum(log, fpath, expected_sha1sum,
+        ret = self.sh_check_checksum(log, fpath, expected_checksum,
                                      checksum_command=checksum_command)
         if ret:
             log.cl_error("file [%s] does not have expected sha1sum [%s]",
-                         fpath, expected_sha1sum)
+                         fpath, expected_checksum)
             return -1
 
         return 0

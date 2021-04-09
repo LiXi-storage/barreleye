@@ -1,4 +1,5 @@
 SOURCES =
+CHECKS =
 
 ../pycoral/version.py: build_version.py
 	../coral version save ../pycoral/version.py
@@ -6,6 +7,6 @@ SOURCES =
 SOURCES += ../pycoral/version.py
 
 clean-local:
-	rm -f $(SOURCES)
+	rm -f $(SOURCES) $(CHECKS)
 
-all: $(SOURCES) all-am
+all: $(SOURCES) $(CHECKS) all-am

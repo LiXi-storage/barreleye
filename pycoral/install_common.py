@@ -106,7 +106,8 @@ def yum_repo_install(log, host, repo_fpath, rpms):
     return 0
 
 
-def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir):
+def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
+                 use_cp=False):
     """
     Sync the files in the iso to the directory
     """
@@ -160,8 +161,12 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir):
     ret = 0
     log.cl_info("syncing ISO to [%s] on host [%s]",
                 dest_iso_dir, host.sh_hostname)
-    cmds = ["mkdir -p %s" % dest_iso_dir,
-            "rsync --delete -a %s/ %s" % (iso_dir, dest_iso_dir)]
+    cmds = ["mkdir -p %s" % dest_iso_dir]
+    if use_cp:
+        cmds.append("rm -fr %s/*" % (dest_iso_dir))
+        cmds.append("cp -a %s/* %s" % (iso_dir, dest_iso_dir))
+    else:
+        cmds.append("rsync --delete -a %s/ %s" % (iso_dir, dest_iso_dir))
     for command in cmds:
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
@@ -268,7 +273,7 @@ def coral_rpm_reinstall(log, host, iso_path):
 
     # Use RPM upgrade so that the running services will be restarted by RPM
     # scripts.
-    command = ("rpm -Uvh %s/coral-*.rpm --force" % (package_dir))
+    command = ("rpm -Uvh %s/coral-*.rpm --force --nodeps" % (package_dir))
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -599,8 +604,8 @@ class CoralInstallationHost():
         if coral_reinstall:
             ret = coral_rpm_reinstall(log, host, self.cih_iso_dir)
             if ret:
-                log.cl_error("failed to install Coral RPMs or the "
-                             "dependencies on host [%s]", hostname)
+                log.cl_error("failed to install Coral RPMs on host [%s]",
+                             hostname)
                 return -1
 
         # If local file, restore the send files in case overwritten by RPMs/pip
@@ -659,7 +664,7 @@ class CoralInstallationCluster():
     :param hosts: Hosts to install
     :param iso_path: ISO file path on localhost
     """
-    def __init__(self, workspace, iso_dir):
+    def __init__(self, workspace, local_host, iso_dir):
         # A list of CoralInstallationHost
         self.cic_installation_hosts = []
         # The workspace on local and remote host
@@ -670,7 +675,7 @@ class CoralInstallationCluster():
         # The generated repo config file under workspace on local host
         self.cic_repo_config_fpath = workspace + "/coral.repo"
         # Local host to run command
-        self.cic_local_host = ssh_host.get_local_host()
+        self.cic_local_host = local_host
 
     def cic_add_hosts(self, hosts, pip_libs, dependent_rpms,
                       send_fpath_dict, need_backup_fpaths,
@@ -734,66 +739,6 @@ class CoralInstallationCluster():
             log.cl_error("failed to install on cluster in parallel")
             return -1
         return 0
-
-
-def bootstrap_from_iso(log, workspace, local_host, rpms, missing_pips):
-    """
-    Install the dependent RPMs and pip packages from ISO
-    """
-    # pylint: disable=too-many-branches
-    missing_rpms = []
-    for rpm in rpms:
-        ret = local_host.sh_rpm_query(log, rpm)
-        if ret != 0:
-            missing_rpms.append(rpm)
-
-    if len(missing_rpms) == 0 and len(missing_pips) == 0:
-        return 0
-
-    missing_string = ""
-    if len(missing_rpms) > 0:
-        missing_string = "RPMs %s" % missing_rpms
-
-    if len(missing_pips) > 0:
-        if missing_string != "":
-            missing_string += "and pip packages %s" % missing_pips
-
-    log.cl_debug("installing %s on localhost [%s] from ISO",
-                 missing_string, local_host.sh_hostname)
-
-    iso_pattern = None
-    arg_index = 1
-    iso_index = None
-    for arg in sys.argv[1:]:
-        if arg == "--iso":
-            iso_index = arg_index
-            break
-        arg_index += 1
-
-    if iso_index is not None:
-        if iso_index >= len(sys.argv) - 1:
-            log.cl_error("missing path for --iso option")
-            return -1
-        iso_pattern = sys.argv[iso_index + 1]
-
-    if iso_pattern is not None:
-        ret = sync_iso_dir(log, workspace, local_host, iso_pattern,
-                           constant.CORAL_ISO_DIR)
-        if ret:
-            log.cl_error("failed to sync ISO files from [%s] to dir [%s] on local host [%s]",
-                         iso_pattern, constant.CORAL_ISO_DIR,
-                         local_host.sh_hostname)
-            return -1
-
-    ret = localhost_install_dependency(log, workspace,
-                                       local_host, constant.CORAL_ISO_DIR,
-                                       rpms, missing_pips,
-                                       "bootstrap")
-    if ret:
-        log.cl_error("failed to install depdendencies to run command")
-        log.cl_error("you might want to add --iso option to point to the "
-                     "correct ISO")
-    return ret
 
 
 def yum_install_rpm_from_internet(log, host, rpms):
@@ -1019,5 +964,34 @@ def download_pip3_packages(log, host, pip_dir, pip_packages):
                      retval.cr_exit_status,
                      retval.cr_stdout,
                      retval.cr_stderr)
+        return -1
+    return 0
+
+
+def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
+                             lazy_prepare=True):
+    """
+    Install Lustre and Coral packages on a host
+    """
+    install_cluster = CoralInstallationCluster(workspace, local_host,
+                                               iso_dir)
+    send_fpath_dict = {}
+    need_backup_fpaths = []
+    install_cluster.cic_add_hosts([host], constant.CORAL_DEPENDENT_PIPS,
+                                  constant.CORAL_DEPENDENT_RPMS,
+                                  send_fpath_dict,
+                                  need_backup_fpaths,
+                                  coral_reinstall=True)
+    ret = install_cluster.cic_install(log)
+    if ret:
+        log.cl_error("failed to install dependent RPMs on host [%s]",
+                     host.sh_hostname)
+        return -1
+
+    ret = host.lsh_lustre_prepare(log, workspace,
+                                  lazy_prepare=lazy_prepare)
+    if ret:
+        log.cl_error("failed to prepare host [%s] to run Lustre service",
+                     host.sh_hostname)
         return -1
     return 0

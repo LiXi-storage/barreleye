@@ -158,3 +158,5 @@ INFO: please login by [admin:admin] for administrating
 ```
 
 Now the installation of the monitoring system is completed, and all the metrics can be viewed through the Grafana web interface.
+
+[MIT © Li Xi](./LICENSE)

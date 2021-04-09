@@ -163,7 +163,7 @@ class CommandJob():
         if self.cj_timeout:
             self.cj_max_stop_time = self.cj_timeout + self.cj_start_time
         shell = '/bin/bash'
-        self.cj_subprocess = subprocess.Popen("LANG=en_US " + self.cj_command,
+        self.cj_subprocess = subprocess.Popen("LANG=en_US.UTF-8 " + self.cj_command,
                                               stdout=subprocess.PIPE,
                                               stderr=subprocess.PIPE,
                                               shell=True,
@@ -551,3 +551,13 @@ def merge_files(file_list, output_file):
                     if not buff:
                         break
                     output_fd.write(buff)
+
+
+def random_kvm_mac():
+    """
+    Return a mac string for qemu/kvm
+    """
+    # 52:54:00 is the OUI of qemu/kvm
+    mac = [0x52, 0x54, 0x00, random.randint(0x00, 0x7f),
+           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
+    return ':'.join(map(lambda x: "%02x" % x, mac))

@@ -133,6 +133,7 @@ class BarreleInstance():
 
         install_cluster = \
             install_common.CoralInstallationCluster(self.bei_workspace,
+                                                    self.bei_local_host,
                                                     self.bei_iso_dir)
 
         need_backup_fpaths = []
