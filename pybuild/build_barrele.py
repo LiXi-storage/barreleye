@@ -12,10 +12,10 @@ from pybarreleye import barrele_constant
 PACAKGE_URL_DICT = {}
 # The URL of Collectd tarball
 COLLECTD_URL = ("https://github.com/LiXi-storage/collectd/releases/download/"
-                "collectd-5.12.0.barreleye1/collectd-5.12.0.barreleye1.tar.bz2")
+                "collectd-5.12.0.brl2/collectd-5.12.0.brl2.tar.bz2")
 # The sha1sum of Collectd tarball. Need to update together with
 # COLLECTD_URL
-COLLECTD_SHA1SUM = "7e19cfb97621d0d7d3fc078c224bcc1a8ad0c4d2"
+COLLECTD_SHA1SUM = "9fb8be9d7c0bf7c84b93ef5bf441d393b081e7d9"
 PACAKGE_URL_DICT["collectd"] = COLLECTD_URL
 
 # The RPM names of Collectd to check

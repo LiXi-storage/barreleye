@@ -317,6 +317,15 @@ class CoralInstallationHost():
         self.cih_need_backup_fpaths = need_backup_fpaths
         # Reinstall Coral RPMs
         self.cih_coral_reinstall = coral_reinstall
+        # A list of Coral service names to preserve. If the service is
+        # running before reinstalling Coral RPMs, it should be restarted
+        # after reinstalling Coral RPMs. Usually, these services should
+        # already been restarted in the RPM post-installation script, but the
+        # restarting process could fail in some circumstances. So the services
+        # will be started for several times until timeout.
+        #
+        # Note this list will be shrinked when services are up running.
+        self.cih_preserve_services = []
 
     def _cih_send_iso_dir(self, log):
         """
@@ -505,6 +514,105 @@ class CoralInstallationHost():
             return -1
         return 0
 
+    def _cih_services_pre_preserve(self, log):
+        """
+        Check the service status before reinstallation
+        """
+        host = self.cih_host
+        command = "rpm -qa | grep coral-"
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status == 0:
+            rpm_names = retval.cr_stdout.splitlines()
+        elif (retval.cr_exit_status == 1 and
+              len(retval.cr_stdout) == 0):
+            log.cl_debug("no rpm can be find by command [%s] on host [%s], "
+                         "no need to uninstall",
+                         command, host.sh_hostname)
+            rpm_names = []
+        else:
+            log.cl_error("unexpected result of command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        service_prefix = "/usr/lib/systemd/system/"
+        installed_services = []
+        for rpm_name in rpm_names:
+            command = "rpm -ql %s | grep %s" % (rpm_name, service_prefix)
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status == 0:
+                systemd_files = retval.cr_stdout.splitlines()
+            elif (retval.cr_exit_status == 1 and
+                  len(retval.cr_stdout) == 0):
+                log.cl_debug("no files can be find by command [%s] on host [%s], "
+                             "no need to uninstall",
+                             command, host.sh_hostname)
+                systemd_files = []
+            else:
+                log.cl_error("unexpected result of command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+            for systemd_file in systemd_files:
+                if not systemd_file.startswith(service_prefix):
+                    log.cl_error("unexpected file name [%s] in RPM [%s] on "
+                                 "host [%s]", systemd_file, rpm_name,
+                                 host.hostname)
+                    return -1
+                # This service name has ".service" tail. But that is fine.
+                service_name = systemd_file[len(service_prefix):]
+                installed_services.append(service_name)
+
+        for service_name in installed_services:
+            command = ("systemctl is-active %s" % (service_name))
+            retval = host.sh_run(log, command)
+            if retval.cr_stdout == "active\n":
+                self.cih_preserve_services.append(service_name)
+        return 0
+
+    def _cih_services_try_preserve(self, log):
+        """
+        Try start the services after reinstallation
+        """
+        host = self.cih_host
+        rc = 0
+        for service_name in self.cih_preserve_services[:]:
+            ret = host.sh_service_start(log, service_name)
+            if ret:
+                log.cl_warning("failed to start service [%s] on host [%s]",
+                               service_name, host.sh_hostname)
+                rc = -1
+            else:
+                self.cih_preserve_services.remove(service_name)
+        return rc
+
+    def _cih_services_preserve(self, log, timeout=90):
+        """
+        Start the services after reinstallation with a timeout.
+        """
+        ret = utils.wait_condition(log, self._cih_services_try_preserve,
+                                   (), timeout=timeout)
+        if ret:
+            service_string = ""
+            for service_name in self.cih_preserve_services:
+                if service_string == "":
+                    service_string += service_name
+                else:
+                    service_string += ", " + service_name
+            log.cl_error("failed to start services [%s] on host [%s] after "
+                         "trying for [%s] seconds",
+                         service_string, self.cih_host.sh_hostname,
+                         timeout)
+        return ret
+
     def cih_install(self, log, repo_config_fpath, disable_selinux=True,
                     disable_firewalld=True):
         """
@@ -602,9 +710,21 @@ class CoralInstallationHost():
             return -1
 
         if coral_reinstall:
+            ret = self._cih_services_pre_preserve(log)
+            if ret:
+                log.cl_error("failed to prepare for preserving Coral "
+                             "services on host [%s]",
+                             hostname)
+                return -1
+
             ret = coral_rpm_reinstall(log, host, self.cih_iso_dir)
             if ret:
                 log.cl_error("failed to install Coral RPMs on host [%s]",
+                             hostname)
+                return -1
+            ret = self._cih_services_preserve(log)
+            if ret:
+                log.cl_error("failed to preserve Coral services on host [%s]",
                              hostname)
                 return -1
 
@@ -681,7 +801,7 @@ class CoralInstallationCluster():
                       send_fpath_dict, need_backup_fpaths,
                       coral_reinstall=True):
         """
-        Add installation host
+        Add installation host.
         """
         for host in hosts:
             is_local = host.sh_hostname == self.cic_local_host.sh_hostname
@@ -753,6 +873,26 @@ def yum_install_rpm_from_internet(log, host, rpms):
 
     if len(missing_rpms) == 0:
         return 0
+
+    # Cleanup, otherwise, might hit problem like:
+    #
+    # https://mirrors.xxx/epel/7/x86_64/repodata/xxx-filelists.sqlite.bz2:
+    # [Errno 14] HTTPS Error 404 - Not Found
+    # Trying other mirror.
+    #
+    cmds = ["yum clean all",
+            "rpm --rebuilddb"]
+    for command in cmds:
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
 
     command = "yum install -y"
     for rpm in rpms:

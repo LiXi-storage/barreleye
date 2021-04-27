@@ -888,10 +888,9 @@ class SSHHost():
             from_host = self.sh_hostname
             ret = self.sh_run(log, rsync, timeout=timeout)
         if ret.cr_exit_status:
-            log.cl_error("failed to send file %s on host [%s]  "
-                         "to dest [%s] on host [%s] using rsync, "
-                         "command = [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
+            log.cl_error("failed to send file %s on host [%s] to dest [%s] "
+                         "on host [%s], command = [%s], ret = [%d], "
+                         "stdout = [%s], stderr = [%s]",
                          source, from_host, dest, remote_host.sh_hostname,
                          rsync, ret.cr_exit_status, ret.cr_stdout,
                          ret.cr_stderr)
