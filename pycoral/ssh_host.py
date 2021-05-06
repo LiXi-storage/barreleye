@@ -594,8 +594,7 @@ class SSHHost():
             paths = [scp_remote_escape(path) for path in paths]
         if self.sh_inited_as_local and not self.sh_ssh_for_local:
             return '"%s"' % (" ".join(paths))
-        else:
-            return 'root@%s:"%s"' % (self.sh_hostname, " ".join(paths))
+        return 'root@%s:"%s"' % (self.sh_hostname, " ".join(paths))
 
     def sh_set_umask_perms(self, dest):
         """
@@ -888,7 +887,7 @@ class SSHHost():
             from_host = self.sh_hostname
             ret = self.sh_run(log, rsync, timeout=timeout)
         if ret.cr_exit_status:
-            log.cl_error("failed to send file %s on host [%s] to dest [%s] "
+            log.cl_error("failed to send file [%s] on host [%s] to dest [%s] "
                          "on host [%s], command = [%s], ret = [%d], "
                          "stdout = [%s], stderr = [%s]",
                          source, from_host, dest, remote_host.sh_hostname,
@@ -1721,19 +1720,27 @@ class SSHHost():
             return None
         return retval.cr_stdout.strip()
 
-    def sh_virsh_dominfo(self, log, hostname):
+    def sh_virsh_dominfo(self, log, hostname, quiet=False):
         """
         Get the virsh dominfo of a domain
         """
         command = ("virsh dominfo %s" % hostname)
         retval = self.sh_run(log, command)
         if retval.cr_exit_status:
-            log.cl_debug("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command, self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+            if quiet:
+                log.cl_debug("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command, self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+            else:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command, self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
             return None
 
         lines = retval.cr_stdout.splitlines()
@@ -1755,7 +1762,7 @@ class SSHHost():
         """
         Get the state of a hostname
         """
-        dominfos = self.sh_virsh_dominfo(log, hostname)
+        dominfos = self.sh_virsh_dominfo(log, hostname, quiet=quiet)
         if dominfos is None:
             if quiet:
                 log.cl_debug("failed to get dominfo of [%s] on host [%s]",
@@ -3662,7 +3669,7 @@ class SSHHost():
     def sh_sync_two_dirs(self, log, src, dest_parent):
         """
         Sync a dir to another dir. dest_parent is the target parent dir. And
-        the existing dir will be removed
+        the dir with the same name under that parent will be removed.
         """
         # Stripe / otherwise it will has different meaning
         dest_parent = dest_parent.rstrip("/")

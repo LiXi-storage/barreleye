@@ -598,6 +598,19 @@ class CoralInstallationHost():
         """
         Start the services after reinstallation with a timeout.
         """
+        if len(self.cih_preserve_services) == 0:
+            return 0
+
+        service_str = ""
+        for service in self.cih_preserve_services:
+            if service_str == "":
+                service_str = service
+            else:
+                service_str += ", " + service
+        if service_str != "":
+            log.cl_info("preserving services [%s] after reinstalling Coral RPMs "
+                        "on host [%s]",
+                        service_str, self.cih_host.sh_hostname)
         ret = utils.wait_condition(log, self._cih_services_try_preserve,
                                    (), timeout=timeout)
         if ret:
