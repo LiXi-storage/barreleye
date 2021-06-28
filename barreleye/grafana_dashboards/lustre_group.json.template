@@ -18,7 +18,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1624882342107,
+  "iteration": 1624882011263,
   "links": [],
   "panels": [
     {
@@ -63,11 +63,12 @@
       },
       "styles": [
         {
-          "alias": "UID",
+          "alias": "GID",
           "align": "auto",
           "dateFormat": "YYYY-MM-DD HH:mm:ss",
           "pattern": "Metric",
-          "type": "number"
+          "type": "number",
+          "unit": "none"
         },
         {
           "align": "auto",
@@ -86,17 +87,17 @@
       ],
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "dsType": "influxdb",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_ost_jobstats_bytes-fs_name-uid",
+          "measurement": "cqm_ost_jobstats_bytes-fs_name-gid",
           "orderByTime": "ASC",
           "policy": "default",
           "query": "SELECT sum(\"sum\") FROM \"cqm_ost_jobstats_bytes\" WHERE ( \"optype\" = 'sum_write_bytes' OR \"optype\" = 'sum_read_bytes' ) AND \"fs_name\" = '$fs_name' AND $timeFilter GROUP BY time(1m), \"job_id\" fill(null)",
@@ -123,7 +124,7 @@
         }
       ],
       "timeFrom": null,
-      "title": "I/O Throughput per User",
+      "title": "I/O Throughput per Group",
       "transform": "timeseries_aggregations",
       "type": "table-old"
     },
@@ -169,7 +170,7 @@
       },
       "styles": [
         {
-          "alias": "UID",
+          "alias": "GID",
           "align": "auto",
           "dateFormat": "YYYY-MM-DD HH:mm:ss",
           "pattern": "Metric",
@@ -192,17 +193,17 @@
       ],
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "dsType": "influxdb",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_ost_jobstats_bytes-fs_name-optype-uid",
+          "measurement": "cqm_ost_jobstats_bytes-fs_name-gid-optype",
           "orderByTime": "ASC",
           "policy": "default",
           "query": "SELECT sum(\"sum\") FROM \"cqm_ost_jobstats_bytes\" WHERE \"optype\" = 'sum_write_bytes' AND \"fs_name\" = '$fs_name' AND $timeFilter GROUP BY time(1m), \"job_id\" fill(null)",
@@ -235,7 +236,7 @@
         }
       ],
       "timeFrom": null,
-      "title": "Write Throughput per User",
+      "title": "Write Throughput per Group",
       "transform": "timeseries_aggregations",
       "type": "table-old"
     },
@@ -281,7 +282,7 @@
       },
       "styles": [
         {
-          "alias": "UID",
+          "alias": "GID",
           "align": "auto",
           "dateFormat": "YYYY-MM-DD HH:mm:ss",
           "pattern": "Metric",
@@ -304,17 +305,17 @@
       ],
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "dsType": "influxdb",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_ost_jobstats_bytes-fs_name-optype-uid",
+          "measurement": "cqm_ost_jobstats_bytes-fs_name-gid-optype",
           "orderByTime": "ASC",
           "policy": "default",
           "query": "SELECT sum(\"sum\") FROM \"cqm_ost_jobstats_bytes\" WHERE \"optype\" = 'sum_write_bytes' AND \"fs_name\" = '$fs_name' AND $timeFilter GROUP BY time(1m), \"job_id\" fill(null)",
@@ -392,7 +393,7 @@
       },
       "styles": [
         {
-          "alias": "UID",
+          "alias": "GID",
           "align": "auto",
           "dateFormat": "YYYY-MM-DD HH:mm:ss",
           "pattern": "Metric",
@@ -415,17 +416,17 @@
       ],
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "dsType": "influxdb",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_mdt_jobstats_samples-fs_name-uid",
+          "measurement": "cqm_mdt_jobstats_samples-fs_name-gid",
           "orderByTime": "ASC",
           "policy": "default",
           "refId": "A",
@@ -451,7 +452,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Metadata Performance per User",
+      "title": "Metadata Performance per Group",
       "transform": "timeseries_aggregations",
       "type": "table-old"
     },
@@ -504,16 +505,16 @@
       "steppedLine": false,
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_ost_jobstats_bytes-fs_name-uid",
+          "measurement": "cqm_ost_jobstats_bytes-fs_name-gid",
           "orderByTime": "ASC",
           "policy": "default",
           "refId": "A",
@@ -541,7 +542,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "I/O Throughput per User",
+      "title": "I/O Throughput per Group",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -627,16 +628,16 @@
       "steppedLine": false,
       "targets": [
         {
-          "alias": "$tag_uid",
+          "alias": "$tag_gid",
           "groupBy": [
             {
               "params": [
-                "uid"
+                "gid"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "cqm_mdt_jobstats_samples-fs_name-uid",
+          "measurement": "cqm_mdt_jobstats_samples-fs_name-gid",
           "orderByTime": "ASC",
           "policy": "default",
           "refId": "A",
@@ -664,7 +665,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Metadata Performance per User",
+      "title": "Metadata Performance per Group",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -758,7 +759,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Lustre User",
+  "title": "Lustre Group",
   "uid": null,
   "version": 1
 }

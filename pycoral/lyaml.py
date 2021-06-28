@@ -12,7 +12,7 @@ class YamlDumper(yaml.Dumper):
     Provide proper indent
     """
     def increase_indent(self, flow=False, indentless=False):
-        return super(YamlDumper, self).increase_indent(flow, False)
+        return super().increase_indent(flow, False)
 
 
 def write_yaml_config(log, prefix, config, config_fpath):

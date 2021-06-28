@@ -42,6 +42,8 @@ GRAFANA_DASHBOARDS["Lustre OST"] = "lustre_ost.json"
 GRAFANA_DASHBOARDS["Lustre Statistics"] = "lustre_statistics.json"
 DASHBOARD_NAME_LUSTRE_USER = "Lustre User"
 GRAFANA_DASHBOARDS[DASHBOARD_NAME_LUSTRE_USER] = "lustre_user.json"
+DASHBOARD_NAME_LUSTRE_GROUP = "Lustre Group"
+GRAFANA_DASHBOARDS[DASHBOARD_NAME_LUSTRE_GROUP] = "lustre_group.json"
 GRAFANA_DASHBOARDS["Server Statistics"] = "server_statistics.json"
 GRAFANA_DASHBOARDS["SFA Physical Disk"] = "SFA_physical_disk.json"
 GRAFANA_DASHBOARDS["SFA Virtual Disk"] = "SFA_virtual_disk.json"
@@ -839,7 +841,7 @@ class BarreleServer():
         """
         Recreate Grafana dashboards
         """
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-locals,too-many-branches
         host = self.bes_server_host
         collect_interval = str(barreleye_instance.bei_collect_interval)
         local_host = barreleye_instance.bei_local_host
@@ -859,20 +861,16 @@ class BarreleServer():
                 return -1
             if ret:
                 dashboard_json_fpath = (workspace + "/" + fname)
-                template_file = open(dashboard_template_fpath, 'r',
-                                     encoding='utf-8')
-                lines = template_file.readlines()
-                template_file.close()
+                with open(dashboard_template_fpath, 'r', encoding='utf-8') as template_file:
+                    lines = template_file.readlines()
 
-                json_file = open(dashboard_json_fpath, 'w',
-                                 encoding='utf-8')
-                for line in lines:
-                    line = line.replace(TEMPLATE_COLLECT_INTERVAL,
-                                        collect_interval)
-                    line = line.replace(TEMPLATE_DATASOURCE_NAME,
-                                        GRAFANA_DATASOURCE_NAME)
-                    json_file.write(line)
-                json_file.close()
+                with open(dashboard_json_fpath, 'w', encoding='utf-8') as json_file:
+                    for line in lines:
+                        line = line.replace(TEMPLATE_COLLECT_INTERVAL,
+                                            collect_interval)
+                        line = line.replace(TEMPLATE_DATASOURCE_NAME,
+                                            GRAFANA_DATASOURCE_NAME)
+                        json_file.write(line)
             else:
                 ret = local_host.sh_path_exists(log, dashboard_json_fpath)
                 if ret < 0:
@@ -890,11 +888,19 @@ class BarreleServer():
                 dashboard = json.load(json_file)
 
             folder_id = 0
-            if (name == DASHBOARD_NAME_LUSTRE_USER and
-                    jobstat_pattern != barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID):
-                # If jobstat pattern is not procename_uid, put the
-                # Lustre User dashboard to "Disabled" folder
-                folder_id = self.bes_disabled_folder_id
+            user_patterns = [barrele_constant.BARRELE_JOBSTAT_PATTERN_PROCNAME_UID,
+                             barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID]
+            group_patterns = [barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID]
+            if name == DASHBOARD_NAME_LUSTRE_USER:
+                if jobstat_pattern not in user_patterns:
+                    # If jobstat pattern is not recognized, put the
+                    # Lustre User dashboard to "Disabled" folder
+                    folder_id = self.bes_disabled_folder_id
+            elif name == DASHBOARD_NAME_LUSTRE_GROUP:
+                if jobstat_pattern not in group_patterns:
+                    # If jobstat pattern is not recognized, put the
+                    # Lustre Group dashboard to "Disabled" folder
+                    folder_id = self.bes_disabled_folder_id
 
             ret = self._bes_grafana_recreate_dashboard(log, name, dashboard,
                                                        folder_id)
@@ -1105,10 +1111,11 @@ class BarreleServer():
                          "host [%s]", service_name, host.sh_hostname)
             return -1
 
-        ret = self._bes_influxdb_create_database(log,
-                                                 drop_database=drop_database)
+        ret = utils.wait_condition(log, self._bes_influxdb_create_database,
+                                   (drop_database,),
+                                   timeout=120)
         if ret:
-            log.cl_error("failed to create Influxdb database of Barreleye")
+            log.cl_error("failed to create Influxdb database")
             return -1
 
         ret = self._bes_influxdb_recreate_cqs(log, barreleye_instance)
@@ -1251,9 +1258,18 @@ class BarreleServer():
             continuous_query = InfluxdbContinuousQuery("mdt_jobstats_samples",
                                                        ["fs_name", "uid"])
             continuous_queries.append(continuous_query)
+        elif (barreleye_instance.bei_jobstat_pattern ==
+              barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID):
+            continuous_query = InfluxdbContinuousQuery("mdt_jobstats_samples",
+                                                       ["fs_name", "uid"])
+            continuous_queries.append(continuous_query)
+            continuous_query = InfluxdbContinuousQuery("mdt_jobstats_samples",
+                                                       ["fs_name", "gid"])
+            continuous_queries.append(continuous_query)
         elif (barreleye_instance.bei_jobstat_pattern !=
               barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
-            log.cl_error("unknown jobstat pattern [%s]",
+            log.cl_error("unknown jobstat pattern [%s] when creating "
+                         "continuous queries for MDT",
                          barreleye_instance.bei_jobstat_pattern)
             return -1
         continuous_query = InfluxdbContinuousQuery("ost_stats_bytes",
@@ -1313,9 +1329,45 @@ class BarreleServer():
                                                         "ost_index"],
                                                        where=where)
             continuous_queries.append(continuous_query)
+        elif (barreleye_instance.bei_jobstat_pattern ==
+              barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID):
+            # UID
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "uid",
+                                                        "optype"])
+            continuous_queries.append(continuous_query)
+            where = "WHERE optype = 'sum_read_bytes' OR optype = 'sum_write_bytes'"
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "uid"],
+                                                       where=where)
+            continuous_queries.append(continuous_query)
+            where = "WHERE optype = 'sum_read_bytes' OR optype = 'sum_write_bytes'"
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "uid",
+                                                        "ost_index"],
+                                                       where=where)
+            continuous_queries.append(continuous_query)
+
+            # GID
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "gid",
+                                                        "optype"])
+            continuous_queries.append(continuous_query)
+            where = "WHERE optype = 'sum_read_bytes' OR optype = 'sum_write_bytes'"
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "gid"],
+                                                       where=where)
+            continuous_queries.append(continuous_query)
+            where = "WHERE optype = 'sum_read_bytes' OR optype = 'sum_write_bytes'"
+            continuous_query = InfluxdbContinuousQuery("ost_jobstats_bytes",
+                                                       ["fs_name", "gid",
+                                                        "ost_index"],
+                                                       where=where)
+            continuous_queries.append(continuous_query)
         elif (barreleye_instance.bei_jobstat_pattern !=
               barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
-            log.cl_error("unknown jobstat pattern [%s]",
+            log.cl_error("unknown jobstat pattern [%s] when creating "
+                         "continuous queries for OST",
                          barreleye_instance.bei_jobstat_pattern)
             return -1
         continuous_query = InfluxdbContinuousQuery("ost_brw_stats_rpc_bulk_samples",
@@ -1354,7 +1406,8 @@ class BarreleServer():
                                                  continuous_query.icq_groups,
                                                  where=continuous_query.icq_where)
             if ret:
-                log.cl_error("failed to create continuous query of measurement [%s]",
+                log.cl_error("failed to create continuous query of "
+                             "measurement [%s]",
                              continuous_query.icq_measurement)
                 return -1
         return 0

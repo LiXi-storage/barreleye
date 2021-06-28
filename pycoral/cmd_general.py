@@ -1,6 +1,7 @@
 """
 Library for defining a command written in python
 """
+# pylint: disable=too-many-lines
 import sys
 import logging
 import traceback
@@ -44,9 +45,8 @@ def load_config(log, config_fpath):
     except:
         error = traceback.format_exc()
         try:
-            config_fd = open(config_fpath)
-            config = yaml.load(config_fd)
-            config_fd.close()
+            with open(config_fpath) as config_fd:
+                config = yaml.load(config_fd)
         except:
             log.cl_error("failed to load file [%s] using TOML format: %s",
                          config_fpath, error)
@@ -56,18 +56,18 @@ def load_config(log, config_fpath):
     return config
 
 
-def check_iso_fpath(iso):
+def check_argument_fpath(fpath):
     """
-    Check the iso fpath is valid
+    Check the fpath is valid
     """
-    if (not isinstance(iso, bool)) and isinstance(iso, int):
-        iso = str(iso)
-    if not isinstance(iso, str):
-        print("ERROR: invalid iso path [%s], should be a string" % iso,
+    if (not isinstance(fpath, bool)) and isinstance(fpath, int):
+        fpath = str(fpath)
+    if not isinstance(fpath, str):
+        print("ERROR: invalid file path [%s], should be a string" % fpath,
               file=sys.stderr)
         sys.exit(1)
-    elif len(iso) == 0:
-        print("ERROR: empty iso path", file=sys.stderr)
+    elif len(fpath) == 0:
+        print("ERROR: empty file path", file=sys.stderr)
         sys.exit(1)
 
 
@@ -350,11 +350,11 @@ def add_parameter_pair(param_dict, key, value):
     return 0
 
 
-def parse_parameter(log, param):
+def parse_parameter(log, param, delimiter=" "):
     """
     A single line of key/value pairs or flags without leading "Test-Parameters:".
     Return a dict. Key is the key, value is the value.
-    Please check doc/Test-Parameters.txt for more info about the format.
+    Please check doc/en/Test-Parameters.txt for more info about the format.
     Return None on error.
     """
     # pylint: disable=too-many-branches,too-many-statements
@@ -371,7 +371,7 @@ def parse_parameter(log, param):
     escape = False
     for char in param:
         if status == PTP_INIT:
-            if char == " ":
+            if char == delimiter:
                 continue
             if char.isalnum() or char == "_":
                 status = PTP_KEY
@@ -381,14 +381,14 @@ def parse_parameter(log, param):
                              param)
                 return None
         elif status == PTP_KEY:
-            if char == " ":
+            if char == delimiter:
                 ret = add_parameter_pair(param_dict, key, True)
                 if ret:
                     log.cl_error("invalid [%s]: ambiguous values",
                                  param)
                     return None
                 key = ""
-            elif char.isalnum() or char == "_":
+            elif char.isalnum() or char == "_" or char == "-":
                 key += char
             elif char == "=":
                 if len(key) == 0:
@@ -409,9 +409,9 @@ def parse_parameter(log, param):
                 escape = True
                 # The escape will be handled together with next char.
                 continue
-            if char == " ":
+            if char == delimiter:
                 if escape:
-                    value += " "
+                    value += delimiter
                     escape = False
                 else:
                     # The key/value pair finishes
@@ -513,7 +513,8 @@ TEST_SKIPPED = 1
 
 
 def run_test(log, workspace, only_test_names, first_test_names,
-             local_host, reverse_order, start, stop, test_functs, args):
+             local_host, reverse_order, start, stop, skip_basic,
+             test_functs, args):
     """
     Run test.
     If only is specified together with start/stop, start/stop option will
@@ -522,9 +523,11 @@ def run_test(log, workspace, only_test_names, first_test_names,
     will be ignored.
     Only/first tests can repeat tests, e.g. first=testA,testA would repeat
     testA for twice.
-    :param test_functs: a list of function that has the argument types of: test_funct(log, test_workspace, *args)
+    :param skip_basic: Do not add basic test when it is not selected.
+    :param test_functs: A list of function that has the argument types of:
+        test_funct(log, test_workspace, *args)
     """
-    # pylint: disable=too-many-branches,too-many-locals,too-many-arguments
+    # pylint: disable=too-many-branches,too-many-locals
     # pylint: disable=too-many-statements,global-statement
     test_dict = {}
     for test_funct in test_functs:
@@ -605,13 +608,18 @@ def run_test(log, workspace, only_test_names, first_test_names,
         elif selected_tests[0].__name__ != "basic":
             if reverse_order:
                 selected_tests.reverse()
-            selected_tests.insert(0, basic_test)
+            if not skip_basic:
+                selected_tests.insert(0, basic_test)
         elif reverse_order:
             other_tests = selected_tests[1:]
             other_tests.reverse()
-            selected_tests = [basic_test] + other_tests
+            if skip_basic:
+                selected_tests = other_tests
+            else:
+                selected_tests = [basic_test] + other_tests
 
-    if len(selected_tests) > 0 and selected_tests[0].__name__ != "basic":
+    if (len(selected_tests) > 0 and selected_tests[0].__name__ != "basic" and
+            not skip_basic):
         selected_tests.insert(0, basic_test)
 
     table = prettytable.PrettyTable()
@@ -758,7 +766,7 @@ def parse_field_string(log, field_string, quick_fields, table_fields,
     """
     Return field names.
     """
-    # pylint: disable=too-many-branches,too-many-arguments
+    # pylint: disable=too-many-branches
     if field_string is None:
         if not print_table:
             field_names = all_fields
@@ -816,8 +824,8 @@ def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
     """
     Print table of virtual machines
     """
-    # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
-    # pylint: disable=too-many-statements,too-many-arguments
+    # pylint: disable=too-many-locals,too-many-branches
+    # pylint: disable=too-many-statements
     if len(quick_fields) == 0:
         log.cl_error("empty table")
         return -1
@@ -868,7 +876,7 @@ def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
         table.align = "l"
         if sortby is None:
             table_set_sortby(table, field_names[0])
-        else:
+        if sortby:
             table_set_sortby(table, sortby)
         log.cl_stdout(table)
     return rc
@@ -938,7 +946,6 @@ def check_argument_types(log, name, value, allow_none=False,
     """
     Check the argument is str. If not, exit.
     """
-    # pylint: disable=too-many-arguments
     if allow_bool and isinstance(value, bool):
         return
 
@@ -980,3 +987,104 @@ def get_command_name(command):
         else:
             name += "+"
     return name
+
+
+def check_version_extra(log, extra):
+    """
+    Allowed characters: [0-9] [a-x] [A-X], "_", "-"
+    Not allowed: ".", space
+    """
+    if len(extra) == 0:
+        log.cl_error("illegal empty extra part of revision")
+        return -1
+
+    for character in extra:
+        if character.isalnum():
+            continue
+        if character in ["_", "-"]:
+            continue
+        log.cl_error("illegal character [%s] in extra part [%s] of revision",
+                     character, extra)
+        return -1
+    return 0
+
+
+def coral_parse_version(log, version_string, minus_as_delimiter=False):
+    """
+    Two possible version formats:
+        version.major.minor
+        version.major.minor-extra
+    If minus_as_delimiter is false, allowed format is:
+        version.major.minor_extra
+    In the first format, return (version, major, minor, None)
+    Return (version, major, minor, extra)
+    """
+    if minus_as_delimiter:
+        delimiter = "-"
+    else:
+        delimiter = "_"
+    fields = version_string.split(delimiter, 1)
+
+    if len(fields) == 1:
+        extra = None
+    elif len(fields) == 2:
+        extra = fields[1]
+        rc = check_version_extra(log, extra)
+        if rc:
+            log.cl_error("illegal extra part in revision string [%s]",
+                         version_string)
+            return None, None, None, None
+    else:
+        log.cl_error("unexpected revision string [%s]",
+                     version_string)
+        return None, None, None, None
+
+    tuple_string = fields[0]
+    fields = tuple_string.split(".")
+    if len(fields) != 3:
+        log.cl_error("invalid field number [%s] of tuple [%s] in revision "
+                     "string [%s], expected 3",
+                     len(fields), tuple_string, version_string)
+        return None, None, None, None
+
+    try:
+        version = int(fields[0], 10)
+    except ValueError:
+        log.cl_error("none-number version string [%s] in revision string [%s]",
+                     fields[0], version_string)
+        return None, None, None, None
+
+    try:
+        major = int(fields[1], 10)
+    except ValueError:
+        log.cl_error("none-number major string [%s] in revision string [%s]",
+                     fields[1], version_string)
+        return None, None, None, None
+
+    try:
+        minor = int(fields[2], 10)
+    except ValueError:
+        log.cl_error("none-number minor string [%s] in revision string [%s]",
+                     fields[2], version_string)
+        return None, None, None, None
+    return version, major, minor, extra
+
+
+def coral_parse_version_extra(extra):
+    """
+    Parse the extra tag with the format of ${PREFIX}${INDEX}, e.g. tag10
+    ${INDEX} is a decimal number.
+    010 is identical to 10
+    """
+    string_index = 0
+    for string_index in range(len(extra)):
+        if not extra[-string_index - 1].isdigit():
+            break
+        string_index += 1
+    if string_index == 0:
+        return None, None
+
+    prefix = extra[:-string_index]
+    index_str = extra[-string_index:]
+    index_number = int(index_str, 10)
+    return prefix, index_number

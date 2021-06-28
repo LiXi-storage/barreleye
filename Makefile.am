@@ -39,7 +39,7 @@ clean-local:
 	rm -f $(CHECKS)
 	rm -fr ISO
 	rm -f coral-*.iso
-	rm -f coral-*.md5
+	rm -f coral-*_SHA256SUM
 	rm -fr dist
 	rm -fr build
 	rm -f coral-*.tar.bz2
@@ -57,7 +57,7 @@ mrproper: maintainer-clean
 	rm -f Makefile.in aclocal.m4 configure
 	rm -f compile depcomp install-sh missing
 
-BARRELEYE_RPM = build/RPMS/$(target_cpu)/coral-barreleye-$(PACKAGE_VERSION)-$(CORAL_RELEASE).el$(DISTRO_RELEASE)*.$(target_cpu).rpm
+BARRELEYE_RPM = build/RPMS/$(target_cpu)/coral-barreleye-$(PACKAGE_VERSION)-$(CORAL_RELEASE).$(DISTRO_SHORT)*.$(target_cpu).rpm
 
 CORAL_RPMS =
 if ENABLE_BARRELE
@@ -82,17 +82,25 @@ rpms: coral.spec dist
 			$(EXTRA_OPTION) -tb $(distdir).tar.gz \
 		&& echo "RPMs successfully generated in $(build_dir)/RPMS"
 
-coral-$(PACKAGE_VERSION).$(target_cpu).iso: rpms
+coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: rpms
 	rm $(ISO_PATH) -fr
 	rm -f coral-*.iso
-	rm -f coral-*.md5
+	rm -f coral-*_SHA256SUM
 	cp -a $(ISO_CACHE_PATH) $(ISO_PATH)
+	echo -n "version: " > $(ISO_PATH)/VERSION
+	./coral version show >> $(ISO_PATH)/VERSION
+	echo >> $(ISO_PATH)/VERSION
+	echo "distro: $(DISTRO_SHORT)" >> $(ISO_PATH)/VERSION
+	echo >> $(ISO_PATH)/VERSION
+	echo "target_cpu: $(target_cpu)" >> $(ISO_PATH)/VERSION
+	echo >> $(ISO_PATH)/VERSION
 	cp $(CORAL_RPMS) $(PACKAGE_PATH)
 	createrepo $(PACKAGE_PATH)
-	mkisofs -joliet-long -R -o coral-$(PACKAGE_VERSION).$(target_cpu).iso $(ISO_PATH)
+	mkisofs -joliet-long -R -o coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso $(ISO_PATH)
 
-coral-$(PACKAGE_VERSION).$(target_cpu).md5: coral-$(PACKAGE_VERSION).$(target_cpu).iso
-	md5sum coral-$(PACKAGE_VERSION).$(target_cpu).iso \
-		> coral-$(PACKAGE_VERSION).$(target_cpu).md5
+coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso
+	sha256sum coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso \
+		> coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM
 
-iso: coral-$(PACKAGE_VERSION).$(target_cpu).iso coral-$(PACKAGE_VERSION).$(target_cpu).md5
+iso: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso \
+	coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM

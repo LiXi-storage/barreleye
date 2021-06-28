@@ -240,7 +240,6 @@ def print_agents(log, barreleye_instance, agents, status=False,
     Print table of BarreleAgent.
     """
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-    # pylint: disable=too-many-arguments
     if not print_table and len(agents) > 1:
         log.cl_error("failed to print non-table output with multiple "
                      "agents")
@@ -526,7 +525,6 @@ def print_servers(log, barreleye_instance, servers, status=False,
     Print table of BarreleServer.
     """
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-    # pylint: disable=too-many-arguments
     if not print_table and len(servers) > 1:
         log.cl_error("failed to print non-table output with multiple "
                      "servers")
@@ -738,7 +736,7 @@ class BarreleCommand():
         self._bec_log_to_file = debug
         self._bec_iso = iso
         if iso is not None:
-            cmd_general.check_iso_fpath(iso)
+            cmd_general.check_argument_fpath(iso)
         self.cluster._init(config, log, debug, iso)
         self.agent._init(config, log, debug, iso)
         self.server._init(config, log, debug, iso)

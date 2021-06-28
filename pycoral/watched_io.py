@@ -54,7 +54,7 @@ class WatchedIO(io.TextIOWrapper):
             self.wi_io = False
         else:
             self.wi_io = True
-            super(WatchedIO, self).__init__(buffered_io)
+            super().__init__(buffered_io)
         self.wi_func = func
         self.wi_args = args
 
@@ -69,7 +69,7 @@ class WatchedIO(io.TextIOWrapper):
         data = str(data, encoding='utf-8', errors='ignore')
         if self.wi_io:
             try:
-                super(WatchedIO, self).write(data)
+                super().write(data)
             except:
                 logging.error("failed to write data: %s",
                               traceback.format_exc())
@@ -80,14 +80,14 @@ class WatchedIO(io.TextIOWrapper):
         Close
         """
         if self.wi_io:
-            super(WatchedIO, self).close()
+            super().close()
 
     def flush(self):
         """
         Flush
         """
         if self.wi_io:
-            super(WatchedIO, self).flush()
+            super().flush()
 
 
 def log_watcher_debug(args, new_log):

@@ -295,7 +295,6 @@ class CoralLog():
     def __init__(self, name=None, resultsdir=None, console_format=FMT_FULL,
                  condition=None, stdout_color=None, stderr_color=None,
                  remember_records=False):
-        # pylint: disable=too-many-arguments
         self.cl_name = name
         self.cl_result = utils.CommandResult()
         self.cl_resultsdir = resultsdir
@@ -340,7 +339,6 @@ class CoralLog():
         Get a child log
         If overwrite, the existing log will be overwritten
         """
-        # pylint: disable=too-many-arguments
         if self.cl_name is not None:
             name = self.cl_name + "." + name
         return get_log(name, resultsdir=resultsdir,
@@ -446,7 +444,6 @@ class CoralLog():
         """
         Emit a log
         """
-        # pylint: disable=too-many-arguments
         record_args = None
         exc_info = None
         extra = None
@@ -537,7 +534,6 @@ def get_log(name=None, resultsdir=None, console_format=FMT_FULL,
     Get the log.
     If overwrite, the existing log will be overwritten.
     """
-    # pylint: disable=too-many-arguments
     log = CoralLog(name=name, resultsdir=resultsdir,
                    console_format=console_format,
                    condition=condition,

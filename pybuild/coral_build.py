@@ -8,6 +8,7 @@ import filelock
 # Local libs
 from pycoral import ssh_host
 from pycoral import constant
+from pycoral import lustre_version
 from pycoral import install_common
 from pycoral import cmd_general
 from pybuild import build_constant
@@ -376,7 +377,6 @@ def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
     """
     Install the dependency of building Coral
     """
-    # pylint: disable=too-many-arguments
     if not origin_mirror:
         # "epel-release" should have been installed
         command = """sed -e 's!^metalink=!#metalink=!g' \
@@ -416,8 +416,8 @@ def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
                       "wget"]  # Needed by downloading from web
 
     if distro == ssh_host.DISTRO_RHEL7:
-        dependent_rpms += ["python36-pylint",  # Needed for Python codes check
-                           "python-pep8",  # Needed for Python codes check
+        dependent_pips += ["pylint"]  # Needed for Python codes check
+        dependent_rpms += ["python-pep8",  # Needed for Python codes check
                            "python36-psutil"]  # Used by Python codes
     else:
         assert distro == ssh_host.DISTRO_RHEL8
@@ -520,6 +520,32 @@ def sync_shared_build_cache(log, host, private_cache, shared_parent):
     return ret
 
 
+def install_lustre_util_rpm(log, local_host, lustre_dist):
+    """
+    Install Lustre until on local host
+    """
+    log.cl_info("installing Lustre util RPM for building")
+    command = "rpm -qi %s" % lustre_version.RPM_LUSTRE
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status == 0:
+        return 0
+
+    rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_LUSTRE]
+    rpm_fpath = "%s/%s" % (lustre_dist.ldis_lustre_rpm_dir, rpm_name)
+    command = "rpm -ivh %s --nodeps" % rpm_fpath
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
 def build(log, source_dir, workspace,
           cache=constant.CORAL_BUILD_CACHE,
           lustre_rpms_dir=None,
@@ -532,7 +558,7 @@ def build(log, source_dir, workspace,
     """
     Build the Coral ISO.
     """
-    # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
+    # pylint: disable=too-many-locals,too-many-branches
     # pylint: disable=too-many-statements
     if disable_plugin is None:
         disabled_plugins = []
@@ -575,6 +601,7 @@ def build(log, source_dir, workspace,
 
     need_lustre_rpms = False
     need_collectd = False
+    install_lustre = False
     enabled_plugin_str = ""
     for plugin in plugins:
         if enabled_plugin_str == "":
@@ -585,6 +612,8 @@ def build(log, source_dir, workspace,
             need_lustre_rpms = True
         if plugin.cpt_need_collectd:
             need_collectd = True
+        if plugin.cpt_install_lustre:
+            install_lustre = True
 
     type_fname = constant.CORAL_BUILD_CACHE_TYPE_OPEN
     if type_fname == constant.CORAL_BUILD_CACHE_TYPE_OPEN:
@@ -628,7 +657,7 @@ def build(log, source_dir, workspace,
     elif collectd is not None:
         sync_cache_back = False
 
-    if not need_lustre_rpms:
+    if not need_lustre_rpms and not install_lustre:
         if lustre_rpms_dir is not None:
             log.cl_warning("option [--lustre %s] has been ignored since "
                            "no need to have Lustre RPMs",
@@ -724,7 +753,7 @@ def build(log, source_dir, workspace,
         return -1
 
     lustre_distribution = None
-    if need_lustre_rpms:
+    if need_lustre_rpms or install_lustre:
         if lustre_distribution is None:
             log.cl_error("Lustre distribution is needed unexpectedly")
             return -1

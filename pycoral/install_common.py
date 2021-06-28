@@ -229,7 +229,6 @@ def localhost_install_dependency(log, workspace, local_host, iso_dir, missing_rp
     """
     Install the dependent RPMs and pip packages after ISO is synced
     """
-    # pylint: disable=too-many-arguments
     repo_config_fpath = ("%s/%s.repo" % (workspace, name))
     packages_dir = iso_dir + "/" + constant.BUILD_PACKAGES
 
@@ -295,7 +294,6 @@ class CoralInstallationHost():
     def __init__(self, workspace, host, is_local, iso_dir, pip_libs,
                  dependent_rpms, send_fpath_dict, need_backup_fpaths,
                  coral_reinstall=True):
-        # pylint: disable=too-many-arguments
         self.cih_workspace = workspace
         # ISO dir that configured in repo file
         self.cih_iso_dir = iso_dir
@@ -833,7 +831,7 @@ class CoralInstallationCluster():
         :param send_fpath_dict: key is the fpath on localhost, value is the
         fpath on remote host.
         """
-        # pylint: disable=too-many-arguments,too-many-locals
+        # pylint: disable=too-many-locals
         # Prepare the local repo config file
         local_host = self.cic_local_host
         command = ("mkdir -p %s" % (self.cic_workspace))
@@ -1059,8 +1057,8 @@ def command_missing_packages_rhel7():
     try:
         import toml
     except ImportError:
-        list_add(missing_rpms, "python36-toml")
         list_add(missing_rpms, "epel-release")
+        list_add(missing_pips, "toml")
 
     try:
         import psutil
@@ -1148,3 +1146,132 @@ def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
                      host.sh_hostname)
         return -1
     return 0
+
+
+def get_version_from_iso_dir(log, host, iso_dir):
+    """
+    Get Coral version from ISO dir
+    """
+    command = "cat %s/VERSION" % iso_dir
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None, None, None
+
+    version = None
+    distro_short = None
+    target_cpu = None
+    lines = retval.cr_stdout.splitlines()
+    for line in lines:
+        version_string = "version: "
+        if line.startswith(version_string):
+            version = line[len(version_string):]
+        cpu_string = "target_cpu: "
+        if line.startswith(cpu_string):
+            target_cpu = line[len(cpu_string):]
+        distro_string = "distro: "
+        if line.startswith(distro_string):
+            distro_short = line[len(distro_string):]
+    return version, distro_short, target_cpu
+
+
+def get_version_from_iso_file(log, workspace, host, iso_path):
+    """
+    Get Coral version and CPU arch from ISO file
+    """
+    mnt_path = workspace + "/mnt"
+    command = ("mkdir -p %s && mount -o loop %s %s" %
+               (mnt_path, iso_path, mnt_path))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None, None, None
+
+    version, distro_short, target_cpu = \
+        get_version_from_iso_dir(log, host, mnt_path)
+    if version is None:
+        log.cl_error("failed to get version from ISO dir [%s] on host [%s]",
+                     mnt_path, host.sh_hostname)
+
+    command = ("umount %s" % (mnt_path))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None, None, None
+    return version, distro_short, target_cpu
+
+
+def get_version_from_iso_fname(log, fname):
+    """
+    Get Coral version from ISO file name
+    """
+    fname = os.path.basename(fname)
+    suffix = ".iso"
+    if not fname.endswith(suffix):
+        log.cl_error("unexpected ISO fname [%s] without %s suffix",
+                     fname, suffix)
+        return None, None, None
+    remain = fname[:-len(suffix)]
+
+    prefix = "coral-"
+    if not remain.startswith(prefix):
+        log.cl_error("unexpected ISO fname [%s] without %s prefix",
+                     fname, prefix)
+        return None, None, None
+    remain = remain[len(prefix):]
+
+    point = remain.rfind(".")
+    if point < 0:
+        log.cl_error("unexpected ISO fname [%s] without target CPU",
+                     fname)
+        return None, None, None
+
+    if point == len(remain) - 1:
+        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
+                     fname)
+        return None, None, None
+
+    if point == 1:
+        log.cl_error("unexpected ISO fname [%s] with empty distro",
+                     fname)
+        return None, None, None
+    target_cpu = remain[point + 1:]
+
+    remain = remain[:point]
+
+    point = remain.rfind(".")
+    if point < 0:
+        log.cl_error("unexpected ISO fname [%s] without target CPU",
+                     fname)
+        return None, None, None
+
+    if point == len(remain) - 1:
+        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
+                     fname)
+        return None, None, None
+
+    if point == 1:
+        log.cl_error("unexpected ISO fname [%s] with empty distro",
+                     fname)
+        return None, None, None
+    distro_short = remain[point + 1:]
+    version = remain[:point]
+    return version, distro_short, target_cpu

@@ -95,29 +95,23 @@ if [[[ "$DISTRO_NAME" != "rhel" ]]]; then
         AC_MSG_ERROR([$DISTRO_NAME is not a supported distro.])
 fi
 DISTRO_RELEASE=$(echo $DISTRO | awk -F 'rhel-' '{print $2}' | awk -F '.' '{print $1}')
-AC_MSG_RESULT([$DISTRO_RELEASE])
-AC_SUBST(DISTRO_RELEASE)
+DISTRO_SHORT=el$DISTRO_RELEASE
+AC_MSG_RESULT([$DISTRO_SHORT])
+AC_SUBST(DISTRO_SHORT)
 
 # ------- check for target_cpu --------
 AC_SUBST(target_cpu)
 
-# ------- check for python --------
-AC_CHECK_PROGS([PYTHON], [python], [])
-if test "x$PYTHON" = "x"; then
-	AC_MSG_ERROR([Python is needed for tests. Install python please.])
+# ------- check for python3 --------
+AC_CHECK_PROGS([PYTHON3], [python3], [])
+if test "x$PYTHON3" = "x"; then
+	AC_MSG_ERROR([Python3 is needed. Install python3 please.])
 fi
 
 # ------- check for pep8 --------
 AC_CHECK_PROGS([PEP8], [pep8], [])
 if test "x$PEP8" = "x"; then
 	AC_MSG_ERROR([pep8 is needed to check python coding style. Install pep8 please.])
-fi
-
-# ------- check for pylint-3 --------
-AC_CHECK_PROGS([PYLINT], [pylint-3], [])
-if test "x$PYLINT" = "x"; then
-	AC_MSG_ERROR([pylint-3 is needed to check python coding style. Install
-pylint-3 please.])
 fi
 
 # -------- check whether enable zfs support --------

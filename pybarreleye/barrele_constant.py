@@ -67,8 +67,11 @@ BARRELE_JOBSTAT_PATTERN_UNKNOWN = "unknown"
 # The jobstat configured in Lustre is "procname_uid". Some metrics of users
 # will be enabled.
 BARRELE_JOBSTAT_PATTERN_PROCNAME_UID = "procname_uid"
+# The jobid_name needs to be configured as "u%u.g%g".
+BARRELE_JOBSTAT_PATTERN_UID_GID = "uid_gid"
 BARRELE_JOBSTAT_PATTERNS = [BARRELE_JOBSTAT_PATTERN_UNKNOWN,
-                            BARRELE_JOBSTAT_PATTERN_PROCNAME_UID]
+                            BARRELE_JOBSTAT_PATTERN_PROCNAME_UID,
+                            BARRELE_JOBSTAT_PATTERN_UID_GID]
 
 # The Collectd/Influxdb service is active
 BARRELE_AGENT_ACTIVE = "active"

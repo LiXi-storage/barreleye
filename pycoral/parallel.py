@@ -23,7 +23,6 @@ class ParallelThread():
 
     def __init__(self, parallel_execute, thread_index, funct, args,
                  thread_id=None):
-        # pylint: disable=too-many-arguments
         # ParallelExecute this thread belongs to
         self.pt_parallel_execute = parallel_execute
         # Index of this thread in ParallelExecute
@@ -126,7 +125,6 @@ class ParallelExecute():
     # pylint: disable=too-few-public-methods
     def __init__(self, log, workspace, name, main, args_array, thread_ids=None,
                  parallelism=-1):
-        # pylint: disable=too-many-arguments
         # Parant log
         # How many threads will be running in parallel
         self.pe_parallelism = parallelism

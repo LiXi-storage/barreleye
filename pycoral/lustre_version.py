@@ -34,7 +34,7 @@ class LustreVersion():
     """
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, name, rpm_patterns, priority):
-        # pylint: disable=too-few-public-methods,too-many-arguments
+        # pylint: disable=too-few-public-methods
         self.lv_name = name
         # Key: RPM_*, value: regular expression to match the RPM fname.
         self.lv_rpm_pattern_dict = rpm_patterns

@@ -58,7 +58,8 @@ class CoralPluginType():
     # pylint: disable=too-few-public-methods
     def __init__(self, plugin_name,
                  build_dependent_pips=None, is_devel=True,
-                 need_lustre_rpms=False, need_collectd=False):
+                 need_lustre_rpms=False, need_collectd=False,
+                 install_lustre=False):
         # The name of the plugin
         self.cpt_plugin_name = plugin_name
         # Whether the plugin is only for devel
@@ -71,6 +72,8 @@ class CoralPluginType():
             build_dependent_pips = []
         # The pip packages to install before building
         self.cpt_build_dependent_pips = build_dependent_pips
+        # Whether install Lustre library RPM for build
+        self.cpt_install_lustre = install_lustre
 
     def cpt_build_dependent_rpms(self, distro):
         """

@@ -37,7 +37,7 @@ def build(coral_command,
     :param origin_mirror: Whether use origin Yum mirrors. If not use Tsinghua
         mirror for possible speedup. Default: False.
     """
-    # pylint: disable=too-many-arguments,unused-argument,protected-access
+    # pylint: disable=unused-argument,protected-access
     if not isinstance(coral_command._cc_log_to_file, bool):
         print("ERROR: invalid debug option [%s], should be a bool type" %
               (coral_command._cc_log_to_file), file=sys.stderr)

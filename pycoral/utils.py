@@ -121,7 +121,6 @@ class CommandJob():
                  stderr_tee=None, stdin=None, return_stdout=True,
                  return_stderr=True, quit_func=None,
                  flush_tee=False, silent=False):
-        # pylint: disable=too-many-arguments
         self.cj_command = command
         self.cj_result = CommandResult()
         self.cj_timeout = timeout
@@ -155,6 +154,7 @@ class CommandJob():
         """
         Start to run the command
         """
+        # pylint: disable=consider-using-with
         if self.cj_started:
             return -1
 
@@ -342,7 +342,6 @@ def run(command, timeout=None, stdout_tee=None, stderr_tee=None, stdin=None,
     """
     Run a command
     """
-    # pylint: disable=too-many-arguments
     if not isinstance(command, str):
         stderr = "type of command argument is not a basestring"
         return CommandResult(stderr=stderr, exit_status=-1)
@@ -414,7 +413,6 @@ WAIT_CONDITION_QUIT = 8192
 
 
 def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1):
-    # pylint: disable=too-many-arguments
     """
     Wait until the condition_func returns 0
 

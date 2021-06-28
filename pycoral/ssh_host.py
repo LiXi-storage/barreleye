@@ -84,7 +84,7 @@ def scp_remote_escape(filename):
             quotes are NOT added and so should be added at some point by
             the caller.
     """
-    escape_chars = r' !"$&' "'" r'()*,:;<=>?[\]^`{|}'
+    escape_chars = r' !"$&' + "'" + r'()*,:;<=>?[\]^`{|}'
 
     new_name = []
     for char in filename:
@@ -127,7 +127,6 @@ def ssh_run(hostname, command, login_name="root", timeout=None,
     """
     Use ssh to run command on a remote host
     """
-    # pylint: disable=too-many-arguments
     if not isinstance(command, str):
         stderr = "type of command argument is not a basestring"
         return utils.CommandResult(stderr=stderr, exit_status=-1)
@@ -219,7 +218,6 @@ class SSHHost():
 
     def sh_wait_condition(self, log, command, condition_func, args, timeout=90,
                           sleep_interval=1, quiet=False):
-        # pylint: disable=too-many-arguments
         """
         Wait until the condition_func returns 0
         """
@@ -249,7 +247,6 @@ class SSHHost():
                        diff_exit_status=None, diff_stdout=None,
                        diff_stderr=None, timeout=90, sleep_interval=1,
                        quiet=False):
-        # pylint: disable=too-many-arguments
         """
         Wait until the command result on a host changed to expected values
         """
@@ -651,7 +648,6 @@ class SSHHost():
         we should improve to rsync.
         scp has no equivalent to --delete, just drop the entire dest dir
         """
-        # pylint: disable=too-many-arguments
         ret = self.sh_is_localhost(log)
         if ret < 0:
             log.cl_error("failed to check whether host [%s] is local host",
@@ -856,7 +852,7 @@ class SSHHost():
         If remot_host is not none, the file will be sent to that host;
         Otherwise, it will be sent to this host.
         """
-        # pylint: disable=too-many-arguments,too-many-locals
+        # pylint: disable=too-many-locals
         if not self.sh_has_rsync(log):
             log.cl_debug("host [%s] doesnot have rsync, trying to install",
                          self.sh_hostname)
@@ -903,7 +899,6 @@ class SSHHost():
         """
         Run a command on the host
         """
-        # pylint: disable=too-many-arguments
         login_name = self.sh_login_name
         if not silent:
             log.cl_debug("starting [%s] on host [%s]", command,
@@ -937,27 +932,24 @@ class SSHHost():
         """
         Run a command on the host and saving the stdout/stderr to log files
         """
-        # pylint: disable=too-many-arguments
-        stdout_fd = open(stdout_fpath, "wb")
-        stderr_fd = open(stderr_fpath, "wb")
-        message = ("Running command [%s] on host [%s]\n" %
-                   (command, self.sh_hostname))
-        stderr_fd.write(message.encode())
-        # Test could be a little bit time consuming.
-        retval = self.sh_run(log, command,
-                             stdout_tee=stdout_fd,
-                             stderr_tee=stderr_fd,
-                             silent=silent,
-                             timeout=timeout,
-                             stdin=stdin,
-                             quit_func=quit_func,
-                             return_stdout=False,
-                             return_stderr=False)
-        end = ("Returning value [%s] from command [%s] on host [%s]\n" %
-               (retval.cr_exit_status, command, self.sh_hostname))
-        stderr_fd.write(end.encode())
-        stderr_fd.close()
-        stdout_fd.close()
+        with open(stdout_fpath, "wb") as stdout_fd:
+            with open(stderr_fpath, "wb") as stderr_fd:
+                message = ("Running command [%s] on host [%s]\n" %
+                           (command, self.sh_hostname))
+                stderr_fd.write(message.encode())
+                # Test could be a little bit time consuming.
+                retval = self.sh_run(log, command,
+                                     stdout_tee=stdout_fd,
+                                     stderr_tee=stderr_fd,
+                                     silent=silent,
+                                     timeout=timeout,
+                                     stdin=stdin,
+                                     quit_func=quit_func,
+                                     return_stdout=False,
+                                     return_stderr=False)
+                end = ("Returning value [%s] from command [%s] on host [%s]\n" %
+                       (retval.cr_exit_status, command, self.sh_hostname))
+                stderr_fd.write(end.encode())
         return retval
 
     def sh_get_kernel_ver(self, log):
@@ -1058,7 +1050,6 @@ class SSHHost():
         """
         Return the command job on a host
         """
-        # pylint: disable=too-many-arguments
         full_command = ssh_command(self.sh_hostname, command)
         job = utils.CommandJob(full_command, timeout, stdout_tee, stderr_tee,
                                stdin)
@@ -1225,7 +1216,7 @@ class SSHHost():
         """
         Mount file system
         """
-        # pylint: disable=too-many-return-statements,too-many-arguments
+        # pylint: disable=too-many-return-statements
         if check_device:
             retval = self.sh_run(log, "test -b %s" % device)
             if retval.cr_exit_status != 0:
@@ -2407,6 +2398,26 @@ class SSHHost():
             return -1
         return 0
 
+    def sh_service_is_active(self, log, service_name):
+        """
+        If is active, return 1. If inactive, return 0. Return -1 on error.
+        """
+        command = "systemctl is-active %s" % service_name
+        retval = self.sh_run(log, command)
+        # Unknown service means this service might have not been configured
+        if retval.cr_stdout == "unknown\n":
+            return 0
+
+        if retval.cr_stdout == "inactive\n":
+            return 0
+
+        if retval.cr_stdout == "failed\n":
+            return 0
+
+        if retval.cr_stdout in ["active\n", "activating\n"]:
+            return 1
+        return -1
+
     def sh_service_stop(self, log, service_name):
         """
         Stop the service if it is running
@@ -2446,11 +2457,11 @@ class SSHHost():
 
             if retval.cr_stdout == "failed\n":
                 return 0
-            log.cl_error("failed to stop service [%s] after checking it using command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
+            log.cl_error("failed to stop service [%s] on host [%s], "
+                         "command = [%s], ret = [%d], stdout = [%s], stderr = [%s]",
                          service_name,
-                         command,
                          self.sh_hostname,
+                         command,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
@@ -2491,11 +2502,12 @@ class SSHHost():
         if retval.cr_stdout == "active\n":
             return 0
 
-        log.cl_error("failed to start service [%s] after checking it using command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
+        log.cl_error("failed to start service [%s] on host [%s], "
+                     "command = [%s], ret = [%d], stdout = [%s], "
+                     "stderr = [%s]",
                      service_name,
-                     command,
                      self.sh_hostname,
+                     command,
                      retval.cr_exit_status,
                      retval.cr_stdout,
                      retval.cr_stderr)
@@ -2617,7 +2629,6 @@ class SSHHost():
         """
         Create inode with a specifi type
         """
-        # pylint: disable=too-many-arguments
         if inode_type == stat.S_IFREG:
             command = ("touch %s" % (inode_path))
         elif inode_type == stat.S_IFDIR:
@@ -2681,7 +2692,7 @@ class SSHHost():
         """
         Run the command and watching the output
         """
-        # pylint: disable=too-many-arguments,too-many-locals
+        # pylint: disable=too-many-locals
         if not silent:
             log.cl_debug("start to run command [%s] on host [%s]", command,
                          self.sh_hostname)
@@ -2961,7 +2972,6 @@ class SSHHost():
         """
         Set the resource order
         """
-        # pylint: disable=too-many-arguments
         command = ("crm configure order %s %s %s" %
                    (order_id, first, then))
         retval = self.sh_run(log, command)
@@ -3217,7 +3227,6 @@ class SSHHost():
         Fetch the soure codes from Git server. Assuming the dir
         has been inited by git.
         """
-        # pylint: disable=too-many-arguments
         command = ("cd %s && git config remote.origin.url %s && "
                    "git fetch --tags --progress %s "
                    "+refs/heads/*:refs/remotes/origin/* && "
@@ -3242,7 +3251,6 @@ class SSHHost():
         """
         Get the soure codes from Git server.
         """
-        # pylint: disable=too-many-arguments
         command = ("rm -fr %s && mkdir -p %s && git init %s" %
                    (git_dir, git_dir, git_dir))
         retval = self.sh_run(log, command)
@@ -3770,7 +3778,7 @@ class SSHHost():
         If output_fname exists, need to add -O to wget because sometimes the URL
         does not save the download file with expected fname.
         """
-        # pylint: disable=too-many-arguments,too-many-branches
+        # pylint: disable=too-many-branches
         target_dir = os.path.dirname(fpath)
         fname = os.path.basename(fpath)
         url_fname = os.path.basename(url)
@@ -3842,14 +3850,14 @@ class SSHHost():
         return 0
 
 
-def get_local_host(ssh=True):
+def get_local_host(ssh=True, host_type=SSHHost):
     """
     Return local host
     """
     local_hostname = socket.gethostname()
     login_name = getpass.getuser()
-    local_host = SSHHost(local_hostname, local=True, ssh_for_local=ssh,
-                         login_name=login_name)
+    local_host = host_type(local_hostname, local=True, ssh_for_local=ssh,
+                           login_name=login_name)
     return local_host
 
 
@@ -3879,9 +3887,8 @@ def read_file(log, local_host, fpath, max_size=None):
         return None
 
     try:
-        new_file = open(fpath, "r")
-        content = new_file.read()
-        new_file.close()
+        with open(fpath, "r") as new_file:
+            content = new_file.read()
     except:
         log.cl_error("failed to read from file [%s] from host [%s]: %s",
                      fpath, local_host.sh_hostname,
@@ -3935,9 +3942,8 @@ def write_ssh_key(log, workspace, local_host, hostname, content):
         return None
 
     try:
-        fd = open(fpath, "w")
-        fd.write(content)
-        fd.close()
+        with open(fpath, "w") as fd:
+            fd.write(content)
     except:
         log.cl_error("failed to write file [%s] on host [%s]: %s",
                      fpath, local_host.sh_hostname,

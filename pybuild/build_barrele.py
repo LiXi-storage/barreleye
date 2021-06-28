@@ -267,9 +267,9 @@ def get_collectd_version_release(log, host, collectd_src_dir,
     return collectd_version_release
 
 
-def build_collectd_rpms(log, host, packages_dir, collectd_src_dir,
-                        tarball_fpath, distro_number,
-                        target_cpu, collectd_version):
+def build_collectd_rpms(log, host, target_cpu, packages_dir,
+                        collectd_src_dir, tarball_fpath, distro_number,
+                        collectd_version):
     """
     Build Collectd RPMs on a host
     """
@@ -331,8 +331,9 @@ def build_collectd_rpms(log, host, packages_dir, collectd_src_dir,
     return 0
 
 
-def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
-                             collectd_version, collectd_version_release,
+def collectd_build_and_check(log, host, target_cpu, packages_dir,
+                             collectd_src_dir, collectd_version,
+                             collectd_version_release,
                              tarball_fpath, extra_package_fnames):
     """
     Check and build Collectd RPMs
@@ -351,12 +352,6 @@ def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
         distro_number = "8"
     else:
         log.cl_error("build on distro [%s] is not supported yet", distro)
-        return -1
-
-    target_cpu = host.sh_target_cpu(log)
-    if target_cpu is None:
-        log.cl_error("failed to get the target cpu on host [%s]",
-                     host.sh_hostname)
         return -1
 
     ret = check_collectd_rpms_integrity(log, existing_rpm_fnames,
@@ -382,9 +377,9 @@ def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
         log.cl_error("failed to remove old Collectd RPMs")
         return -1
 
-    ret = build_collectd_rpms(log, host, packages_dir, collectd_src_dir,
-                              tarball_fpath, distro_number,
-                              target_cpu, collectd_version)
+    ret = build_collectd_rpms(log, host, target_cpu, packages_dir,
+                              collectd_src_dir, tarball_fpath, distro_number,
+                              collectd_version)
     if ret:
         log.cl_error("failed to build Collectd RPMs from src [%s]",
                      collectd_src_dir)
@@ -419,7 +414,7 @@ def collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
     return 0
 
 
-def build_collectd_tarball(log, workspace, host, packages_dir,
+def build_collectd_tarball(log, workspace, host, target_cpu, packages_dir,
                            tarball_fpath, extra_package_fnames,
                            known_collectd_version=None):
     """
@@ -487,8 +482,9 @@ def build_collectd_tarball(log, workspace, host, packages_dir,
                      "source dir")
         return -1
 
-    ret = collectd_build_and_check(log, host, packages_dir, collectd_src_dir,
-                                   collectd_version, collectd_version_release,
+    ret = collectd_build_and_check(log, host, target_cpu, packages_dir,
+                                   collectd_src_dir, collectd_version,
+                                   collectd_version_release,
                                    tarball_fpath, extra_package_fnames)
     if ret:
         log.cl_error("failed to build and check Collectd RPMs")
@@ -496,8 +492,8 @@ def build_collectd_tarball(log, workspace, host, packages_dir,
     return 0
 
 
-def download_and_build_collectd(log, workspace, host, type_cache, packages_dir,
-                                collectd_url, expected_sha1sum,
+def download_and_build_collectd(log, workspace, host, type_cache, target_cpu,
+                                packages_dir, collectd_url, expected_sha1sum,
                                 extra_package_fnames):
     """
     Download Collectd source code tarball and build
@@ -512,7 +508,7 @@ def download_and_build_collectd(log, workspace, host, type_cache, packages_dir,
         log.cl_error("failed to download Collectd sourcecode tarball")
         return -1
 
-    ret = build_collectd_tarball(log, workspace, host,
+    ret = build_collectd_tarball(log, workspace, host, target_cpu,
                                  packages_dir, tarball_fpath,
                                  extra_package_fnames)
     if ret:
@@ -522,7 +518,7 @@ def download_and_build_collectd(log, workspace, host, type_cache, packages_dir,
     return 0
 
 
-def build_collectd_dir(log, workspace, host, packages_dir,
+def build_collectd_dir(log, workspace, host, target_cpu, packages_dir,
                        origin_collectd_dir, extra_package_fnames):
     """
     Build Collectd from src dir
@@ -603,7 +599,7 @@ def build_collectd_dir(log, workspace, host, packages_dir,
         return -1
 
     collectd_tarball_fpath = collectd_dir + "/" + collectd_tarball_fname
-    ret = build_collectd_tarball(log, workspace, host, packages_dir,
+    ret = build_collectd_tarball(log, workspace, host, target_cpu, packages_dir,
                                  collectd_tarball_fpath, extra_package_fnames,
                                  known_collectd_version=collectd_version)
     if ret:
@@ -613,14 +609,14 @@ def build_collectd_dir(log, workspace, host, packages_dir,
     return 0
 
 
-def build_collectd(log, workspace, host, type_cache, packages_dir, collectd,
-                   extra_package_fnames):
+def build_collectd(log, workspace, host, type_cache, target_cpu, packages_dir,
+                   collectd, extra_package_fnames):
     """
     Build Collectd
     """
     if collectd is None:
         return download_and_build_collectd(log, workspace, host, type_cache,
-                                           packages_dir, COLLECTD_URL,
+                                           target_cpu, packages_dir, COLLECTD_URL,
                                            COLLECTD_SHA1SUM,
                                            extra_package_fnames)
 
@@ -629,7 +625,7 @@ def build_collectd(log, workspace, host, type_cache, packages_dir, collectd,
         if stat.S_ISREG(stat_result.st_mode):
             log.cl_info("building Collectd RPMs from tarball [%s] on host [%s]",
                         collectd, host.sh_hostname)
-            ret = build_collectd_tarball(log, workspace, host,
+            ret = build_collectd_tarball(log, workspace, host, target_cpu,
                                          packages_dir, collectd,
                                          extra_package_fnames)
             if ret:
@@ -639,7 +635,7 @@ def build_collectd(log, workspace, host, type_cache, packages_dir, collectd,
         elif stat.S_ISDIR(stat_result.st_mode):
             log.cl_info("building Collectd RPMs from dir [%s] on host [%s]",
                         collectd, host.sh_hostname)
-            ret = build_collectd_dir(log, workspace, host,
+            ret = build_collectd_dir(log, workspace, host, target_cpu,
                                      packages_dir, collectd,
                                      extra_package_fnames)
             if ret:
@@ -653,7 +649,7 @@ def build_collectd(log, workspace, host, type_cache, packages_dir, collectd,
         return 0
 
     return download_and_build_collectd(log, workspace, host, type_cache,
-                                       packages_dir, collectd, None,
+                                       target_cpu, packages_dir, collectd, None,
                                        extra_package_fnames)
 
 
@@ -675,16 +671,10 @@ def download_influxdb_x86_64(log, host, packages_dir, extra_package_fnames):
     return 0
 
 
-def build_influxdb(log, host, packages_dir, extra_package_fnames):
+def build_influxdb(log, host, target_cpu, packages_dir, extra_package_fnames):
     """
     Build Influxdb
     """
-    target_cpu = host.sh_target_cpu(log)
-    if target_cpu is None:
-        log.cl_error("failed to get the target cpu on host [%s]",
-                     host.sh_hostname)
-        return -1
-
     if target_cpu == "x86_64":
         rc = download_influxdb_x86_64(log, host, packages_dir,
                                       extra_package_fnames)
@@ -697,16 +687,10 @@ def build_influxdb(log, host, packages_dir, extra_package_fnames):
     return 0
 
 
-def build_grafana(log, host, packages_dir, extra_package_fnames):
+def build_grafana(log, host, target_cpu, packages_dir, extra_package_fnames):
     """
     Build Grafana
     """
-    target_cpu = host.sh_target_cpu(log)
-    if target_cpu is None:
-        log.cl_error("failed to get the target cpu on host [%s]",
-                     host.sh_hostname)
-        return -1
-
     if target_cpu == "x86_64":
         url = GRAFANA_RPM_URL_X86_64
         expected_sha1sum = GRAFANA_RPM_SHA1SUM_X86_64
@@ -830,14 +814,14 @@ def build_grafana_plugins(log, host, type_cache, iso_cache, extra_iso_fnames):
     return 0
 
 
-def build_barreleye(log, workspace, host, type_cache, iso_cache, packages_dir,
-                    collectd, extra_iso_fnames, extra_package_fnames,
-                    extra_rpm_names):
+def build_barreleye(log, workspace, host, type_cache, target_cpu, iso_cache,
+                    packages_dir, collectd, extra_iso_fnames,
+                    extra_package_fnames, extra_rpm_names):
     """
     Build barreleye
     """
-    rc = build_collectd(log, workspace, host, type_cache, packages_dir,
-                        collectd, extra_package_fnames)
+    rc = build_collectd(log, workspace, host, type_cache, target_cpu,
+                        packages_dir, collectd, extra_package_fnames)
     if rc:
         log.cl_error("failed to build Collectd RPMs")
         return -1
@@ -848,12 +832,13 @@ def build_barreleye(log, workspace, host, type_cache, iso_cache, packages_dir,
         log.cl_error("failed to download Grafana")
         return -1
 
-    rc = build_grafana(log, host, packages_dir, extra_package_fnames)
+    rc = build_grafana(log, host, target_cpu, packages_dir, extra_package_fnames)
     if rc:
         log.cl_error("failed to download Grafana")
         return -1
 
-    rc = build_influxdb(log, host, packages_dir, extra_package_fnames)
+    rc = build_influxdb(log, host, target_cpu, packages_dir,
+                        extra_package_fnames)
     if rc:
         log.cl_error("failed to download Influxdb")
         return -1
@@ -868,10 +853,10 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
     """
     # pylint: disable=too-few-public-methods
     def __init__(self):
-        super(CoralBarrelePlugin, self).__init__("barrele",
-                                                 BARRELEYE_BUILD_DEPENDENT_PIPS,
-                                                 is_devel=False,
-                                                 need_collectd=True)
+        super().__init__("barrele",
+                         BARRELEYE_BUILD_DEPENDENT_PIPS,
+                         is_devel=False,
+                         need_collectd=True)
 
     def cpt_build_dependent_rpms(self, distro):
         """
@@ -887,7 +872,7 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
         """
         # pylint: disable=unused-argument,no-self-use
         ret = build_barreleye(log, workspace, local_host, type_cache,
-                              iso_cache, packages_dir, collectd,
+                              target_cpu, iso_cache, packages_dir, collectd,
                               extra_iso_fnames, extra_package_fnames,
                               extra_rpm_names)
         if ret:

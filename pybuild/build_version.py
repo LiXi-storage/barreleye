@@ -18,61 +18,6 @@ CORAL_VERSION_FPATH = "version"
 VERSION_EXTRA_GIT_DIRTY = "-dirty"
 
 
-def coral_parse_version(log, version_string):
-    """
-    Two possible version formats:
-        version.major.minor
-        version.major.minor-extra
-    In the first format, return (version, major, minor, None)
-    Return (version, major, minor, extra)
-    """
-    fields = version_string.split("-", 1)
-
-    if len(fields) == 1:
-        extra = None
-    elif len(fields) == 2:
-        extra = fields[1]
-        rc = check_version_extra(log, extra)
-        if rc:
-            log.cl_error("illegal extra part in revision string [%s]",
-                         version_string)
-            return None, None, None, None
-    else:
-        log.cl_error("unexpected revision string [%s]",
-                     version_string)
-        return None, None, None, None
-
-    tuple_string = fields[0]
-    fields = tuple_string.split(".")
-    if len(fields) != 3:
-        log.cl_error("invalid field number [%s] of tuple [%s] in revision "
-                     "string [%s], expected 3",
-                     len(fields), tuple_string, version_string)
-        return None, None, None, None
-
-    try:
-        version = int(fields[0], 10)
-    except ValueError:
-        log.cl_error("none-number version string [%s] in revision string [%s]",
-                     fields[0], version_string)
-        return None, None, None, None
-
-    try:
-        major = int(fields[1], 10)
-    except ValueError:
-        log.cl_error("none-number major string [%s] in revision string [%s]",
-                     fields[1], version_string)
-        return None, None, None, None
-
-    try:
-        minor = int(fields[2], 10)
-    except ValueError:
-        log.cl_error("none-number minor string [%s] in revision string [%s]",
-                     fields[2], version_string)
-        return None, None, None, None
-    return version, major, minor, extra
-
-
 def coral_uniformed_version(version):
     """
     Char '-' is illegal for RPM. Replace it to "_". So
@@ -131,7 +76,8 @@ def coral_version_from_git(log, local_host, source_dir):
 
     git_version_line = lines[0]
     git_version, git_major, git_minor, git_extra = \
-        coral_parse_version(log, git_version_line)
+        cmd_general.coral_parse_version(log, git_version_line,
+                                        minus_as_delimiter=True)
     if git_version is None:
         log.cl_error("invalid revision [%s] got from command [%s]",
                      git_version_line, command)
@@ -200,7 +146,9 @@ def coral_get_version(log, source_dir):
                      version_fpath)
         return None, None, None, None
 
-    version, major, minor, extra = coral_parse_version(log, version_line)
+    version, major, minor, extra = \
+        cmd_general.coral_parse_version(log, version_line,
+                                        minus_as_delimiter=True)
     if version is None:
         log.cl_error("invalid version [%s] in file [%s]",
                      version_line, version_fpath)
@@ -462,26 +410,6 @@ def git_tree_is_clean(log, local_host, source_dir):
     return 0
 
 
-def check_version_extra(log, extra):
-    """
-    Allowed characters: [0-9] [a-x] [A-X], "_", "-"
-    Not allowed: ".", space
-    """
-    if len(extra) == 0:
-        log.cl_error("illegal empty extra part of revision")
-        return -1
-
-    for character in extra:
-        if character.isalnum():
-            continue
-        if character in ["_", "-"]:
-            continue
-        log.cl_error("illegal character [%s] in extra part [%s] of revision",
-                     character, extra)
-        return -1
-    return 0
-
-
 def _update_version(log, workspace, source_dir, add_version=False,
                     add_major=False, add_minor=False,
                     new_extra=None):
@@ -508,7 +436,7 @@ def _update_version(log, workspace, source_dir, add_version=False,
     if new_extra is not None:
         changing = True
         if len(new_extra) != 0:
-            rc = check_version_extra(log, new_extra)
+            rc = cmd_general.check_version_extra(log, new_extra)
             if rc:
                 log.cl_error("extra part [%s] of reviesion is illegal",
                              new_extra)

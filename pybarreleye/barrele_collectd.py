@@ -348,7 +348,7 @@ PostCacheChain "PostCache"
     def cdc_plugin_lustre(self, log, version, enable_lustre_oss=False,
                           enable_lustre_mds=False, enable_lustre_client=False,
                           enable_lustre_exp_ost=False, enable_lustre_exp_mdt=False):
-        # pylint: disable=too-many-arguments,too-many-branches,too-many-statements
+        # pylint: disable=too-many-branches,too-many-statements
         """
         Config the Lustre plugin
         """
@@ -618,7 +618,7 @@ PostCacheChain "PostCache"
     <ItemType>
         Type "ost_jobstats"
         <ExtendedParse>
-            # Parse the field job_id
+            # Parse the field job_id when jobid is configured to "procname_uid".
             Field "job_id"
             # Match the pattern
             Pattern "(.+)[.]([[:digit:]]+)"
@@ -634,9 +634,32 @@ PostCacheChain "PostCache"
         TsdbTags "procname=${extendfield:procname} uid=${extendfield:uid}"
     </ItemType>
 """
+            elif (self.cdc_jobstat_pattern ==
+                  barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID):
+                config += """
+    <ItemType>
+        Type "ost_jobstats"
+        <ExtendedParse>
+            # Parse the field job_id when jobid_name is configured as "u%u.g%g".
+            Field "job_id"
+            # Match the pattern
+            Pattern "u([[:digit:]]+)[.]g([[:digit:]]+)"
+            <ExtendedField>
+                Index 1
+                Name uid
+            </ExtendedField>
+            <ExtendedField>
+                Index 2
+                Name gid
+            </ExtendedField>
+        </ExtendedParse>
+        TsdbTags "uid=${extendfield:uid} gid=${extendfield:gid}"
+    </ItemType>
+"""
             elif (self.cdc_jobstat_pattern !=
                   barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
-                log.cl_error("unknown jobstat pattern [%s]",
+                log.cl_error("unknown jobstat pattern [%s] when configuring "
+                             "job ID parser for OST",
                              self.cdc_jobstat_pattern)
                 return -1
         if enable_lustre_exp_ost:
@@ -866,7 +889,7 @@ PostCacheChain "PostCache"
     <ItemType>
         Type "mdt_jobstats"
         <ExtendedParse>
-            # Parse the field job_id
+            # Parse the field job_id when jobid is configured to "procname_uid".
             Field "job_id"
             # Match the pattern
             Pattern "(.+)[.]([[:digit:]]+)"
@@ -882,9 +905,32 @@ PostCacheChain "PostCache"
         TsdbTags "procname=${extendfield:procname} uid=${extendfield:uid}"
     </ItemType>
 """
+            elif (self.cdc_jobstat_pattern ==
+                  barrele_constant.BARRELE_JOBSTAT_PATTERN_UID_GID):
+                config += """
+    <ItemType>
+        Type "mdt_jobstats"
+        <ExtendedParse>
+            # Parse the field job_id when jobid_name is configured as "u%u.g%g".
+            Field "job_id"
+            # Match the pattern
+            Pattern "u([[:digit:]]+)[.]g([[:digit:]]+)"
+            <ExtendedField>
+                Index 1
+                Name uid
+            </ExtendedField>
+            <ExtendedField>
+                Index 2
+                Name gid
+            </ExtendedField>
+        </ExtendedParse>
+        TsdbTags "uid=${extendfield:uid} gid=${extendfield:gid} projid=${extendfield:projid}"
+    </ItemType>
+"""
             elif (self.cdc_jobstat_pattern !=
                   barrele_constant.BARRELE_JOBSTAT_PATTERN_UNKNOWN):
-                log.cl_error("unknown jobstat pattern [%s]",
+                log.cl_error("unknown jobstat pattern [%s] when configuring "
+                             "job ID parser for MDT",
                              self.cdc_jobstat_pattern)
                 return -1
 
