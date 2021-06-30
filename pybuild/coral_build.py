@@ -19,10 +19,10 @@ from pybuild import build_doc
 
 # The url of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_SHA1SUM
-PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/releases/download/v4.2/PyInstaller-4.2.tar.gz"
+PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/releases/download/v4.3/pyinstaller-4.3.tar.gz"
 # The sha1sum of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_URL
-PYINSTALLER_TARBALL_SHA1SUM = "bac8d46737876468d7be607a44b90debd60422b5"
+PYINSTALLER_TARBALL_SHA1SUM = "972f24ef11cf69875daa2ebd4804c5f505c0fec8"
 # The url of pdsh tarball. Need to update together with
 # PDSH_TARBALL_SHA1SUM
 PDSH_TARBALL_URL = "https://github.com/chaos/pdsh/releases/download/pdsh-2.34/pdsh-2.34.tar.gz"

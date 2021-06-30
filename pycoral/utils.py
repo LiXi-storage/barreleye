@@ -154,7 +154,9 @@ class CommandJob():
         """
         Start to run the command
         """
-        # pylint: disable=consider-using-with
+        # RHEL8 build would fail without bad-option-value since it does not
+        # understand consider-using-with.
+        # pylint: disable=bad-option-value,consider-using-with
         if self.cj_started:
             return -1
 
