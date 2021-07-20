@@ -27,7 +27,9 @@ def read_one_line(filename):
     """
     Open file and read one line
     """
-    return open(filename, 'r').readline().rstrip('\n')
+    with open(filename, 'r') as fd:
+        line = fd.readline().rstrip('\n')
+    return line
 
 
 def pid_is_alive(pid):

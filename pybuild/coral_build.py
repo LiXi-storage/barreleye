@@ -372,27 +372,37 @@ def install_pyinstaller(log, host, type_cache):
     return 0
 
 
-def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
-                       plugins, pip_dir, origin_mirror=False):
+def prepare_install_modulemd_tools(log, host):
+    """
+    modulemd-tools is needed as tools of modulemd YAML files for YUM
+    repository, especially repo2module.
+    """
+    command = 'dnf copr enable frostyx/modulemd-tools-epel -y'
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None
+
+    return ["modulemd-tools"]
+
+
+def install_build_dependency(log, workspace, host, distro, target_cpu,
+                             type_cache, plugins, pip_dir,
+                             tsinghua_mirror=False):
     """
     Install the dependency of building Coral
     """
-    if not origin_mirror:
-        # "epel-release" should have been installed
-        command = """sed -e 's!^metalink=!#metalink=!g' \
--e 's!^#baseurl=!baseurl=!g' \
--e 's!//download\.fedoraproject\.org/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
--e 's!http://mirrors\.tuna!https://mirrors.tuna!g' \
--i /etc/yum.repos.d/epel.repo /etc/yum.repos.d/epel-testing.repo"""
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+    # pylint: disable=too-many-locals
+    if tsinghua_mirror:
+        ret = install_common.yum_replace_to_tsinghua(log, host)
+        if ret:
+            log.cl_error("failed to replace YUM mirrors to Tsinghua University")
             return -1
 
     command = 'yum -y groupinstall "Development Tools"'
@@ -425,6 +435,13 @@ def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
                            "python3-psutil"]  # Used by Python codes
         dependent_pips += ["pep8"]  # Needed for Python codes check
 
+        rpms = prepare_install_modulemd_tools(log, host)
+        if rpms is None:
+            log.cl_error("failed to install modulemd-tools on host [%s]",
+                         host.sh_hostname)
+            return -1
+        dependent_rpms += rpms
+
     # We need all depdendency for all plugins since no matter they
     # are needed or not, the Python codes will be checked, and the Python
     # codes might depend on the RPMs.
@@ -434,10 +451,11 @@ def install_dependency(log, workspace, host, distro, target_cpu, type_cache,
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
                                                  dependent_pips,
-                                                 pip_dir=pip_dir)
+                                                 pip_dir,
+                                                 tsinghua_mirror=tsinghua_mirror)
     if ret:
-        log.cl_error("failed to install missing packages on host [%s]",
-                     host.sh_hostname)
+        log.cl_error("failed to install missing packages on host [%s] "
+                     "from Internet", host.sh_hostname)
         return -1
 
     for plugin in plugins:
@@ -554,7 +572,7 @@ def build(log, source_dir, workspace,
           enable_zfs=False,
           enable_devel=False,
           disable_plugin=None,
-          origin_mirror=False):
+          tsinghua_mirror=False):
     """
     Build the Coral ISO.
     """
@@ -696,9 +714,10 @@ def build(log, source_dir, workspace,
                      local_host.sh_hostname)
         return -1
 
-    ret = install_dependency(log, workspace, local_host, distro, target_cpu,
-                             type_cache, plugins, build_pip_dir,
-                             origin_mirror=origin_mirror)
+    ret = install_build_dependency(log, workspace, local_host, distro,
+                                   target_cpu, type_cache, plugins,
+                                   build_pip_dir,
+                                   tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install dependency for building")
         return -1
@@ -747,7 +766,8 @@ def build(log, source_dir, workspace,
         return -1
 
     ret = install_common.download_pip3_packages(log, local_host, pip_dir,
-                                                constant.CORAL_DEPENDENT_PIPS)
+                                                constant.CORAL_DEPENDENT_PIPS,
+                                                tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to download pip3 packages")
         return -1

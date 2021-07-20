@@ -170,6 +170,8 @@ class SSHHost():
         self.sh_ssh_for_local = ssh_for_local
         # The login name to user for ssh
         self.sh_login_name = login_name
+        # The hostname got from "hostname" commnad
+        self.sh_real_hostname = None
 
     def sh_is_up(self, log, timeout=60):
         """
@@ -895,10 +897,12 @@ class SSHHost():
     def sh_run(self, log, command, silent=False,
                timeout=LONGEST_SIMPLE_COMMAND_TIME, stdout_tee=None,
                stderr_tee=None, stdin=None, return_stdout=True,
-               return_stderr=True, quit_func=None, flush_tee=False):
+               return_stderr=True, quit_func=None, flush_tee=False,
+               checking_hostname=False):
         """
         Run a command on the host
         """
+        # pylint: disable=too-many-locals
         login_name = self.sh_login_name
         if not silent:
             log.cl_debug("starting [%s] on host [%s]", command,
@@ -923,6 +927,15 @@ class SSHHost():
                          command, self.sh_hostname, ret.cr_exit_status,
                          ret.cr_stdout,
                          ret.cr_stderr)
+        if not checking_hostname and self.sh_real_hostname is None:
+            retval = self.sh_run(log, "hostname", checking_hostname=True)
+            if retval.cr_exit_status == 0:
+                self.sh_real_hostname = retval.cr_stdout.strip()
+                if self.sh_real_hostname != self.sh_hostname:
+                    log.cl_warning("the real hostname of host [%s] is [%s], "
+                                   "please corret the config to avoid "
+                                   "unexpected error",
+                                   self.sh_hostname, self.sh_real_hostname)
         return ret
 
     def sh_run_with_logs(self, log, command, stdout_fpath, stderr_fpath,
@@ -3059,30 +3072,32 @@ class SSHHost():
         fnames = retval.cr_stdout.split()
         return fnames
 
-    def sh_install_pip3_packages(self, log, pip_packages, pip_dir=None,
-                                 quiet=False):
+    def sh_install_pip3_packages(self, log, pip_packages, pip_dir,
+                                 quiet=False, tsinghua_mirror=False):
         """
         Install pip3 packages on a host
         """
+        if len(pip_packages) == 0:
+            return 0
+        command = "pip3 install"
+        if pip_dir is not None:
+            command += " --no-index --find-links %s" % pip_dir
+        elif tsinghua_mirror:
+            command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
         for pip_package in pip_packages:
-            if pip_dir is None:
-                command = ("pip3 install %s" %
-                           (pip_package))
-            else:
-                command = ("pip3 install --no-index --find-links %s %s" %
-                           (pip_dir, pip_package))
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status:
-                if not quiet:
-                    log.cl_error("failed to run command [%s] on host [%s], "
-                                 "ret = [%d], stdout = [%s], stderr = [%s]",
-                                 command,
-                                 self.sh_hostname,
-                                 retval.cr_exit_status,
-                                 retval.cr_stdout,
-                                 retval.cr_stderr)
-                return -1
+            command += " " + pip_package
 
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            if not quiet:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+            return -1
         return 0
 
     def sh_show_pip3_packages(self, log, pip_package):

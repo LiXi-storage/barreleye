@@ -44,8 +44,8 @@ clean-local:
 	rm -fr build
 	rm -f coral-*.tar.bz2
 	rm -f coral-*.tar.gz
-	for exec in $(EXECS); do \
-		rm -f $$exec.spec; \
+	for exe in $(EXES); do \
+		rm -f $$exe.spec; \
 	done
 	rm -fr coral_build_*
 
@@ -67,12 +67,17 @@ else
 rpmbuild_opt += --without barrele
 endif
 
-EXECS = barrele
+EXES = barrele
 
-exes:
-	for exec in $(EXECS); do \
-		PYTHONPATH=$(PIP3_PACKAGE_PATH) pyinstaller -F $$exec --clean; \
-	done
+PYINSTALLER_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) pyinstaller -F --clean
+
+dist/barrele:
+	mkdir -p dist
+	$(PYINSTALLER_CMD) barrele
+
+EXE_BINS = $(addprefix dist/, $(EXES)) 
+
+exes: $(EXE_BINS)
 
 EXTRA_OPTION =
 rpms: coral.spec dist
@@ -87,15 +92,19 @@ coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: rpms
 	rm -f coral-*.iso
 	rm -f coral-*_SHA256SUM
 	cp -a $(ISO_CACHE_PATH) $(ISO_PATH)
-	echo -n "version: " > $(ISO_PATH)/VERSION
-	./coral version show >> $(ISO_PATH)/VERSION
-	echo >> $(ISO_PATH)/VERSION
-	echo "distro: $(DISTRO_SHORT)" >> $(ISO_PATH)/VERSION
-	echo >> $(ISO_PATH)/VERSION
-	echo "target_cpu: $(target_cpu)" >> $(ISO_PATH)/VERSION
-	echo >> $(ISO_PATH)/VERSION
+	echo -n "release_name: " > $(ISO_PATH)/VERSION.yaml
+	./coral version show >> $(ISO_PATH)/VERSION.yaml
+	echo >> $(ISO_PATH)/VERSION.yaml
+	echo "distro_short: $(DISTRO_SHORT)" >> $(ISO_PATH)/VERSION.yaml
+	echo "target_cpu: $(target_cpu)" >> $(ISO_PATH)/VERSION.yaml
+	echo -n "release_date: " >> $(ISO_PATH)/VERSION.yaml
+	date +%s >> $(ISO_PATH)/VERSION.yaml
 	cp $(CORAL_RPMS) $(PACKAGE_PATH)
 	createrepo $(PACKAGE_PATH)
+	@if [ "$(DISTRO_SHORT)" = "el8" ]; then \
+		repo2module -s stable $(PACKAGE_PATH) $(PACKAGE_PATH)/modules.yaml; \
+		modifyrepo --mdtype=modules $(PACKAGE_PATH)/modules.yaml $(PACKAGE_PATH)/repodata; \
+	fi
 	mkisofs -joliet-long -R -o coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso $(ISO_PATH)
 
 coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso

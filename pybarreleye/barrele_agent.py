@@ -75,7 +75,7 @@ class BarreleAgent():
             return -1
 
         distro = self.bea_host.sh_distro(log)
-        if distro != ssh_host.DISTRO_RHEL7:
+        if distro not in [ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8]:
             log.cl_error("host [%s] has unsupported distro [%s]",
                          self.bea_host.sh_hostname, distro)
             return -1
@@ -148,10 +148,10 @@ class BarreleAgent():
                                                                    rpm_fnames,
                                                                    skip_kernel=True)
         if version is None:
-            log.cl_info("failed to match Lustre version according to RPM "
-                        "names on host [%s], using default [%s]",
-                        self.bea_host.sh_hostname,
-                        lustre_fallback_version.lv_name)
+            log.cl_warning("failed to match Lustre version according to RPM "
+                           "names on host [%s], using default [%s]",
+                           self.bea_host.sh_hostname,
+                           lustre_fallback_version.lv_name)
             self.bea_lustre_version = lustre_fallback_version
         else:
             log.cl_info("detected Lustre version [%s] on host [%s]",

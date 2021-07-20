@@ -197,13 +197,13 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
     return ret
 
 
-def localhost_install_pip3_packages(log, local_host, pip_packages,
-                                    pip_dir=None, quiet=False):
+def install_pip3_packages_from_cache(log, local_host, pip_packages,
+                                     pip_dir, quiet=False):
     """
     Install pip3 packages on local host and make sure it can be imported later.
     """
     ret = local_host.sh_install_pip3_packages(log, pip_packages,
-                                              pip_dir=pip_dir, quiet=quiet)
+                                              pip_dir, quiet=quiet)
     if ret:
         if not quiet:
             log.cl_error("failed to install pip3 packages %s in dir "
@@ -224,8 +224,8 @@ def localhost_install_pip3_packages(log, local_host, pip_packages,
     return 0
 
 
-def localhost_install_dependency(log, workspace, local_host, iso_dir, missing_rpms,
-                                 missing_pips, name):
+def install_dependency_from_iso(log, workspace, local_host, iso_dir,
+                                missing_rpms, missing_pips, name):
     """
     Install the dependent RPMs and pip packages after ISO is synced
     """
@@ -252,8 +252,8 @@ def localhost_install_dependency(log, workspace, local_host, iso_dir, missing_rp
         return -1
 
     pip_dir = iso_dir + "/" + constant.BUILD_PIP
-    ret = localhost_install_pip3_packages(log, local_host, missing_pips,
-                                          pip_dir=pip_dir)
+    ret = install_pip3_packages_from_cache(log, local_host, missing_pips,
+                                           pip_dir)
     if ret:
         log.cl_error("failed to install missing pip packages %s in dir "
                      "[%s] on localhost [%s]",
@@ -293,7 +293,7 @@ class CoralInstallationHost():
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, workspace, host, is_local, iso_dir, pip_libs,
                  dependent_rpms, send_fpath_dict, need_backup_fpaths,
-                 coral_reinstall=True):
+                 coral_reinstall=True, tsinghua_mirror=False):
         self.cih_workspace = workspace
         # ISO dir that configured in repo file
         self.cih_iso_dir = iso_dir
@@ -324,6 +324,8 @@ class CoralInstallationHost():
         #
         # Note this list will be shrinked when services are up running.
         self.cih_preserve_services = []
+        # Whether to use YUM and pip mirror from Tsinghua University
+        self.cih_tsinghua_mirror = tsinghua_mirror
 
     def _cih_send_iso_dir(self, log):
         """
@@ -645,7 +647,7 @@ class CoralInstallationHost():
             log.cl_error("failed to get distro of host [%s]",
                          hostname)
             return -1
-        if distro not in [ssh_host.DISTRO_RHEL7]:
+        if distro not in [ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8]:
             log.cl_error("unsupported distro [%s] of host [%s]",
                          distro, hostname)
             return -1
@@ -705,6 +707,14 @@ class CoralInstallationHost():
             for fpath in need_backup_fpaths:
                 self._cih_backup_file(log, fpath)
 
+        if self.cih_tsinghua_mirror:
+            ret = yum_replace_to_tsinghua(log, host)
+            if ret:
+                log.cl_error("failed to replace YUM mirrors to Tsinghua "
+                             "University on host [%s]",
+                             hostname)
+                return -1
+
         ret = yum_repo_install(log, host, repo_config_fpath,
                                dependent_rpms)
         if ret:
@@ -713,7 +723,7 @@ class CoralInstallationHost():
             return -1
 
         ret = host.sh_install_pip3_packages(log, pip_libs,
-                                            pip_dir=self.cih_pip_dir)
+                                            self.cih_pip_dir)
         if ret:
             log.cl_error("failed to install missing pip packages %s in "
                          "dir [%s] on host [%s]",
@@ -810,7 +820,8 @@ class CoralInstallationCluster():
 
     def cic_add_hosts(self, hosts, pip_libs, dependent_rpms,
                       send_fpath_dict, need_backup_fpaths,
-                      coral_reinstall=True):
+                      coral_reinstall=True,
+                      tsinghua_mirror=False):
         """
         Add installation host.
         """
@@ -822,7 +833,8 @@ class CoralInstallationCluster():
                                                       pip_libs, dependent_rpms,
                                                       send_fpath_dict,
                                                       need_backup_fpaths,
-                                                      coral_reinstall=coral_reinstall)
+                                                      coral_reinstall=coral_reinstall,
+                                                      tsinghua_mirror=tsinghua_mirror)
             self.cic_installation_hosts.append(installation_host)
 
     def cic_install(self, log, parallelism=10):
@@ -872,10 +884,18 @@ class CoralInstallationCluster():
         return 0
 
 
-def yum_install_rpm_from_internet(log, host, rpms):
+def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
     """
     Check whether a RPM installed or not. If not, use yum to install
     """
+    # pylint: disable=too-many-branches
+    if tsinghua_mirror:
+        ret = yum_replace_to_tsinghua(log, host)
+        if ret:
+            log.cl_error("failed to replace YUM mirrors to Tsinghua "
+                         "University on host [%s]", host.sh_hostname)
+            return -1
+
     missing_rpms = []
     for rpm in rpms:
         ret = host.sh_rpm_query(log, rpm)
@@ -930,36 +950,90 @@ def yum_install_rpm_from_internet(log, host, rpms):
                          new_missing_rpms)
             return -1
         if "epel-release" in missing_rpms:
-            ret = yum_install_rpm_from_internet(log, host, new_missing_rpms)
+            # Replace the yum too if installed epel-release. So pass down
+            # tsinghua_yum.
+            ret = yum_install_rpm_from_internet(log, host, new_missing_rpms,
+                                                tsinghua_mirror=tsinghua_mirror)
             return ret
     return 0
 
 
-def bootstrap_from_internet(log, host, rpms, pip_packages, pip_dir=None):
+def yum_replace_to_tsinghua(log, host):
+    """
+    Replace the YUM to Tsinghua University
+    """
+    log.cl_info("replaceing CentOS and epel YUM to use mirrors from "
+                "Tsinghua University")
+    config_fpath = "/etc/yum.repos.d/epel.repo"
+    ret = host.sh_path_exists(log, config_fpath)
+    if ret < 0:
+        log.cl_error("failed to check whether file [%s] exists on host [%s]",
+                     config_fpath, host.sh_hostname)
+        return -1
+    if ret:
+        command = """sed -e 's!^metalink=!#metalink=!g' \
+    -e 's!^#baseurl=!baseurl=!g' \
+    -e 's!//download\.fedoraproject\.org/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
+    -e 's!http://mirrors\.tuna!https://mirrors.tuna!g' \
+    -i /etc/yum.repos.d/epel*.repo"""
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+    # Centos-base should have been installed
+    command = """sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+-e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' \
+-i.bak \
+/etc/yum.repos.d/CentOS-*.repo
+"""
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def bootstrap_from_internet(log, host, rpms, pip_packages, pip_dir,
+                            tsinghua_mirror=False):
     """
     Install the dependent RPMs and pip packages from Internet
     """
-    ret = yum_install_rpm_from_internet(log, host, rpms)
+    ret = yum_install_rpm_from_internet(log, host, rpms,
+                                        tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install missing RPMs on host [%s]",
                      host.sh_hostname)
         return -1
 
     if pip_dir is not None:
-        ret = localhost_install_pip3_packages(log, host, pip_packages,
-                                              pip_dir=pip_dir, quiet=True)
+        ret = install_pip3_packages_from_cache(log, host, pip_packages,
+                                               pip_dir, quiet=True)
         if ret == 0:
             return 0
 
         # Download if failed to install from cache
-        ret = download_pip3_packages(log, host, pip_dir, pip_packages)
+        ret = download_pip3_packages(log, host, pip_dir, pip_packages,
+                                     tsinghua_mirror=tsinghua_mirror)
         if ret:
             log.cl_error("failed to download pip packages on host [%s]",
                          host.sh_hostname)
             return -1
 
-    ret = localhost_install_pip3_packages(log, host, pip_packages,
-                                          pip_dir=pip_dir)
+    ret = install_pip3_packages_from_cache(log, host, pip_packages,
+                                           pip_dir)
     if ret:
         log.cl_error("failed to install pip3 packages %s on "
                      "host [%s]",
@@ -1090,20 +1164,28 @@ def command_missing_packages(distro):
     return None, None
 
 
-def download_pip3_packages(log, host, pip_dir, pip_packages):
+def download_pip3_packages(log, host, pip_dir, pip_packages,
+                           tsinghua_mirror=False):
     """
     Download pip3 packages
     """
     if len(pip_packages) == 0:
         return 0
-    log.cl_info("downloading pip3 packages %s to dir [%s] on host [%s]",
-                pip_packages, pip_dir, host.sh_hostname)
-    ret = yum_install_rpm_from_internet(log, host, ["python3-pip"])
+    if tsinghua_mirror:
+        message = " from Tsinghua University mirror"
+    else:
+        message = ""
+    log.cl_info("downloading pip3 packages %s to dir [%s] on host [%s]%s",
+                pip_packages, pip_dir, host.sh_hostname, message)
+    ret = yum_install_rpm_from_internet(log, host, ["python3-pip"],
+                                        tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install [python3-pip] RPM")
         return -1
 
     command = ("mkdir -p %s && cd %s && pip3 download" % (pip_dir, pip_dir))
+    if tsinghua_mirror:
+        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
     for pip_package in pip_packages:
         command += " " + pip_package
     retval = host.sh_run(log, command)
@@ -1120,7 +1202,7 @@ def download_pip3_packages(log, host, pip_dir, pip_packages):
 
 
 def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
-                             lazy_prepare=True):
+                             lazy_prepare=True, tsinghua_mirror=False):
     """
     Install Lustre and Coral packages on a host
     """
@@ -1132,7 +1214,8 @@ def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
                                   constant.CORAL_DEPENDENT_RPMS,
                                   send_fpath_dict,
                                   need_backup_fpaths,
-                                  coral_reinstall=True)
+                                  coral_reinstall=True,
+                                  tsinghua_mirror=tsinghua_mirror)
     ret = install_cluster.cic_install(log)
     if ret:
         log.cl_error("failed to install dependent RPMs on host [%s]",
@@ -1146,132 +1229,3 @@ def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
                      host.sh_hostname)
         return -1
     return 0
-
-
-def get_version_from_iso_dir(log, host, iso_dir):
-    """
-    Get Coral version from ISO dir
-    """
-    command = "cat %s/VERSION" % iso_dir
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None, None, None
-
-    version = None
-    distro_short = None
-    target_cpu = None
-    lines = retval.cr_stdout.splitlines()
-    for line in lines:
-        version_string = "version: "
-        if line.startswith(version_string):
-            version = line[len(version_string):]
-        cpu_string = "target_cpu: "
-        if line.startswith(cpu_string):
-            target_cpu = line[len(cpu_string):]
-        distro_string = "distro: "
-        if line.startswith(distro_string):
-            distro_short = line[len(distro_string):]
-    return version, distro_short, target_cpu
-
-
-def get_version_from_iso_file(log, workspace, host, iso_path):
-    """
-    Get Coral version and CPU arch from ISO file
-    """
-    mnt_path = workspace + "/mnt"
-    command = ("mkdir -p %s && mount -o loop %s %s" %
-               (mnt_path, iso_path, mnt_path))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None, None, None
-
-    version, distro_short, target_cpu = \
-        get_version_from_iso_dir(log, host, mnt_path)
-    if version is None:
-        log.cl_error("failed to get version from ISO dir [%s] on host [%s]",
-                     mnt_path, host.sh_hostname)
-
-    command = ("umount %s" % (mnt_path))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None, None, None
-    return version, distro_short, target_cpu
-
-
-def get_version_from_iso_fname(log, fname):
-    """
-    Get Coral version from ISO file name
-    """
-    fname = os.path.basename(fname)
-    suffix = ".iso"
-    if not fname.endswith(suffix):
-        log.cl_error("unexpected ISO fname [%s] without %s suffix",
-                     fname, suffix)
-        return None, None, None
-    remain = fname[:-len(suffix)]
-
-    prefix = "coral-"
-    if not remain.startswith(prefix):
-        log.cl_error("unexpected ISO fname [%s] without %s prefix",
-                     fname, prefix)
-        return None, None, None
-    remain = remain[len(prefix):]
-
-    point = remain.rfind(".")
-    if point < 0:
-        log.cl_error("unexpected ISO fname [%s] without target CPU",
-                     fname)
-        return None, None, None
-
-    if point == len(remain) - 1:
-        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
-                     fname)
-        return None, None, None
-
-    if point == 1:
-        log.cl_error("unexpected ISO fname [%s] with empty distro",
-                     fname)
-        return None, None, None
-    target_cpu = remain[point + 1:]
-
-    remain = remain[:point]
-
-    point = remain.rfind(".")
-    if point < 0:
-        log.cl_error("unexpected ISO fname [%s] without target CPU",
-                     fname)
-        return None, None, None
-
-    if point == len(remain) - 1:
-        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
-                     fname)
-        return None, None, None
-
-    if point == 1:
-        log.cl_error("unexpected ISO fname [%s] with empty distro",
-                     fname)
-        return None, None, None
-    distro_short = remain[point + 1:]
-    version = remain[:point]
-    return version, distro_short, target_cpu

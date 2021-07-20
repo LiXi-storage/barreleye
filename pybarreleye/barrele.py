@@ -6,6 +6,7 @@ from pycoral import parallel
 from pycoral import cmd_general
 from pycoral import version
 from pycoral import clog
+from pycoral import constant
 from pybarreleye import barrele_instance
 from pybarreleye import barrele_constant
 
@@ -72,11 +73,14 @@ def barrele_version(barrele_command):
     # pylint: disable=unused-argument,protected-access
     logdir = barrele_command._bec_logdir
     log_to_file = barrele_command._bec_log_to_file
-    logdir_is_default = (logdir == barrele_constant.BARRELE_LOG_DIR)
-    log, _ = cmd_general.init_env_noconfig(logdir, log_to_file,
-                                           logdir_is_default)
-    log.cl_stdout(version.CORAL_VERSION)
-    cmd_general.cmd_exit(log, 0)
+    simple = True
+    if simple:
+        logdir_is_default = (logdir == barrele_constant.BARRELE_LOG_DIR)
+        log, _ = cmd_general.init_env_noconfig(logdir, log_to_file,
+                                               logdir_is_default)
+        cmd_general.print_field(log, constant.TITLE_CURRENT_RELEASE,
+                                version.CORAL_VERSION)
+        cmd_general.cmd_exit(log, 0)
 
 
 class BarreleAgentStatusCache():

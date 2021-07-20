@@ -104,3 +104,17 @@ CORAL_DEPENDENT_PIPS = []
 # The message to use in commands
 CMD_MSG_NONE = "<none>"
 CMD_MSG_UNKNOWN = "<unknown>"
+
+TITLE_CURRENT_RELEASE = "Current Release"
+
+CORAL_ISO_VERSION_FNAME = "VERSION.yaml"
+CORAL_RELEASE_INFO_FNAME = "release_info.yaml"
+
+# The constant in VERSION of iso
+CORAL_STR_RELEASE_NAME = "release_name"
+# The constant in VERSION of iso
+CORAL_STR_TARGET_CPU = "target_cpu"
+# The constant in VERSION of iso
+CORAL_STR_DISTRO_SHORT = "distro_short"
+# The constant in VERSION of iso
+CORAL_STR_RELEASE_DATE = "release_date"

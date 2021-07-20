@@ -244,6 +244,7 @@ FMT_NORMAL = "%(levelname)s: %(message)s"
 FMT_QUIET = "%(message)s"
 FMT_FULL = ("[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)s] "
             "%(message)s")
+FMT_TIME = "[%(asctime)s] [%(levelname)s] %(message)s"
 DATE_FMT = "%Y/%m/%d-%H:%M:%S"
 
 

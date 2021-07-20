@@ -17,7 +17,7 @@ def build(coral_command,
           e2fsprogs=None,
           collectd=None,
           enable_zfs=False, enable_devel=False,
-          disable_plugin=None, origin_mirror=False):
+          disable_plugin=None, tsinghua_mirror=False):
     """
     Build the Coral ISO.
     :param debug: Whether to dump debug logs into files, default: False.
@@ -34,8 +34,9 @@ def build(coral_command,
     :param enable_zfs: Whether enable ZFS support. Default: False.
     :param enable_devel: Whether enable development support. Default: False.
     :param disable_plugin: Disable one or more plugins. Default: None.
-    :param origin_mirror: Whether use origin Yum mirrors. If not use Tsinghua
-        mirror for possible speedup. Default: False.
+    :param tsinghua_mirror: Whether use YUM and pip mirrors from Tsinghua
+        Univeristy. If specified, will replace mirrors for possible speedup.
+        Default: False.
     """
     # pylint: disable=unused-argument,protected-access
     if not isinstance(coral_command._cc_log_to_file, bool):
@@ -52,18 +53,20 @@ def build(coral_command,
 
     cache = cmd_general.check_argument_str(log, "cache", cache)
     if lustre is not None:
-        lustre = cmd_general.check_argument_str(log, "lustre", lustre)
+        cmd_general.check_argument_fpath(lustre)
+        lustre = lustre.rstrip("/")
     if e2fsprogs is not None:
-        e2fsprogs = cmd_general.check_argument_str(log, "e2fsprogs",
-                                                   e2fsprogs)
+        cmd_general.check_argument_fpath(e2fsprogs)
+        e2fsprogs = e2fsprogs.rstrip("/")
     if collectd is not None:
-        collectd = cmd_general.check_argument_str(log, "collectd", collectd)
+        cmd_general.check_argument_fpath(collectd)
+        collectd = collectd.rstrip("/")
     cmd_general.check_argument_bool(log, "enable_zfs", enable_zfs)
     cmd_general.check_argument_bool(log, "enable_devel", enable_devel)
     if disable_plugin is not None:
         disable_plugin = cmd_general.check_argument_list_str(log, "disable_plugin",
                                                              disable_plugin)
-    cmd_general.check_argument_bool(log, "origin_mirror", origin_mirror)
+    cmd_general.check_argument_bool(log, "tsinghua_mirror", tsinghua_mirror)
     rc = coral_build.build(log, source_dir, workspace, cache=cache,
                            lustre_rpms_dir=lustre,
                            e2fsprogs_rpms_dir=e2fsprogs,
@@ -71,7 +74,7 @@ def build(coral_command,
                            enable_zfs=enable_zfs,
                            enable_devel=enable_devel,
                            disable_plugin=disable_plugin,
-                           origin_mirror=origin_mirror)
+                           tsinghua_mirror=tsinghua_mirror)
     cmd_general.cmd_exit(log, rc)
 
 

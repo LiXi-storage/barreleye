@@ -12,6 +12,8 @@ import socket
 import prettytable
 import toml
 import yaml
+from pycoral import lyaml
+from pycoral import constant
 from pycoral import clog
 from pycoral import time_util
 from pycoral import utils
@@ -73,7 +75,7 @@ def check_argument_fpath(fpath):
 
 def init_env_noconfig(logdir, log_to_file, logdir_is_default,
                       prefix="", identity=None, force_stdout_color=False,
-                      force_stderr_color=False):
+                      force_stderr_color=False, console_format=clog.FMT_NORMAL):
     """
     Init log and workspace for commands that needs it
     """
@@ -137,7 +139,7 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
 
     log = clog.get_log(resultsdir=resultsdir, overwrite=True,
                        console_level=logging.INFO,
-                       console_format=clog.FMT_NORMAL,
+                       console_format=console_format,
                        stdout_color=stdout_color,
                        stderr_color=stderr_color)
 
@@ -145,12 +147,13 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
 
 
 def init_env(config_fpath, logdir, log_to_file, logdir_is_default,
-             prefix="", identity=None):
+             prefix="", identity=None, console_format=clog.FMT_NORMAL):
     """
     Init log, workspace and config for commands that needs it
     """
     log, workspace = init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                                       prefix=prefix, identity=identity)
+                                       prefix=prefix, identity=identity,
+                                       console_format=console_format)
     if (not isinstance(config_fpath, bool)) and isinstance(config_fpath, int):
         config_fpath = str(config_fpath)
     if not isinstance(config_fpath, str):
@@ -1088,3 +1091,217 @@ def coral_parse_version_extra(extra):
     index_str = extra[-string_index:]
     index_number = int(index_str, 10)
     return prefix, index_number
+
+
+class CoralVersionInfo():
+    """
+    The version info in the Coral ISO
+    """
+    # pylint: disable=too-few-public-methods
+    def __init__(self, release_name, distro_short, target_cpu, release_date):
+        # Release name printed by "./coral version show"
+        self.cvi_release_name = release_name
+        # Short distro, e.g. el7 or el8
+        self.cvi_distro_short = distro_short
+        # Target CPU, e.g. x86_64
+        self.cvi_target_cpu = target_cpu
+        # Seconds since the epoch.
+        self.cvi_release_date = release_date
+
+    def cvi_release_info_dump(self, log, fpath):
+        """
+        Dump the release info to a file.
+        """
+        prefix = """#
+# Version information of the Coral release.
+#
+"""
+        config = {}
+        config[constant.CORAL_STR_RELEASE_NAME] = self.cvi_release_name
+        config[constant.CORAL_STR_RELEASE_DATE] = self.cvi_release_date
+        return lyaml.write_yaml_config(log, prefix, config, fpath)
+
+    def cvi_dump(self, log, fpath):
+        """
+        Dump the info to a file.
+        """
+        prefix = """#
+# Version information of the Coral ISO.
+#
+"""
+        config = {}
+        config[constant.CORAL_STR_RELEASE_NAME] = self.cvi_release_name
+        config[constant.CORAL_STR_TARGET_CPU] = self.cvi_target_cpu
+        config[constant.CORAL_STR_DISTRO_SHORT] = self.cvi_distro_short
+        config[constant.CORAL_STR_RELEASE_DATE] = self.cvi_release_date
+        return lyaml.write_yaml_config(log, prefix, config, fpath)
+
+
+def read_release_info_file(log, release_info_fpath):
+    """
+    Get Coral version from release info file. Return the release name and
+    release date.
+    """
+    yaml_content = lyaml.read_yaml_file(log, release_info_fpath)
+    if yaml_content is None:
+        return None, None
+
+    if constant.CORAL_STR_RELEASE_NAME not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_NAME, release_info_fpath)
+        return None, None
+    release_name = yaml_content[constant.CORAL_STR_RELEASE_NAME]
+
+    if constant.CORAL_STR_RELEASE_DATE not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_DATE, release_info_fpath)
+        return None, None
+    release_date_str = yaml_content[constant.CORAL_STR_RELEASE_DATE]
+    try:
+        release_date = int(release_date_str)
+    except:
+        log.cl_error("invalid release date [%s] in version file [%s]",
+                     release_date_str, release_info_fpath)
+        return None, None
+
+    return release_name, release_date
+
+
+def get_version_from_version_file(log, version_file):
+    """
+    Get Coral version from version file in ISO dir. Return CoralVersionInfo.
+    """
+    yaml_content = lyaml.read_yaml_file(log, version_file)
+    if yaml_content is None:
+        return None
+
+    if constant.CORAL_STR_RELEASE_NAME not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_NAME, version_file)
+        return None
+    release_name = yaml_content[constant.CORAL_STR_RELEASE_NAME]
+
+    if constant.CORAL_STR_TARGET_CPU not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_TARGET_CPU, version_file)
+        return None
+    target_cpu = yaml_content[constant.CORAL_STR_TARGET_CPU]
+
+    if constant.CORAL_STR_DISTRO_SHORT not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_DISTRO_SHORT, version_file)
+        return None
+    distro_short = yaml_content[constant.CORAL_STR_DISTRO_SHORT]
+
+    if constant.CORAL_STR_RELEASE_DATE not in yaml_content:
+        log.cl_error("no [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_DATE, version_file)
+        return None
+    release_date_str = yaml_content[constant.CORAL_STR_RELEASE_DATE]
+    try:
+        release_date = int(release_date_str)
+    except:
+        log.cl_error("invalid release date [%s] in version file [%s]",
+                     release_date_str, version_file)
+        return None
+
+    coral_version_info = CoralVersionInfo(release_name, distro_short, target_cpu,
+                                          release_date)
+
+    return coral_version_info
+
+
+def get_version_from_iso_file(log, workspace, local_host, iso_path):
+    """
+    Get Coral version and CPU arch from ISO file. Return CoralVersionInfo.
+    """
+    mnt_path = workspace + "/mnt"
+    command = ("mkdir -p %s && mount -o loop %s %s" %
+               (mnt_path, iso_path, mnt_path))
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None
+
+    version_file = mnt_path + "/" + constant.CORAL_ISO_VERSION_FNAME
+    coral_version_info = get_version_from_version_file(log, version_file)
+    if coral_version_info is None:
+        log.cl_error("failed to get version from ISO dir [%s] on host [%s]",
+                     mnt_path, local_host.sh_hostname)
+
+    command = ("umount %s" % (mnt_path))
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None
+    return coral_version_info
+
+
+def get_version_from_iso_fname(log, fname):
+    """
+    Get Coral version from ISO file name
+    """
+    fname = os.path.basename(fname)
+    suffix = ".iso"
+    if not fname.endswith(suffix):
+        log.cl_error("unexpected ISO fname [%s] without %s suffix",
+                     fname, suffix)
+        return None, None, None
+    remain = fname[:-len(suffix)]
+
+    prefix = "coral-"
+    if not remain.startswith(prefix):
+        log.cl_error("unexpected ISO fname [%s] without %s prefix",
+                     fname, prefix)
+        return None, None, None
+    remain = remain[len(prefix):]
+
+    point = remain.rfind(".")
+    if point < 0:
+        log.cl_error("unexpected ISO fname [%s] without target CPU",
+                     fname)
+        return None, None, None
+
+    if point == len(remain) - 1:
+        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
+                     fname)
+        return None, None, None
+
+    if point == 1:
+        log.cl_error("unexpected ISO fname [%s] with empty distro",
+                     fname)
+        return None, None, None
+    target_cpu = remain[point + 1:]
+
+    remain = remain[:point]
+
+    point = remain.rfind(".")
+    if point < 0:
+        log.cl_error("unexpected ISO fname [%s] without target CPU",
+                     fname)
+        return None, None, None
+
+    if point == len(remain) - 1:
+        log.cl_error("unexpected ISO fname [%s] with empty target CPU",
+                     fname)
+        return None, None, None
+
+    if point == 1:
+        log.cl_error("unexpected ISO fname [%s] with empty distro",
+                     fname)
+        return None, None, None
+    distro_short = remain[point + 1:]
+    version = remain[:point]
+    return version, distro_short, target_cpu

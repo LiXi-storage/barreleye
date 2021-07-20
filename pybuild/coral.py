@@ -4,7 +4,7 @@ Entrance of Coral command
 # DO NOT import any library that needs extra python package,
 # since this might cause failure of commands that uses this
 # library to install python packages.
-# build_bootstrap() should install them if there is any.
+# coral_command_bootstrap() should install them if there is any.
 import sys
 from pycoral import install_common
 from pycoral import ssh_host
@@ -12,7 +12,7 @@ from pycoral import clog
 from pycoral import constant
 
 
-def build_bootstrap():
+def coral_command_bootstrap(tsinghua_mirror=False):
     """
     Bootstrap the command by installing the dependencies.
     """
@@ -44,8 +44,10 @@ def build_bootstrap():
 
     ret = install_common.bootstrap_from_internet(log, local_host, missing_rpms,
                                                  missing_pips,
-                                                 pip_dir=constant.CORAL_BUILD_CACHE_PIP_DIR)
+                                                 constant.CORAL_BUILD_CACHE_PIP_DIR,
+                                                 tsinghua_mirror=tsinghua_mirror)
     if ret:
+        log.cl_error("failed to bootstrap the coral command from Internet")
         sys.exit(ret)
 
 
@@ -54,7 +56,13 @@ def main():
     main routine
     """
     # pylint: disable=bad-option-value,import-outside-toplevel
-    build_bootstrap()
+    tsinghua_mirror_options = ["--tsinghua-mirror", "--tsinghua_mirror"]
+    tsinghua_mirror = False
+    for tsinghua_mirror_option in tsinghua_mirror_options:
+        if tsinghua_mirror_option in sys.argv:
+            tsinghua_mirror = True
+            break
+    coral_command_bootstrap(tsinghua_mirror=tsinghua_mirror)
 
     from pybuild import coral_command
     coral_command.main()
