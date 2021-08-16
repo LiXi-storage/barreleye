@@ -926,6 +926,22 @@ def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
                          retval.cr_stderr)
             return -1
 
+    # For the epel repository dependency, yum install epel-release first
+    # if needed
+    if "epel-release" in rpms:
+        command = "yum install -y epel-release"
+        log.cl_info("running command [%s] on host [%s]",
+                    command, host.sh_hostname)
+        retval = host.sh_watched_run(log, command, None, None,
+                                     return_stdout=False,
+                                     return_stderr=False)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] on host [%s]",
+                         command, host.sh_hostname)
+            return -1
+
+    # yum install all rpms
+    # If distro is RHEL8/CentOS8, enable powertools repository for dependency
     command = "yum install -y"
     if host.sh_distro(log) == ssh_host.DISTRO_RHEL8:
         command += " --enablerepo powertools"
@@ -948,16 +964,9 @@ def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
         if ret != 0:
             new_missing_rpms.append(rpm)
     if len(new_missing_rpms) != 0:
-        if "epel-release" in new_missing_rpms:
-            log.cl_error("rpms %s is missing after yum install",
-                         new_missing_rpms)
-            return -1
-        if "epel-release" in missing_rpms:
-            # Replace the yum too if installed epel-release. So pass down
-            # tsinghua_yum.
-            ret = yum_install_rpm_from_internet(log, host, new_missing_rpms,
-                                                tsinghua_mirror=tsinghua_mirror)
-            return ret
+        log.cl_error("rpms %s is missing after yum install",
+                     new_missing_rpms)
+        return -1
     return 0
 
 
