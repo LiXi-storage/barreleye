@@ -927,6 +927,8 @@ def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
             return -1
 
     command = "yum install -y"
+    if host.sh_distro(log) == ssh_host.DISTRO_RHEL8:
+        command += " --enablerepo powertools"
     for rpm in rpms:
         command += " %s" % rpm
 
