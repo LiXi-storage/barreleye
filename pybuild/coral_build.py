@@ -418,8 +418,7 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
         return -1
 
     dependent_pips = []
-    dependent_rpms = ["createrepo",  # To create the repo in ISO
-                      "e2fsprogs-devel",  # Needed for ./configure
+    dependent_rpms = ["e2fsprogs-devel",  # Needed for ./configure
                       "genisoimage",  # Generate the ISO image
                       "git",  # Needed by building anything from Git repository.
                       "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
@@ -430,11 +429,13 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
 
     if distro == ssh_host.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
-        dependent_rpms += ["python-pep8",  # Needed for Python codes check
+        dependent_rpms += ["createrepo",  # To create the repo in ISO
+                           "python-pep8",  # Needed for Python codes check
                            "python36-psutil"]  # Used by Python codes
     else:
         assert distro == ssh_host.DISTRO_RHEL8
-        dependent_rpms += ["python3-pylint",  # Needed for Python codes check
+        dependent_rpms += ["createrepo_c",  # To create the repo in ISO
+                           "python3-pylint",  # Needed for Python codes check
                            "python3-psutil"]  # Used by Python codes
         dependent_pips += ["pep8"]  # Needed for Python codes check
 
@@ -449,7 +450,12 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
     # are needed or not, the Python codes will be checked, and the Python
     # codes might depend on the RPMs.
     for plugin in build_common.CORAL_PLUGIN_DICT.values():
-        dependent_rpms += plugin.cpt_build_dependent_rpms(distro)
+        rpms = plugin.cpt_build_dependent_rpms(log, distro)
+        if rpms is None:
+            log.cl_error("failed to get build dependent rpms of plugin [%s] on host [%s]",
+                         plugin.cpt_plugin_name, host.sh_hostname)
+            return -1
+        dependent_rpms += rpms
         dependent_pips += plugin.cpt_build_dependent_pips
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,

@@ -60,44 +60,50 @@ GRAFANA_PIECHART_PANEL_URL = ("https://github.com/grafana/piechart-panel/"
 # GRAFANA_PIECHART_PANEL_URL
 GRAFANA_PIECHART_PANEL_SHA1SUM = "2b3c33afd865af4575d87a83e3d45e61acf8273a"
 PACAKGE_URL_DICT["grafana_piechart_panel"] = GRAFANA_PIECHART_PANEL_URL
-# RPMs needed by building collectd
-COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
-                                 "ganglia-devel",
-                                 "gtk2-devel",
-                                 "iptables-devel",
-                                 "iproute-devel",
-                                 "libatasmart-devel",
-                                 "libdbi-devel",
-                                 "libcap-devel",
-                                 "libesmtp-devel",
-                                 "libgcrypt-devel",
-                                 "libmemcached-devel",
-                                 "libmicrohttpd-devel",
-                                 "libmnl-devel",
-                                 "libnotify-devel",
-                                 "libpcap-devel",
-                                 "libssh2-devel",
-                                 "libxml2-devel",
-                                 "libvirt-devel",
-                                 "lm_sensors-devel",
-                                 "lua-devel",
-                                 "mosquitto-devel",
-                                 "net-snmp-devel",
-                                 "OpenIPMI-devel",
-                                 "openldap-devel",
-                                 "perl-ExtUtils-Embed",
-                                 "postgresql-devel",
-                                 "python2-devel",
-                                 "qpid-proton-c-devel",
-                                 "riemann-c-client-devel",
-                                 "rrdtool-devel",
-                                 "systemd-devel",  # libudev.h
-                                 "uthash-devel",
-                                 "xfsprogs-devel",
-                                 "yajl-devel",
-                                 "zeromq-devel"]
+
+# Common RPMs needed by building collectd on RHEL
+COLLECTD_BUILD_DEPENDENT_RPMS_RHEL_COMMON = ["libcurl-devel",
+                                             "ganglia-devel",
+                                             "gtk2-devel",
+                                             "iptables-devel",
+                                             "iproute-devel",
+                                             "libatasmart-devel",
+                                             "libdbi-devel",
+                                             "libcap-devel",
+                                             "libesmtp-devel",
+                                             "libgcrypt-devel",
+                                             "libmemcached-devel",
+                                             "libmicrohttpd-devel",
+                                             "libmnl-devel",
+                                             "libnotify-devel",
+                                             "libpcap-devel",
+                                             "libssh2-devel",
+                                             "libxml2-devel",
+                                             "libvirt-devel",
+                                             "lm_sensors-devel",
+                                             "lua-devel",
+                                             "mosquitto-devel",
+                                             "net-snmp-devel",
+                                             "OpenIPMI-devel",
+                                             "openldap-devel",
+                                             "perl-ExtUtils-Embed",
+                                             "qpid-proton-c-devel",
+                                             "riemann-c-client-devel",
+                                             "rrdtool-devel",
+                                             "systemd-devel",  # libudev.h
+                                             "uthash-devel",
+                                             "xfsprogs-devel",
+                                             "yajl-devel",
+                                             "zeromq-devel"]
+# RPMs needed by building collectd on RHEL7/CentOS7
+COLLECTD_BUILD_DEPENDENT_RPMS_RHEL7 = COLLECTD_BUILD_DEPENDENT_RPMS_RHEL_COMMON + ["postgresql-devel",
+                                                                                   "python-devel"]
+# RPMs needed by building collectd on RHEL8/CentOS8
+COLLECTD_BUILD_DEPENDENT_RPMS_RHEL8 = COLLECTD_BUILD_DEPENDENT_RPMS_RHEL_COMMON + ["libpq-devel",
+                                                                                   "python36-devel"]
 # RPMs needed by building barreleye
-BARRELEYE_BUILD_DEPENDENT_RPMS = COLLECTD_BUILD_DEPENDENT_RPMS
+BARRELEYE_BUILD_DEPENDENT_RPMS_RHEL7 = COLLECTD_BUILD_DEPENDENT_RPMS_RHEL7
+BARRELEYE_BUILD_DEPENDENT_RPMS_RHEL8 = COLLECTD_BUILD_DEPENDENT_RPMS_RHEL8
 BARRELEYE_BUILD_DEPENDENT_PIPS = ["requests", "python-slugify"]
 
 
@@ -858,11 +864,16 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
                          is_devel=False,
                          need_collectd=True)
 
-    def cpt_build_dependent_rpms(self, distro):
+    def cpt_build_dependent_rpms(self, log, distro):
         """
         Return the RPMs needed to install before building
         """
-        return BARRELEYE_BUILD_DEPENDENT_RPMS
+        if distro == ssh_host.DISTRO_RHEL7:
+            return BARRELEYE_BUILD_DEPENDENT_RPMS_RHEL7
+        if distro == ssh_host.DISTRO_RHEL8:
+            return BARRELEYE_BUILD_DEPENDENT_RPMS_RHEL8
+        log.cl_error("build on distro [%s] is not supported yet", distro)
+        return None
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
