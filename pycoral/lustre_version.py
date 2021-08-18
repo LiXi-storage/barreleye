@@ -24,8 +24,7 @@ LUSTRE_RPM_TYPES = [RPM_KMOD, RPM_OSD_LDISKFS_MOUNT, RPM_OSD_LDISKFS,
 # A Lustre version need to have these patterns set, otherwise tools would
 # fail.
 LUSTRE_REQUIRED_RPM_TYPES = [RPM_KERNEL, RPM_KMOD, RPM_OSD_LDISKFS_MOUNT,
-                             RPM_OSD_LDISKFS, RPM_LUSTRE, RPM_IOKIT,
-                             RPM_TESTS_KMOD, RPM_TESTS]
+                             RPM_OSD_LDISKFS, RPM_LUSTRE, RPM_IOKIT]
 
 
 class LustreVersion():
