@@ -1,6 +1,6 @@
 dnl
 dnl The m4 file to automatically generate lustre definition file
-dnl Authors: Li Xi <lixi at ddn.com>
+dnl Authors: Li Xi <pkuelelixi at 163.com>
 dnl
 dnl
 include(`general.m4')dnl

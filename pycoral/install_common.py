@@ -677,7 +677,8 @@ class CoralInstallationHost():
             log.cl_error("failed to syncing ISO dir from local host [%s] "
                          "to host [%s]", socket.gethostname(), hostname)
             return -1
-
+        log.cl_info("installing dependent RPMs on host [%s]",
+                    hostname)
         log.cl_debug("installing dependent RPMs %s and pip package %s on "
                      "host [%s]",
                      dependent_rpms, pip_libs, hostname)
@@ -879,7 +880,7 @@ class CoralInstallationCluster():
                                                     parallelism=parallelism)
         ret = parallel_execute.pe_run()
         if ret:
-            log.cl_error("failed to install on cluster in parallel")
+            log.cl_error("failed to install hosts in parallel")
             return -1
         return 0
 

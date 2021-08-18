@@ -7,10 +7,9 @@ from pycoral import constant
 BARRELE_INFLUXDB_DATABASE_NAME = "barreleye_database"
 # Config file of Barreleye
 BARRELE_CONFIG_FNAME = "barreleye.conf"
-# The dir to save original influxdb.conf and also the patch for it
-BARRELE_CONFIG_DIR = constant.ETC_CORAL_DIR + "/barreleye"
+BARRELE_DIR = constant.CORAL_DIR + "/barrele"
 # The dir for XML files
-BARRELE_XML_DIR = constant.ETC_CORAL_DIR + "/barreleye-xmls"
+BARRELE_XML_DIR = BARRELE_DIR + "/xmls"
 # Config file path of barrelelye.conf
 BARRELE_CONFIG = constant.ETC_CORAL_DIR + "/" + BARRELE_CONFIG_FNAME
 BARRELE_LOG_DIR = constant.CORAL_LOG_DIR + "/barrele"

@@ -86,6 +86,7 @@ AC_DEFUN([MB_ARG_CANON_PATH], [
 
 dnl We may be able to use older versions, but I have not verified that
 PKG_CHECK_MODULES([ext2fs], [ext2fs >= 1.42.7 com_err >= 1.42.7])
+PKG_CHECK_MODULES([json_c], [json-c >= 0.11])
 
 # -------- check for distro version --------
 AC_MSG_CHECKING([for distro version])

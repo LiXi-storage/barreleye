@@ -60,7 +60,7 @@ class BarreleInstance():
         # Whether Barreleye agents collect exp_ost_stats_* metrics from Lustre
         # OST.
         self.bei_enable_lustre_exp_ost = enable_lustre_exp_ost
-        # Diction of host. Key is hostname, value is SSHHostname
+        # Diction of host. Key is hostname, value is SSHHost
         self.bei_host_dict = host_dict
         # Diction of agents. Key is hostname, value is BarreleAgent
         self.bei_agent_dict = agent_dict

@@ -69,14 +69,13 @@ cp example_configs/barreleye.toml \
 	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye.conf.example
 install -g 0 -o 0 -m 0644 bash_completion/barrele \
 	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
-mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye
-mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye-xmls
+mkdir -p $RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele/xmls
 cp barreleye/*.xml \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye-xmls
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele/xmls
 cp barreleye/influxdb.conf.diff \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye/
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele
 cp -a barreleye/grafana_dashboards \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye/grafana_dashboards
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele
 %endif  # with barrele
 
 
@@ -86,9 +85,9 @@ rm -rf $RPM_BUILD_ROOT
 %if %{with barrele}
 %files barreleye
 %{_bindir}/barrele
-%{_sysconfdir}/coral/barreleye-xmls
-%{_sysconfdir}/coral/barreleye/influxdb.conf.diff
-%{_sysconfdir}/coral/barreleye/grafana_dashboards
+%{_sharedstatedir}/coral/barrele/xmls
+%{_sharedstatedir}/coral/barrele/influxdb.conf.diff
+%{_sharedstatedir}/coral/barrele/grafana_dashboards
 %{_sysconfdir}/coral/barreleye.conf.example
 %{_datadir}/bash-completion/completions/barrele
 %endif  # with barrele

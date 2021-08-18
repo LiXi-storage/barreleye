@@ -21,7 +21,7 @@ INFLUXDB_CONFIG_DIFF = "influxdb.conf.diff"
 # The Influxdb config fname
 INFLUXDB_CONFIG_FNAME = os.path.basename(INFLUXDB_CONFIG_FPATH)
 # The backuped Influxdb config fpath
-INFLUXDB_CONFIG_BACKUP_FPATH = (barrele_constant.BARRELE_CONFIG_DIR + "/" +
+INFLUXDB_CONFIG_BACKUP_FPATH = (barrele_constant.BARRELE_DIR + "/" +
                                 INFLUXDB_CONFIG_FNAME)
 # The common prefix of Influxdb continuous query
 INFLUXDB_CQ_PREFIX = "cq_"
@@ -47,7 +47,7 @@ GRAFANA_DASHBOARDS[DASHBOARD_NAME_LUSTRE_GROUP] = "lustre_group.json"
 GRAFANA_DASHBOARDS["Server Statistics"] = "server_statistics.json"
 GRAFANA_DASHBOARDS["SFA Physical Disk"] = "SFA_physical_disk.json"
 GRAFANA_DASHBOARDS["SFA Virtual Disk"] = "SFA_virtual_disk.json"
-GRAFANA_DASHBOARD_DIR = (barrele_constant.BARRELE_CONFIG_DIR + "/" +
+GRAFANA_DASHBOARD_DIR = (barrele_constant.BARRELE_DIR + "/" +
                          "grafana_dashboards")
 # The key string to replace to collect interval in Grafana dashboard templates
 TEMPLATE_COLLECT_INTERVAL = "$BARRELEYE_COLLECT_INTERVAL"
@@ -161,7 +161,7 @@ class BarreleServer():
         if ret == 0:
             command = ("cp %s %s" %
                        (INFLUXDB_CONFIG_FPATH,
-                        barrele_constant.BARRELE_CONFIG_DIR))
+                        barrele_constant.BARRELE_DIR))
             retval = host.sh_run(log, command)
             if retval.cr_exit_status:
                 log.cl_error("failed to run command [%s] on host [%s], "
@@ -202,7 +202,7 @@ class BarreleServer():
         # Copy the diff file to workspace to edit
         host = self.bes_server_host
         workspace = barreleye_instance.bei_workspace
-        config_diff = (barrele_constant.BARRELE_CONFIG_DIR + "/" +
+        config_diff = (barrele_constant.BARRELE_DIR + "/" +
                        INFLUXDB_CONFIG_DIFF)
 
         if self._bes_is_influxdb_origin_config(log, INFLUXDB_CONFIG_FPATH):

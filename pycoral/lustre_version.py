@@ -102,7 +102,7 @@ ES5_2_PATTERNS = {
     RPM_TESTS_KMOD: r"^(kmod-lustre-tests-2.+\.rpm)$",
 }
 LUSTRE_VERSION_NAME_ES5_2 = "es5.2"
-LUSTRE_VERSION_ES5_2 = LustreVersion(LUSTRE_VERSION_NAME_2_12,
+LUSTRE_VERSION_ES5_2 = LustreVersion(LUSTRE_VERSION_NAME_ES5_2,
                                      ES5_2_PATTERNS,
                                      1)
 LUSTRE_VERSION_DICT[LUSTRE_VERSION_NAME_ES5_2] = LUSTRE_VERSION_ES5_2

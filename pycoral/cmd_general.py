@@ -526,7 +526,7 @@ def run_test(log, workspace, only_test_names, first_test_names,
     will be ignored.
     Only/first tests can repeat tests, e.g. first=testA,testA would repeat
     testA for twice.
-    :param skip_basic: Do not add basic test when it is not selected.
+    :param skip_basic: Do not run basic test.
     :param test_functs: A list of function that has the argument types of:
         test_funct(log, test_workspace, *args)
     """
@@ -625,6 +625,14 @@ def run_test(log, workspace, only_test_names, first_test_names,
             not skip_basic):
         selected_tests.insert(0, basic_test)
 
+    if skip_basic:
+        former_selected_tests = selected_tests
+        selected_tests = []
+        for selected_test in former_selected_tests:
+            if selected_test.__name__ == "basic":
+                continue
+            selected_tests.append(selected_test)
+
     table = prettytable.PrettyTable()
     table.field_names = ["Test name", "Result", "Duration"]
 
@@ -681,14 +689,14 @@ def run_test(log, workspace, only_test_names, first_test_names,
     return exit_status
 
 
-def get_table_field(log, host, field_number, command):
+def get_table_field(log, host, field_number, command, ignore_status=False):
     """
     Return a dict for a given field of a table.
     Key is service/host/lustrefs/... name, should be the first column
     Value is the field value.
     """
     retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
+    if retval.cr_exit_status and not ignore_status:
         log.cl_error("failed to run command [%s] on host [%s], "
                      "ret = %d, stdout = [%s], stderr = [%s]",
                      command, host.sh_hostname,
@@ -717,7 +725,8 @@ def get_table_field(log, host, field_number, command):
     return field_dict
 
 
-def get_status_dict(log, host, command, ignore_exit_status=True):
+def get_status_dict(log, host, command, ignore_exit_status=True,
+                    strip_value=False):
     """
     Return status dict of client/service/host
     """
@@ -741,6 +750,8 @@ def get_status_dict(log, host, command, ignore_exit_status=True):
     lines = retval.cr_stdout.splitlines()
     status_dict = {}
     for line in lines:
+        if len(line) == 0:
+            continue
         split_index = line.find(": ")
         if split_index < 0:
             log.cl_error("can not find [: ] in output line [%s] of "
@@ -756,6 +767,10 @@ def get_status_dict(log, host, command, ignore_exit_status=True):
             return None
         key = line[0:split_index]
         value = line[split_index + 2:]
+        if strip_value:
+            value = value.strip()
+            if len(value) == 0:
+                log.cl_error("empty value for key [%s]", key)
         if key in status_dict:
             log.cl_error("multiple values for key [%s] of command [%s]",
                          key, command)

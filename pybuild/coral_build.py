@@ -353,7 +353,7 @@ def download_dependent_rpms(log, workspace, host, distro, target_cpu,
     return 0
 
 
-def install_pyinstaller(log, host, type_cache):
+def install_pyinstaller(log, host, type_cache, tsinghua_mirror=False):
     """
     Install pyinstaller
     """
@@ -365,7 +365,8 @@ def install_pyinstaller(log, host, type_cache):
     expected_sha1sum = PYINSTALLER_TARBALL_SHA1SUM
     ret = build_common.install_pip3_package_from_file(log, host, type_cache,
                                                       tarball_url,
-                                                      expected_sha1sum)
+                                                      expected_sha1sum,
+                                                      tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install pip package of pyinstaller")
         return -1
@@ -422,6 +423,8 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                       "genisoimage",  # Generate the ISO image
                       "git",  # Needed by building anything from Git repository.
                       "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
+                      "libyaml-devel",  # yaml C functions.
+                      "json-c-devel",  # Needed by json C functions
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
                       "wget"]  # Needed by downloading from web
 
@@ -466,7 +469,8 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = install_pyinstaller(log, host, type_cache)
+    ret = install_pyinstaller(log, host, type_cache,
+                              tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install pyinstaller on host [%s]",
                      host.sh_hostname)
@@ -551,6 +555,41 @@ def install_lustre_util_rpm(log, local_host, lustre_dist):
     rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_LUSTRE]
     rpm_fpath = "%s/%s" % (lustre_dist.ldis_lustre_rpm_dir, rpm_name)
     command = "rpm -ivh %s --nodeps" % rpm_fpath
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def install_e2fsprogs_rpm(log, local_host, lustre_dist):
+    """
+    Install E2fsprogs until on local host
+    """
+    log.cl_info("installing E2fsprogs RPM for building")
+
+    need_install = False
+    retval = local_host.sh_run(log,
+                               "rpm -q e2fsprogs --queryformat '%{version}'")
+    if retval.cr_exit_status:
+        need_install = True
+    else:
+        current_version = retval.cr_stdout
+        if lustre_dist.ldis_e2fsprogs_version != current_version:
+            need_install = True
+
+    if not need_install:
+        log.cl_info("the same e2fsprogs RPMs are already installed on "
+                    "host [%s]", local_host.sh_hostname)
+        return 0
+
+    command = "rpm -Uvh %s/*.rpm" % lustre_dist.ldis_e2fsprogs_rpm_dir
     retval = local_host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -795,20 +834,22 @@ def build(log, source_dir, workspace,
     enable_devel_string = ""
     if enable_devel:
         enable_devel_string = " --enable-devel"
+    extra_str = ""
     command = ("cd %s && rm coral-*.tar.bz2 coral-*.tar.gz -f && "
                "sh autogen.sh && "
-               "./configure --with-iso-cache=%s%s%s%s && "
+               "./configure --with-iso-cache=%s%s%s%s%s && "
                "make -j8 && "
                "make iso" %
                (source_dir, iso_cache, enable_zfs_string, enable_devel_string,
-                disable_plugins_str))
+                disable_plugins_str, extra_str))
+    log.cl_info("running command [%s] on host [%s]", command,
+                local_host.sh_hostname)
     retval = local_host.sh_watched_run(log, command, None, None,
                                        return_stdout=False,
                                        return_stderr=False)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s]",
-                     command,
-                     local_host.sh_hostname)
+                     command, local_host.sh_hostname)
         return -1
 
     # If there is any plugin disabled or Collectd is special, the local cache

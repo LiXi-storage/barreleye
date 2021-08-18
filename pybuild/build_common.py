@@ -117,7 +117,7 @@ def coral_plugin_register(plugin):
 
 
 def install_pip3_package_from_file(log, host, type_cache, tarball_url,
-                                   expected_sha1sum):
+                                   expected_sha1sum, tsinghua_mirror=False):
     """
     Install pip3 package and cache it for future usage
     """
@@ -131,6 +131,8 @@ def install_pip3_package_from_file(log, host, type_cache, tarball_url,
         return -1
 
     command = "pip3 install %s" % (tarball_fpath)
+    if tsinghua_mirror:
+        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "

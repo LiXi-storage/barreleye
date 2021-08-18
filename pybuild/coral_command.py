@@ -33,7 +33,8 @@ def build(coral_command,
         can be specified if modification to Collectd is needed.
     :param enable_zfs: Whether enable ZFS support. Default: False.
     :param enable_devel: Whether enable development support. Default: False.
-    :param disable_plugin: Disable one or more plugins. Default: None.
+    :param disable_plugin: Disable one or more plugins. To disable multiple
+        plugins, please provide a list seperated by comma. Default: None.
     :param tsinghua_mirror: Whether use YUM and pip mirrors from Tsinghua
         Univeristy. If specified, will replace mirrors for possible speedup.
         Default: False.
@@ -61,6 +62,7 @@ def build(coral_command,
     if collectd is not None:
         cmd_general.check_argument_fpath(collectd)
         collectd = collectd.rstrip("/")
+
     cmd_general.check_argument_bool(log, "enable_zfs", enable_zfs)
     cmd_general.check_argument_bool(log, "enable_devel", enable_devel)
     if disable_plugin is not None:

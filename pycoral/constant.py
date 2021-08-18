@@ -25,6 +25,7 @@ SOURCE_ISO_FNAME = "ISO"
 BUILD_PACKAGES = "Packages"
 SOURCE_ISO_PACKAGES_PATH = SOURCE_ISO_FNAME + "/" + BUILD_PACKAGES
 BUILD_PIP = "pip"
+CORAL_DIR = "/var/lib/coral"
 
 CORAL_LOG_DIR = "/var/log/coral"
 # Dir to save build cache. It includes subdirs for devel and release.

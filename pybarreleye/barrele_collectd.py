@@ -119,8 +119,7 @@ class CollectdConfig():
         # pylint: disable=too-many-statements,too-many-locals,too-many-branches
         with open(fpath, "wt") as fout:
             fout.write("# Collectd config file generated automatcially by "
-                       "ESMON\n# Please contact DDN Storage for information "
-                       "and support\n\n")
+                       "Barreleye\n\n")
             for config_name, config in self.cdc_configs.items():
                 text = '%s %s\n' % (config_name, config)
                 fout.write(text)
