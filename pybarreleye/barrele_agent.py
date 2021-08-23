@@ -146,7 +146,8 @@ class BarreleAgent():
 
         version, _ = lustre_version.match_lustre_version_from_rpms(log,
                                                                    rpm_fnames,
-                                                                   skip_kernel=True)
+                                                                   skip_kernel=True,
+                                                                   skip_test=True)
         if version is None:
             log.cl_warning("failed to match Lustre version according to RPM "
                            "names on host [%s], using default [%s]",

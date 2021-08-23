@@ -21,10 +21,17 @@ RPM_MLNX_KMOD = "mlnx_ofa_modules"
 LUSTRE_RPM_TYPES = [RPM_KMOD, RPM_OSD_LDISKFS_MOUNT, RPM_OSD_LDISKFS,
                     RPM_OSD_ZFS_MOUNT, RPM_OSD_ZFS,
                     RPM_LUSTRE, RPM_IOKIT, RPM_TESTS_KMOD, RPM_TESTS]
+# Version dectection RPM types.
+LUSTRE_VERSION_DETECTION_RPM_TYPES = [RPM_KERNEL, RPM_KMOD, RPM_OSD_LDISKFS_MOUNT,
+                                      RPM_OSD_LDISKFS, RPM_LUSTRE, RPM_IOKIT]
+
+
+LUSTRE_TEST_RPM_TYPES = [RPM_TESTS_KMOD, RPM_TESTS]
+
 # A Lustre version need to have these patterns set, otherwise tools would
 # fail.
-LUSTRE_REQUIRED_RPM_TYPES = [RPM_KERNEL, RPM_KMOD, RPM_OSD_LDISKFS_MOUNT,
-                             RPM_OSD_LDISKFS, RPM_LUSTRE, RPM_IOKIT]
+LUSTRE_REQUIRED_RPM_TYPES = (LUSTRE_VERSION_DETECTION_RPM_TYPES +
+                             LUSTRE_TEST_RPM_TYPES)
 
 
 class LustreVersion():
@@ -107,7 +114,8 @@ LUSTRE_VERSION_ES5_2 = LustreVersion(LUSTRE_VERSION_NAME_ES5_2,
 LUSTRE_VERSION_DICT[LUSTRE_VERSION_NAME_ES5_2] = LUSTRE_VERSION_ES5_2
 
 
-def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False):
+def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False,
+                                   skip_test=False):
     """
     Match the Lustre version from RPM names
     """
@@ -122,6 +130,8 @@ def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False):
         version_matched = True
         for rpm_type in LUSTRE_REQUIRED_RPM_TYPES:
             if rpm_type == RPM_KERNEL and skip_kernel:
+                continue
+            if rpm_type in LUSTRE_TEST_RPM_TYPES and skip_test:
                 continue
             if rpm_type not in version.lv_rpm_pattern_dict:
                 log.cl_error("Lustre version [%s] does not have required RPM"

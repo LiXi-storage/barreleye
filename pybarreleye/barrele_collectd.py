@@ -117,7 +117,7 @@ class CollectdConfig():
         Dump the config to file
         """
         # pylint: disable=too-many-statements,too-many-locals,too-many-branches
-        with open(fpath, "wt") as fout:
+        with open(fpath, "wt", encoding='utf-8') as fout:
             fout.write("# Collectd config file generated automatcially by "
                        "Barreleye\n\n")
             for config_name, config in self.cdc_configs.items():

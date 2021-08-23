@@ -58,7 +58,7 @@ gpgcheck=0
 enabled=1
 gpgkey=
 """ % (package_name, package_name, package_name, packages_dir))
-    with open(repo_fpath, 'w') as config_fd:
+    with open(repo_fpath, 'w', encoding='utf-8') as config_fd:
         config_fd.write(repo_config)
 
 

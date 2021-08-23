@@ -4062,7 +4062,7 @@ def read_file(log, local_host, fpath, max_size=None):
         return None
 
     try:
-        with open(fpath, "r") as new_file:
+        with open(fpath, "r", encoding='utf-8') as new_file:
             content = new_file.read()
     except:
         log.cl_error("failed to read from file [%s] from host [%s]: %s",
@@ -4117,7 +4117,7 @@ def write_ssh_key(log, workspace, local_host, hostname, content):
         return None
 
     try:
-        with open(fpath, "w") as fd:
+        with open(fpath, "w", encoding='utf-8') as fd:
             fd.write(content)
     except:
         log.cl_error("failed to write file [%s] on host [%s]: %s",

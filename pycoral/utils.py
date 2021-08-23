@@ -27,7 +27,7 @@ def read_one_line(filename):
     """
     Open file and read one line
     """
-    with open(filename, 'r') as fd:
+    with open(filename, 'r', encoding='utf-8') as fd:
         line = fd.readline().rstrip('\n')
     return line
 

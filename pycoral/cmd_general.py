@@ -47,7 +47,7 @@ def load_config(log, config_fpath):
     except:
         error = traceback.format_exc()
         try:
-            with open(config_fpath) as config_fd:
+            with open(config_fpath, 'r', encoding='utf-8') as config_fd:
                 config = yaml.load(config_fd)
         except:
             log.cl_error("failed to load file [%s] using TOML format: %s",
