@@ -282,7 +282,7 @@ class SSHHost():
             no_lsb = True
 
         if no_lsb:
-            command = "uname -r"
+            command = "cat /etc/redhat-release"
             retval = self.sh_run(log, command)
             if retval.cr_exit_status:
                 log.cl_error("failed to run command [%s] on host [%s], "
@@ -293,13 +293,16 @@ class SSHHost():
                              retval.cr_stdout,
                              retval.cr_stderr)
                 return None
-            if "el7" in retval.cr_stdout:
+            if (retval.cr_stdout.startswith("CentOS Linux release 7.") or
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 7.")):
                 self.sh_cached_distro = DISTRO_RHEL7
                 return DISTRO_RHEL7
-            if "el8" in retval.cr_stdout:
+            if (retval.cr_stdout.startswith("CentOS Linux release 8.") or
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 8.")):
                 self.sh_cached_distro = DISTRO_RHEL8
                 return DISTRO_RHEL8
-            if "el6" in retval.cr_stdout:
+            if (retval.cr_stdout.startswith("CentOS Linux release 6.") or
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 6.")):
                 self.sh_cached_distro = DISTRO_RHEL6
                 return DISTRO_RHEL6
             log.cl_error("unexpected output of command [%s] on host [%s], "
