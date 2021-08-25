@@ -95,7 +95,7 @@ def download_dependent_rpms_rhel7(log, host, target_cpu, packages_dir,
 def build_pdsh(log, workspace, host, target_cpu, type_cache,
                packages_dir, extra_package_fnames):
     """
-    Build pdsh since RHEL8 does not have pdsh in EPEL.
+    Build pdsh.
 
     Building process is quick, so no need to cache the RPMs.
     """
@@ -167,25 +167,16 @@ def build_pdsh(log, workspace, host, target_cpu, type_cache,
     return 0
 
 
-def download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
-                                  packages_dir, type_cache, dependent_rpms,
-                                  extra_package_fnames):
+def download_dependent_rpms_rhel8(log, host, packages_dir,
+                                  dependent_rpms, extra_package_fnames):
     """
     Download dependent RPMs for RHEL8
     """
     # pylint: disable=too-many-locals
-    ret = build_pdsh(log, workspace, host, target_cpu, type_cache,
-                     packages_dir, extra_package_fnames)
-    if ret:
-        log.cl_error("failed to build PDSH")
-        return -1
-
     command = ("dnf download --resolve --alldeps --destdir %s" %
                (packages_dir))
 
     for rpm_name in dependent_rpms:
-        if rpm_name == "pdsh":
-            continue
         command += " " + rpm_name
 
     log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
@@ -305,9 +296,8 @@ def check_package_rpms(log, host, packages_dir, dependent_rpms,
     return 0
 
 
-def download_dependent_rpms(log, workspace, host, distro, target_cpu,
-                            packages_dir, type_cache, extra_package_fnames,
-                            extra_rpm_names):
+def download_dependent_rpms(log, host, distro, target_cpu, packages_dir,
+                            extra_package_fnames, extra_rpm_names):
     """
     Download dependent RPMs
     """
@@ -335,8 +325,7 @@ def download_dependent_rpms(log, workspace, host, distro, target_cpu,
                                             packages_dir, dependent_rpms,
                                             extra_package_fnames)
     elif distro == ssh_host.DISTRO_RHEL8:
-        ret = download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
-                                            packages_dir, type_cache,
+        ret = download_dependent_rpms_rhel8(log, host, packages_dir,
                                             dependent_rpms,
                                             extra_package_fnames)
     if ret:
@@ -790,9 +779,9 @@ def build(log, source_dir, workspace,
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = download_dependent_rpms(log, workspace, local_host, distro,
-                                  target_cpu, packages_dir, type_cache,
-                                  extra_package_fnames, extra_rpm_names)
+    ret = download_dependent_rpms(log, local_host, distro, target_cpu, packages_dir,
+                                  extra_package_fnames,
+                                  extra_rpm_names)
     if ret:
         log.cl_error("failed to download dependent rpms")
         return -1
