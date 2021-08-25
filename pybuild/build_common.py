@@ -75,7 +75,7 @@ class CoralPluginType():
         # Whether install Lustre library RPM for build
         self.cpt_install_lustre = install_lustre
 
-    def cpt_build_dependent_rpms(self, distro):
+    def cpt_build_dependent_rpms(self, log, distro):
         """
         Return the RPMs needed to install before building
         """
