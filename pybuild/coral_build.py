@@ -414,6 +414,7 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                       "libyaml-devel",  # yaml C functions.
                       "json-c-devel",  # Needed by json C functions
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
+                      "rsync",  # Needed by syncing build cache
                       "wget"]  # Needed by downloading from web
 
     if distro == ssh_host.DISTRO_RHEL7:
