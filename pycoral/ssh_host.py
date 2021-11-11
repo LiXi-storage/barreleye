@@ -908,7 +908,7 @@ class SSHHost():
         # pylint: disable=too-many-locals
         login_name = self.sh_login_name
         if not silent:
-            log.cl_debug("starting [%s] on host [%s]", command,
+            log.cl_debug("starting command [%s] on host [%s]", command,
                          self.sh_hostname)
         if self.sh_inited_as_local and not self.sh_ssh_for_local:
             ret = utils.run(command, timeout=timeout, stdout_tee=stdout_tee,
@@ -1019,6 +1019,21 @@ class SSHHost():
                          command, self.sh_hostname)
         else:
             log.cl_error("unexpected result of command [%s] on host [%s], "
+                         "ret = %d, stdout = [%s], stderr = [%s]",
+                         command, self.sh_hostname,
+                         retval.cr_exit_status, retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def sh_check_rpm_file_integrity(self, log, fpath):
+        """
+        Check the integrity of a RPM file
+        """
+        command = "rpm -K --nosignature %s" % fpath
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = %d, stdout = [%s], stderr = [%s]",
                          command, self.sh_hostname,
                          retval.cr_exit_status, retval.cr_stdout,
@@ -1148,7 +1163,7 @@ class SSHHost():
         """
         command = ("cat /proc/mounts | grep \"%s \"" % device)
         retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0 and retval.cr_exit_status != 1:
+        if retval.cr_exit_status not in [0, 1]:
             log.cl_error("failed to run command [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
@@ -1192,11 +1207,11 @@ class SSHHost():
                 log.cl_error("unexpected output of realpath: [%s]",
                              retval.cr_stdout)
                 return -1
-            device = lines[0]
+            real_device = lines[0]
 
-        command = ("cat /proc/mounts | grep \"%s \"" % device)
+        command = "cat /proc/mounts"
         retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0 and retval.cr_exit_status != 1:
+        if retval.cr_exit_status not in [0, 1]:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
@@ -1209,16 +1224,24 @@ class SSHHost():
         for line in retval.cr_stdout.splitlines():
             log.cl_debug("checking line [%s]", line)
             fields = line.split()
-            assert fields[0] == device
+            if fields[0] != device and fields[0] != real_device:
+                continue
             tmp_mount_point = fields[1]
             tmp_fstype = fields[2]
-            if mount_point is None or tmp_mount_point == mount_point:
-                if fstype and tmp_fstype != fstype:
-                    log.cl_error("device [%s] is mounted to [%s] on host "
-                                 "[%s] with type [%s], not [%s]", device,
-                                 tmp_mount_point, self.sh_hostname,
-                                 tmp_fstype, fstype)
-                return -1
+
+            if mount_point and tmp_mount_point != mount_point:
+                log.cl_warning("device [%s] is mounted to [%s] on host "
+                               "[%s], not expected mount point [%s]",
+                               device, tmp_mount_point,
+                               self.sh_hostname,
+                               mount_point)
+
+            if fstype and tmp_fstype != fstype:
+                log.cl_warning("device [%s] is mounted to [%s] on host "
+                               "[%s] with type [%s], not [%s]", device,
+                               tmp_mount_point, self.sh_hostname,
+                               tmp_fstype, fstype)
+            return 1
         return 0
 
     def sh_device_mounted(self, log, device):
@@ -1316,14 +1339,14 @@ class SSHHost():
         fstype = lines[1]
         return 0, fstype
 
-    def sh_filesystem_df(self, log, mount_point):
+    def sh_filesystem_df(self, log, directory):
         """
         report file system disk space usage
         """
         total = 0
         used = 0
         available = 0
-        command = ("df %s" % (mount_point))
+        command = ("df %s" % (directory))
         retval = self.sh_run(log, command)
         if retval.cr_exit_status != 0:
             log.cl_error("failed to run command [%s] on host [%s], "
@@ -1336,7 +1359,7 @@ class SSHHost():
             return -1, total, used, available
         lines = retval.cr_stdout.splitlines()
         if len(lines) != 2:
-            log.cl_error("command [%s] has unexpected output on host [%s], "
+            log.cl_error("command [%s] has unexpected line number on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
                          self.sh_hostname,
@@ -1345,13 +1368,12 @@ class SSHHost():
                          retval.cr_stderr)
             return -1, total, used, available
         df_pattern = (r"^(?P<device>\S+) +(?P<total>\d+) +(?P<used>\d+) "
-                      r"+(?P<available>\d+) +(?P<percentage>\S+) +%s" %
-                      (mount_point))
+                      r"+(?P<available>\d+) +(?P<percentage>\S+) +\S+")
         df_regular = re.compile(df_pattern)
         line = lines[1]
         match = df_regular.match(line)
         if not match:
-            log.cl_error("command [%s] has unexpected output on host [%s], "
+            log.cl_error("command [%s] has unexpected format on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
                          self.sh_hostname,
@@ -1502,7 +1524,7 @@ class SSHHost():
         log.cl_debug("start to run command [%s] on host [%s]", command,
                      self.sh_hostname)
         retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0 and retval.cr_exit_status != 1:
+        if retval.cr_exit_status not in [0, 1]:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], "
                          "stdout = [%s], stderr = [%s]",
@@ -2561,6 +2583,27 @@ class SSHHost():
                      retval.cr_stderr)
         return -1
 
+    def sh_service_is_enabled(self, log, service_name):
+        """
+        Check whether service is enabled.
+        """
+        command = "systemctl is-enabled %s" % service_name
+        retval = self.sh_run(log, command)
+        if retval.cr_stdout == "disabled\n":
+            return 0
+
+        if retval.cr_stdout == "enabled\n":
+            return 1
+
+        log.cl_error("unexpected command of command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     self.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
     def sh_service_disable(self, log, service_name):
         """
         Disable the service from starting automatically
@@ -2607,6 +2650,7 @@ class SSHHost():
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
+
         return 0
 
     def sh_service_start_enable(self, log, service_name, restart=False):
@@ -3075,6 +3119,38 @@ class SSHHost():
         fnames = retval.cr_stdout.split()
         return fnames
 
+    def sh_real_path(self, log, path, quiet=False):
+        """
+        Return the real path from a path.
+        """
+        # Need -d otherwise directory will list its content
+        command = ("realpath %s" % (path))
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status < 0:
+            if not quiet:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+            return None
+
+        fpaths = retval.cr_stdout.splitlines()
+        if len(fpaths) != 1:
+            if not quiet:
+                log.cl_error("unexpected stdout line number of command [%s] "
+                             "on host [%s], ret = [%d], stdout = [%s], "
+                             "stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+            return None
+        return fpaths[0]
+
     def sh_install_pip3_packages(self, log, pip_packages, pip_dir,
                                  quiet=False, tsinghua_mirror=False):
         """
@@ -3338,7 +3414,7 @@ class SSHHost():
 
     def sh_get_device_size(self, log, device):
         """
-        Get the device size
+        Get the device size (KB)
         """
         command = ("lsblk -b -d %s --output SIZE | "
                    "sed -n '2,1p' | awk '{print $1/1024}'" %
@@ -3796,7 +3872,7 @@ class SSHHost():
         If output_fname exists, need to add -O to wget because sometimes the URL
         does not save the download file with expected fname.
         """
-        # pylint: disable=too-many-branches
+        # pylint: disable=too-many-branches,too-many-locals
         target_dir = os.path.dirname(fpath)
         fname = os.path.basename(fpath)
         url_fname = os.path.basename(url)
@@ -3809,50 +3885,67 @@ class SSHHost():
             log.cl_error("url [%s] and output fname [%s] are not consistent",
                          url, output_fname)
             return -1
-        ret = -1
-        if expected_checksum is not None:
-            ret = self.sh_check_checksum(log, fpath, expected_checksum,
-                                         checksum_command=checksum_command)
-        if ret:
-            log.cl_info("downloading file [%s] from [%s]", fpath, url)
-            # Cleanup the file
-            command = "rm -f %s" % fpath
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
 
-            if output_fname is None:
-                if use_curl:
-                    download_command = "curl -O %s" % url
-                else:
-                    download_command = "wget %s" % url
+        ret = 0
+        if expected_checksum is not None:
+            rc = self.sh_check_checksum(log, fpath, expected_checksum,
+                                        checksum_command=checksum_command)
+            if rc:
+                ret = rc
+        if fpath.endswith(".rpm"):
+            rc = self.sh_check_rpm_file_integrity(log, fpath)
+            if rc:
+                ret = rc
+
+        if ret == 0:
+            return 0
+
+        log.cl_info("downloading file [%s] from [%s]", fpath, url)
+        # Cleanup the file
+        command = "rm -f %s" % fpath
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        if output_fname is None:
+            if use_curl:
+                download_command = "curl -O %s" % url
             else:
-                if use_curl:
-                    download_command = ("curl %s -o %s" %
-                                        (url, output_fname))
-                else:
-                    download_command = ("wget %s -O %s" %
-                                        (url, output_fname))
-            command = ("mkdir -p %s && cd %s && %s" %
-                       (target_dir, target_dir, download_command))
-            log.cl_info("running command [%s] on host [%s]",
-                        command, self.sh_hostname)
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+                download_command = "wget %s" % url
+        else:
+            if use_curl:
+                download_command = ("curl %s -o %s" %
+                                    (url, output_fname))
+            else:
+                download_command = ("wget %s -O %s" %
+                                    (url, output_fname))
+        command = ("mkdir -p %s && cd %s && %s" %
+                   (target_dir, target_dir, download_command))
+        log.cl_info("running command [%s] on host [%s]",
+                    command, self.sh_hostname)
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        if fpath.endswith(".rpm"):
+            ret = self.sh_check_rpm_file_integrity(log, fpath)
+            if ret:
+                log.cl_error("newly downloaded RPM [%s] is broken",
+                             fpath)
                 return -1
 
         if expected_checksum is None:
@@ -3861,10 +3954,10 @@ class SSHHost():
         ret = self.sh_check_checksum(log, fpath, expected_checksum,
                                      checksum_command=checksum_command)
         if ret:
-            log.cl_error("file [%s] does not have expected sha1sum [%s]",
+            log.cl_error("newly downloaded file [%s] does not have expected "
+                         "sha1sum [%s]",
                          fpath, expected_checksum)
             return -1
-
         return 0
 
     def sh_lvm_volumes(self, log):
@@ -3923,7 +4016,7 @@ class SSHHost():
 
     def sh_lvm_vg_or_lv_dict(self, log, vg_or_lv_name, vg=True):
         """
-        Return a dict of VG or LV from command "vgdisplay" or "lvdisplace"
+        Return a dict of VG or LV from command "vgdisplay" or "lvdisplay"
         """
         # pylint: disable=too-many-locals,too-many-branches
         if vg:
@@ -4026,6 +4119,75 @@ class SSHHost():
             return None
         lv_uuid = lv_dict["LV UUID"]
         return lv_uuid
+
+    def sh_blockdev_size(self, log, dev):
+        """
+        Return the size of block device in bytes
+        """
+        command = "blockdev --getsize64 %s" % dev
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        size_str = retval.cr_stdout.strip()
+        try:
+            size = int(size_str)
+        except ValueError:
+            log.cl_error("invalid size printed by command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return size
+
+    def sh_tree_used_bytes(self, log, path):
+        """
+        Return the used bytes of a file/dir tree in bytes
+        """
+        command = "du --summarize --block-size=1 %s" % path
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        fields = retval.cr_stdout.split()
+        if len(fields) != 2:
+            log.cl_error("invalid stdout of command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        bytes_str = fields[0]
+        try:
+            used_bytes = int(bytes_str)
+        except ValueError:
+            log.cl_error("invalid size printed by command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return used_bytes
 
 
 def get_local_host(ssh=True, host_type=SSHHost):

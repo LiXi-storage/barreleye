@@ -502,6 +502,7 @@ def get_shared_build_cache(log, host, workspace, shared_cache):
     """
     Get the shared build cache
     """
+    # pylint: disable=abstract-class-instantiated
     log.cl_info("copying shared cache from [%s] to [%s] on host [%s]",
                 shared_cache, workspace, host.sh_hostname)
     lock_file = build_constant.CORAL_BUILD_CACHE_LOCK
@@ -524,6 +525,7 @@ def sync_shared_build_cache(log, host, private_cache, shared_parent):
     """
     Sync from the local cache to shared cache
     """
+    # pylint: disable=abstract-class-instantiated
     log.cl_info("syncing [%s] to shared cache [%s]", private_cache,
                 shared_parent)
     lock_file = build_constant.CORAL_BUILD_CACHE_LOCK
@@ -664,7 +666,7 @@ def build(log, source_dir, workspace,
         if enabled_plugin_str == "":
             enabled_plugin_str = plugin.cpt_plugin_name
         else:
-            enabled_plugin_str += ", " + plugin.cpt_plugin_name
+            enabled_plugin_str += "," + plugin.cpt_plugin_name
         if plugin.cpt_need_lustre_rpms:
             need_lustre_rpms = True
         if plugin.cpt_need_collectd:
@@ -674,7 +676,7 @@ def build(log, source_dir, workspace,
 
     type_fname = constant.CORAL_BUILD_CACHE_TYPE_OPEN
     if type_fname == constant.CORAL_BUILD_CACHE_TYPE_OPEN:
-        log.cl_info("building ISO with %s", enabled_plugin_str)
+        log.cl_info("building ISO with plugins [%s]", enabled_plugin_str)
 
     local_host = ssh_host.get_local_host(ssh=False)
     distro = local_host.sh_distro(log)

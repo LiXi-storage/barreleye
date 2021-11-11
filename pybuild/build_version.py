@@ -539,7 +539,7 @@ def _update_version(log, workspace, source_dir, add_version=False,
                          "[%s]? [y/N] " % (old_version_string, version_string))
     if ((not input_result.startswith("y")) and
             (not input_result.startswith("Y"))):
-        log.cl_stdout("Quiting without touching anything")
+        log.cl_info("quiting without touching anything")
         return -1
 
     rc = update_version_file(log, local_host, version_string, source_dir)

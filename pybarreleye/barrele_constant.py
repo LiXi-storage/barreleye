@@ -89,6 +89,8 @@ BARRELE_AGENT_STOPPED = "stopped"
 
 # The agent hostname
 BARRELE_FIELD_HOST = "Host"
+# Lustre version name
+BARRELE_FIELD_LUSTRE_VERSION = "Lustre Version"
 # The status of agent up
 BARRELE_FIELD_UP = "Up"
 # The status of agent collectd

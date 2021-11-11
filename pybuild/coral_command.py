@@ -1,7 +1,7 @@
 """
 Coral command
 """
-# Local libs
+# pylint: disable=unused-import
 import sys
 import os
 from fire import Fire
@@ -39,7 +39,7 @@ def build(coral_command,
         Univeristy. If specified, will replace mirrors for possible speedup.
         Default: False.
     """
-    # pylint: disable=unused-argument,protected-access
+    # pylint: disable=unused-argument,protected-access,too-many-locals
     if not isinstance(coral_command._cc_log_to_file, bool):
         print("ERROR: invalid debug option [%s], should be a bool type" %
               (coral_command._cc_log_to_file), file=sys.stderr)
@@ -47,9 +47,10 @@ def build(coral_command,
 
     source_dir = os.getcwd()
     identity = build_common.get_build_path()
+    logdir_is_default = True
     log, workspace = cmd_general.init_env_noconfig(source_dir,
                                                    coral_command._cc_log_to_file,
-                                                   True,
+                                                   logdir_is_default,
                                                    identity=identity)
 
     cache = cmd_general.check_argument_str(log, "cache", cache)

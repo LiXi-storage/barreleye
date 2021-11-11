@@ -34,7 +34,7 @@ SUPPORTED_ZFS_XML_FNAMES = [XML_FNAME_ES3, XML_FNAME_ES4,
                             XML_FNAME_ES5_2, XML_FNAME_2_13]
 
 
-def lustre_version_xml_fname(log, version):
+def lustre_version_xml_fname(log, version, quiet=False):
     """
     Return the XML file of this Lustre version
     """
@@ -45,8 +45,9 @@ def lustre_version_xml_fname(log, version):
     elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_2:
         xml_fname = XML_FNAME_ES5_2
     else:
-        log.cl_error("unsupported Lustre version of [%s]",
-                     version.lv_name)
+        if not quiet:
+            log.cl_error("unsupported Lustre version of [%s]",
+                         version.lv_name)
         return None
     return xml_fname
 
@@ -73,8 +74,7 @@ def support_lustre_client(version):
     """
     Whether this Lustre version supports client_stats_*
     """
-    if (version.lv_name == "es2" or
-            version.lv_name == lustre_version.LUSTRE_VERSION_NAME_2_12):
+    if version.lv_name in ["es2", lustre_version.LUSTRE_VERSION_NAME_2_12]:
         return False
     return True
 
@@ -923,7 +923,7 @@ PostCacheChain "PostCache"
                 Name gid
             </ExtendedField>
         </ExtendedParse>
-        TsdbTags "uid=${extendfield:uid} gid=${extendfield:gid} projid=${extendfield:projid}"
+        TsdbTags "uid=${extendfield:uid} gid=${extendfield:gid}"
     </ItemType>
 """
             elif (self.cdc_jobstat_pattern !=

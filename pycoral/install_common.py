@@ -112,10 +112,10 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
     Sync the files in the iso to the directory
     """
     # pylint: disable=too-many-branches
-    # Just to check ssh to local host works well
+    # Just to check ssh to host works well
     retval = host.sh_run(log, "true", timeout=60)
     if retval.cr_exit_status:
-        log.cl_error("failed to ssh to local host [%s] using user [%s], "
+        log.cl_error("failed to ssh to host [%s] using user [%s], "
                      "stdout = [%s], stderr = [%s]",
                      host.sh_hostname,
                      host.sh_login_name,
@@ -127,11 +127,11 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
         iso_pattern = os.getcwd() + "/" + iso_pattern
     fnames = host.sh_resolve_path(log, iso_pattern, quiet=True)
     if fnames is None or len(fnames) == 0:
-        log.cl_error("failed to find ISO with pattern [%s] on local host [%s]",
+        log.cl_error("failed to find ISO with pattern [%s] on host [%s]",
                      iso_pattern, host.sh_hostname)
         return -1
     if len(fnames) > 1:
-        log.cl_info("multiple ISOs found by pattern [%s] on local host [%s]",
+        log.cl_info("multiple ISOs found by pattern [%s] on host [%s]",
                     iso_pattern, host.sh_hostname)
         return -1
     iso_path = fnames[0]
@@ -626,8 +626,47 @@ class CoralInstallationHost():
                          timeout)
         return ret
 
+    def _cih_change_sshd_max_startups(self, log):
+        """
+        Parallel ssh commands might got following error if the config is small:
+        ssh_exchange_identification: read: Connection reset by peer
+        """
+        host = self.cih_host
+        config = "MaxStartups 30:40:100"
+        retval = host.sh_run(log,
+                             r"grep MaxStartups /etc/ssh/sshd_config "
+                             r"| grep -v \#")
+        if retval.cr_exit_status != 0:
+            log.cl_info("adding [%s] of sshd config on host [%s]",
+                        config, host.sh_hostname)
+            retval = host.sh_run(log, "echo '%s' >> /etc/ssh/sshd_config" %
+                                 config)
+            if retval.cr_exit_status != 0:
+                log.cl_error("failed to change sshd config on host [%s]",
+                             host.sh_hostname)
+                return -1
+
+            service_name = "sshd"
+            log.cl_info("restarting [%s] service on host [%s]",
+                        service_name, host.sh_hostname)
+            ret = host.sh_service_restart(log, service_name)
+            if ret:
+                log.cl_error("failed to restart service [%s] on host [%s]",
+                             service_name, host.sh_hostname)
+                return -1
+        else:
+            line = retval.cr_stdout.strip()
+            if line != config:
+                log.cl_error("unexpected sshd config on "
+                             "host [%s], expected [%s], got [%s]",
+                             host.sh_hostname, config,
+                             line)
+                return -1
+
+        return 0
+
     def cih_install(self, log, repo_config_fpath, disable_selinux=True,
-                    disable_firewalld=True):
+                    disable_firewalld=True, change_sshd_max_startups=True):
         """
         Install the RPMs and pip packages on a host, and send the files
         :param send_fpath_dict: key is the fpath on localhost, value is the
@@ -669,6 +708,13 @@ class CoralInstallationHost():
             ret = self._cih_disable_firewalld(log)
             if ret:
                 log.cl_error("failed to disable firewalld on host [%s]",
+                             hostname)
+                return -1
+
+        if change_sshd_max_startups:
+            ret = self._cih_change_sshd_max_startups(log)
+            if ret:
+                log.cl_error("failed to change MaxStartups of sshd on host [%s]",
                              hostname)
                 return -1
 
@@ -963,7 +1009,7 @@ def yum_replace_to_tsinghua(log, host):
     """
     Replace the YUM to Tsinghua University
     """
-    log.cl_info("replaceing CentOS and epel YUM to use mirrors from "
+    log.cl_info("replacing CentOS and epel YUM to use mirrors from "
                 "Tsinghua University")
     config_fpath = "/etc/yum.repos.d/epel.repo"
     ret = host.sh_path_exists(log, config_fpath)

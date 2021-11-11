@@ -21,6 +21,7 @@ import random
 import string
 import stat
 import socket
+import re
 
 
 def read_one_line(filename):
@@ -457,6 +458,20 @@ def config_value(config, key):
     return config[key]
 
 
+def get_config_list(log, config, key):
+    """
+    Return value of a key in config
+    """
+    if key not in config:
+        return None
+    list_config = config[key]
+    if not isinstance(list_config, list):
+        log.cl_error("field [%s] is not a list",
+                     key)
+        return None
+    return list_config
+
+
 def file_type2string(inode_type):
     """
     Return the string of file type
@@ -563,3 +578,184 @@ def random_kvm_mac():
     mac = [0x52, 0x54, 0x00, random.randint(0x00, 0x7f),
            random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
     return ':'.join(map(lambda x: "%02x" % x, mac))
+
+
+SYMBOLS = {
+    'customary': ('B', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'),
+    'customary_ext': ('byte', 'kilo', 'mega', 'giga', 'tera', 'peta', 'exa',
+                      'zetta', 'iotta'),
+    'iec': ('Bi', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi', 'Yi'),
+    'iec_ext': ('byte', 'kibi', 'mebi', 'gibi', 'tebi', 'pebi', 'exbi',
+                'zebi', 'yobi'),
+}
+
+
+def bytes2human(n, pformat='%(value).1f %(symbol)s', symbols='customary'):
+    """
+    Convert n bytes into a human readable string based on format.
+    symbols can be either "customary", "customary_ext", "iec" or "iec_ext",
+    see: http://goo.gl/kTQMs
+
+      >>> bytes2human(0)
+      '0.0 B'
+      >>> bytes2human(0.9)
+      '0.0 B'
+      >>> bytes2human(1)
+      '1.0 B'
+      >>> bytes2human(1.9)
+      '1.0 B'
+      >>> bytes2human(1024)
+      '1.0 K'
+      >>> bytes2human(1048576)
+      '1.0 M'
+      >>> bytes2human(1099511627776127398123789121)
+      '909.5 Y'
+
+      >>> bytes2human(9856, symbols="customary")
+      '9.6 K'
+      >>> bytes2human(9856, symbols="customary_ext")
+      '9.6 kilo'
+      >>> bytes2human(9856, symbols="iec")
+      '9.6 Ki'
+      >>> bytes2human(9856, symbols="iec_ext")
+      '9.6 kibi'
+
+      >>> bytes2human(10000, "%(value).1f %(symbol)s/sec")
+      '9.8 K/sec'
+
+      >>> # precision can be adjusted by playing with %f operator
+      >>> bytes2human(10000, pformat="%(value).5f %(symbol)s")
+      '9.76562 K'
+    """
+    n = int(n)
+    if n < 0:
+        raise ValueError("n < 0")
+    symbols = SYMBOLS[symbols]
+    prefix = {}
+    for i, s in enumerate(symbols[1:]):
+        prefix[s] = 1 << (i + 1) * 10
+    for symbol in reversed(symbols[1:]):
+        if n >= prefix[symbol]:
+            value = float(n) / prefix[symbol]
+            return pformat % dict(symbol=symbol, value=value)
+    return pformat % dict(symbol=symbols[0], value=n)
+
+
+def bytes2human_with_origin(byte_number):
+    """
+    Return a string of human readable bytes, including origin bytes.
+    """
+    byte_number = int(byte_number)
+    human = bytes2human(byte_number, pformat='%(value).1f%(symbol)s')
+    if human.endswith('B'):
+        return "[%s] bytes" % byte_number
+    return "[%s/%s] bytes" % (human, byte_number)
+
+
+def human2bytes(human_str):
+    """
+    Attempts to guess the string format based on default symbols
+    set and return the corresponding bytes as an integer.
+    When unable to recognize the format ValueError is raised.
+
+      >>> human2bytes('0 B')
+      0
+      >>> human2bytes('1 K')
+      1024
+      >>> human2bytes('1 M')
+      1048576
+      >>> human2bytes('1 Gi')
+      1073741824
+      >>> human2bytes('1 tera')
+      1099511627776
+
+      >>> human2bytes('0.5kilo')
+      512
+      >>> human2bytes('0.1  byte')
+      0
+      >>> human2bytes('1 k')  # k is an alias for K
+      1024
+      >>> human2bytes('12 foo')
+      Traceback (most recent call last):
+          ...
+      ValueError: can't interpret '12 foo'
+    """
+    remain = human_str
+    num = ""
+    while remain and remain[0:1].isdigit() or remain[0:1] == '.':
+        num += remain[0]
+        remain = remain[1:]
+    num = float(num)
+    letter = remain.strip()
+    for _, sset in SYMBOLS.items():
+        if letter in sset:
+            break
+    else:
+        if letter == 'k':
+            # treat 'k' as an alias for 'K' as per: http://goo.gl/kTQMs
+            sset = SYMBOLS['customary']
+            letter = letter.upper()
+        else:
+            raise ValueError("can't interpret %r" % human_str)
+    prefix = {sset[0]: 1}
+    for i, s in enumerate(sset[1:]):
+        prefix[s] = 1 << (i + 1) * 10
+    return int(num * prefix[letter])
+
+
+def replace_keys(origin_str, key, alias):
+    """
+    Return the string replaced Lustre keys with alias
+    """
+    key = key.lower()
+    alias = alias.lower()
+    replace_dict = {}
+    replace_dict[key] = alias
+    replace_dict[key.upper()] = alias.upper()
+    replace_dict[key.capitalize()] = alias.capitalize()
+    for word, new_word in replace_dict.items():
+        origin_str = origin_str.replace(word, new_word)
+    return origin_str
+
+TIME_UNIT_SECONDS_DICT = {"s": 1,
+                          "m": 60,
+                          "h": 3600,
+                          "d": 86400,
+                          "w": 86400 * 7,
+                          "M": 86400 * 30,
+                          "y": 86400 * 365}
+TIME_UNIT_NAME_DICT = {"s": "second",
+                       "m": "minute",
+                       "h": "hour",
+                       "d": "day",
+                       "w": "week",
+                       "M": "month",
+                       "y": "year"}
+
+
+def time2seconds(time_str):
+    """
+    Return the second of the time
+    """
+    return int(time_str[:-1]) * TIME_UNIT_SECONDS_DICT[time_str[-1]]
+
+
+def time2readable(time_str):
+    """
+    Return the readble string of the time
+    """
+    number = int(time_str[:-1])
+    unit = TIME_UNIT_NAME_DICT[time_str[-1]]
+    if number > 1:
+        unit += "s"
+    return str(number) + " " + unit
+
+
+def check_email(email):
+    """
+    Check whether email address is valid
+    """
+    regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    if (re.fullmatch(regex, email)):
+        return 0
+    return -1

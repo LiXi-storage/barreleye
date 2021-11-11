@@ -7,8 +7,10 @@ from pycoral import cmd_general
 from pycoral import version
 from pycoral import clog
 from pycoral import constant
+from pycoral import lustre_version
 from pybarreleye import barrele_instance
 from pybarreleye import barrele_constant
+from pybarreleye import barrele_collectd
 
 
 def init_env(config_fpath, logdir, log_to_file):
@@ -81,6 +83,85 @@ def barrele_version(barrele_command):
         cmd_general.print_field(log, constant.TITLE_CURRENT_RELEASE,
                                 version.CORAL_VERSION)
         cmd_general.cmd_exit(log, 0)
+
+
+def lustre_version_field(log, lversion, field_name):
+    """
+    Return (0, result) for a field of LustreVersion
+    """
+    # pylint: disable=unused-argument
+    ret = 0
+    if field_name == barrele_constant.BARRELE_FIELD_LUSTRE_VERSION:
+        result = lversion.lv_name
+    else:
+        log.cl_error("unknown field [%s] of Lustre version", field_name)
+        result = clog.ERROR_MSG
+        ret = -1
+
+    return ret, result
+
+
+def print_lustre_versions(log, lustre_versions, status=False,
+                          print_table=True, field_string=None):
+    """
+    Print table of BarreleAgent.
+    """
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    if not print_table and len(lustre_versions) > 1:
+        log.cl_error("failed to print non-table output with multiple "
+                     "Lustre versions")
+        return -1
+
+    quick_fields = [barrele_constant.BARRELE_FIELD_LUSTRE_VERSION]
+    slow_fields = []
+    none_table_fields = []
+    table_fields = quick_fields + slow_fields
+    all_fields = table_fields + none_table_fields
+
+    if isinstance(field_string, bool):
+        cmd_general.print_all_fields(log, all_fields)
+        return 0
+
+    field_names = cmd_general.parse_field_string(log, field_string,
+                                                 quick_fields, table_fields,
+                                                 all_fields,
+                                                 print_status=status,
+                                                 print_table=print_table)
+    if field_names is None:
+        log.cl_error("invalid field string [%s] for Lustre version",
+                     field_string)
+        return -1
+
+    rc = cmd_general.print_list(log, lustre_versions, quick_fields,
+                                slow_fields, none_table_fields,
+                                lustre_version_field,
+                                print_table=print_table,
+                                print_status=status,
+                                field_string=field_string)
+    return rc
+
+
+def barrele_lustre_versions(barrele_command):
+    """
+    Print Lustres versions supported by Barreleye.
+
+    The Lustre version name can be used in "lustre_fallback_version" of
+    /etc/coral/barreleye.conf.
+    """
+    # pylint: disable=unused-argument,protected-access
+    logdir = barrele_command._bec_logdir
+    log_to_file = barrele_command._bec_log_to_file
+    logdir_is_default = (logdir == barrele_constant.BARRELE_LOG_DIR)
+    log, _ = cmd_general.init_env_noconfig(logdir, log_to_file,
+                                           logdir_is_default)
+    lustre_versions = []
+    for lversion in lustre_version.LUSTRE_VERSION_DICT.values():
+        fname = barrele_collectd.lustre_version_xml_fname(log, lversion, quiet=True)
+        if fname is None:
+            continue
+        lustre_versions.append(lversion)
+    ret = print_lustre_versions(log, lustre_versions)
+    cmd_general.cmd_exit(log, ret)
 
 
 class BarreleAgentStatusCache():
@@ -729,6 +810,7 @@ class BarreleCommand():
     version = barrele_version
     agent = BarreleAgentCommand()
     server = BarreleServerCommand()
+    lustre_versions = barrele_lustre_versions
 
     def __init__(self, config=barrele_constant.BARRELE_CONFIG,
                  log=barrele_constant.BARRELE_LOG_DIR,

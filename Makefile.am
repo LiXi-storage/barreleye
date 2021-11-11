@@ -87,7 +87,8 @@ rpms: coral.spec dist
 			$(EXTRA_OPTION) -tb $(distdir).tar.gz \
 		&& echo "RPMs successfully generated in $(build_dir)/RPMS"
 
-coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: rpms
+ISO_EXTRA =
+coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA) rpms
 	rm $(ISO_PATH) -fr
 	rm -f coral-*.iso
 	rm -f coral-*_SHA256SUM

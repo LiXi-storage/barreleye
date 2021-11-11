@@ -45,8 +45,11 @@ GRAFANA_DASHBOARDS[DASHBOARD_NAME_LUSTRE_USER] = "lustre_user.json"
 DASHBOARD_NAME_LUSTRE_GROUP = "Lustre Group"
 GRAFANA_DASHBOARDS[DASHBOARD_NAME_LUSTRE_GROUP] = "lustre_group.json"
 GRAFANA_DASHBOARDS["Server Statistics"] = "server_statistics.json"
-GRAFANA_DASHBOARDS["SFA Physical Disk"] = "SFA_physical_disk.json"
-GRAFANA_DASHBOARDS["SFA Virtual Disk"] = "SFA_virtual_disk.json"
+DASHBOARD_NAME_SFA_PHYSICAL = "SFA Physical Disk"
+GRAFANA_DASHBOARDS[DASHBOARD_NAME_SFA_PHYSICAL] = "SFA_physical_disk.json"
+DASHBOARD_NAME_SFA_VIRTUAL = "SFA Virtual Disk"
+GRAFANA_DASHBOARDS[DASHBOARD_NAME_SFA_VIRTUAL] = "SFA_virtual_disk.json"
+DASHBOARD_NAME_SFAS = [DASHBOARD_NAME_SFA_PHYSICAL, DASHBOARD_NAME_SFA_VIRTUAL]
 GRAFANA_DASHBOARD_DIR = (barrele_constant.BARRELE_DIR + "/" +
                          "grafana_dashboards")
 # The key string to replace to collect interval in Grafana dashboard templates
@@ -810,8 +813,9 @@ class BarreleServer():
             return -1
         if response.status_code != HTTPStatus.OK:
             log.cl_error("got status [%d] when adding dashbard [%s] to "
-                         "Grafana",
-                         response.status_code, title_name)
+                         "Grafana, json = [%s]",
+                         response.status_code, title_name,
+                         response.json())
             return -1
         return 0
 
@@ -841,7 +845,7 @@ class BarreleServer():
         """
         Recreate Grafana dashboards
         """
-        # pylint: disable=too-many-locals,too-many-branches
+        # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         host = self.bes_server_host
         collect_interval = str(barreleye_instance.bei_collect_interval)
         local_host = barreleye_instance.bei_local_host
@@ -901,6 +905,9 @@ class BarreleServer():
                     # If jobstat pattern is not recognized, put the
                     # Lustre Group dashboard to "Disabled" folder
                     folder_id = self.bes_disabled_folder_id
+            elif name in DASHBOARD_NAME_SFAS:
+                # SFA dashboards is not supported yet.
+                folder_id = self.bes_disabled_folder_id
 
             ret = self._bes_grafana_recreate_dashboard(log, name, dashboard,
                                                        folder_id)

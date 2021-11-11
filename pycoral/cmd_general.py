@@ -1161,17 +1161,22 @@ def read_release_info_file(log, release_info_fpath):
     if yaml_content is None:
         return None, None
 
-    if constant.CORAL_STR_RELEASE_NAME not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_NAME, release_info_fpath)
+    release_name = utils.config_value(yaml_content,
+                                      constant.CORAL_STR_RELEASE_NAME)
+    if release_name is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_NAME,
+                     release_info_fpath)
         return None, None
-    release_name = yaml_content[constant.CORAL_STR_RELEASE_NAME]
 
-    if constant.CORAL_STR_RELEASE_DATE not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_DATE, release_info_fpath)
+    release_date_str = utils.config_value(yaml_content,
+                                          constant.CORAL_STR_RELEASE_DATE)
+    if release_date_str is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_DATE,
+                     release_info_fpath)
         return None, None
-    release_date_str = yaml_content[constant.CORAL_STR_RELEASE_DATE]
+
     try:
         release_date = int(release_date_str)
     except:
@@ -1190,29 +1195,38 @@ def get_version_from_version_file(log, version_file):
     if yaml_content is None:
         return None
 
-    if constant.CORAL_STR_RELEASE_NAME not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_NAME, version_file)
+    release_name = utils.config_value(yaml_content,
+                                      constant.CORAL_STR_RELEASE_NAME)
+    if release_name is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_NAME,
+                     version_file)
         return None
-    release_name = yaml_content[constant.CORAL_STR_RELEASE_NAME]
 
-    if constant.CORAL_STR_TARGET_CPU not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_TARGET_CPU, version_file)
+    target_cpu = utils.config_value(yaml_content,
+                                    constant.CORAL_STR_TARGET_CPU)
+    if target_cpu is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_TARGET_CPU,
+                     version_file)
         return None
-    target_cpu = yaml_content[constant.CORAL_STR_TARGET_CPU]
 
-    if constant.CORAL_STR_DISTRO_SHORT not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_DISTRO_SHORT, version_file)
+    distro_short = utils.config_value(yaml_content,
+                                      constant.CORAL_STR_DISTRO_SHORT)
+    if distro_short is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_DISTRO_SHORT,
+                     version_file)
         return None
-    distro_short = yaml_content[constant.CORAL_STR_DISTRO_SHORT]
 
-    if constant.CORAL_STR_RELEASE_DATE not in yaml_content:
-        log.cl_error("no [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_DATE, version_file)
+    release_date_str = utils.config_value(yaml_content,
+                                          constant.CORAL_STR_RELEASE_DATE)
+    if release_date_str is None:
+        log.cl_error("can NOT find [%s] in version file [%s]",
+                     constant.CORAL_STR_RELEASE_DATE,
+                     version_file)
         return None
-    release_date_str = yaml_content[constant.CORAL_STR_RELEASE_DATE]
+
     try:
         release_date = int(release_date_str)
     except:

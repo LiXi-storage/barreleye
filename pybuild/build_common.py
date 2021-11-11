@@ -183,6 +183,7 @@ def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
     """
     Install the RPM if not installed
     """
+    # pylint: disable=abstract-class-instantiated
     rpm_fname = None
     for fname in extra_package_fnames:
         if fname.startswith(rpm_name_prefix):

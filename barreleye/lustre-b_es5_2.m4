@@ -598,7 +598,8 @@ HEAD(Lustre-es5_2)
   statfs: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   get_info: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   set_info: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
-  quotactl: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }</pattern>
+  quotactl: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
+  prealloc: +\{ samples: +[[:digit:]]+, unit:  reqs }</pattern>
 						JOBSTAT_FIELD(6, 1, job_id, string, derive, ost, jobid, 1)
 						OST_JOBSTAT_FIELD(6, 2, read_samples, number, derive, 1)
 						OST_JOBSTAT_FIELD_BYTES(6, 3, min_read_bytes, number, derive, 1)
