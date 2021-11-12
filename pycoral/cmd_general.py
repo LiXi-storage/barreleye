@@ -728,7 +728,7 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
 def get_status_dict(log, host, command, ignore_exit_status=True,
                     strip_value=False):
     """
-    Return status dict of client/service/host
+    Return status dict from stdout of command with format of "$KEY: $VALUE"
     """
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
@@ -754,15 +754,18 @@ def get_status_dict(log, host, command, ignore_exit_status=True,
             continue
         split_index = line.find(": ")
         if split_index < 0:
-            log.cl_error("can not find [: ] in output line [%s] of "
+            split_index = line.find(":\t")
+
+        if split_index < 0:
+            log.cl_error("can not find [: ] or [:\t] in output line [%s] of "
                          "command [%s]", line, command)
             return None
         if split_index == 0:
-            log.cl_error("no key before [: ] in output line [%s] of "
+            log.cl_error("no key before [: ] or [:\t] in output line [%s] of "
                          "command [%s]", line, command)
             return None
         if split_index + 2 >= len(line):
-            log.cl_error("no value after [: ] in output line [%s] of "
+            log.cl_error("no value after [: ] or [:\t] in output line [%s] of "
                          "command [%s]", line, command)
             return None
         key = line[0:split_index]

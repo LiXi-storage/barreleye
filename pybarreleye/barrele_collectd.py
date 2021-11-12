@@ -25,13 +25,15 @@ XML_FNAME_ES4 = "lustre-es4-2.10.xml"
 XML_FNAME_2_12 = "lustre-2.12.xml"
 XML_FNAME_ES5_1 = "lustre-b_es5_1.xml"
 XML_FNAME_ES5_2 = "lustre-b_es5_2.xml"
+XML_FNAME_ES6_0 = "lustre-b_es6_0.xml"
 XML_FNAME_2_13 = "lustre-2.13.xml"
 XML_FNAME_IME_1_1 = "ime-1.1.xml"
 XML_FNAME_IME_1_2 = "ime-1.2.xml"
 # The Lustre XML files that supports ZFS.
 SUPPORTED_ZFS_XML_FNAMES = [XML_FNAME_ES3, XML_FNAME_ES4,
                             XML_FNAME_2_12, XML_FNAME_ES5_1,
-                            XML_FNAME_ES5_2, XML_FNAME_2_13]
+                            XML_FNAME_ES5_2, XML_FNAME_2_13,
+                            XML_FNAME_ES6_0]
 
 
 def lustre_version_xml_fname(log, version, quiet=False):
@@ -44,6 +46,8 @@ def lustre_version_xml_fname(log, version, quiet=False):
         xml_fname = XML_FNAME_ES5_1
     elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_2:
         xml_fname = XML_FNAME_ES5_2
+    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES6_0:
+        xml_fname = XML_FNAME_ES6_0
     else:
         if not quiet:
             log.cl_error("unsupported Lustre version of [%s]",
