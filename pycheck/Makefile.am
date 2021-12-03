@@ -14,7 +14,6 @@ PIP3_PACKAGE_PATH = /usr/local/lib/python3.6/site-packages:/usr/local/lib64/pyth
 
 %.python_checked: % ../.pylintrc
 	PYLINTRC=../.pylintrc PYTHONPATH=$(PIP3_PACKAGE_PATH) python3 -m pylint --disable=I $< || exit 1; \
-	PYTHONPATH=$(PIP3_PACKAGE_PATH) pep8 --ignore=E501 $< || exit 1; \
 	touch $@
 
 clean-local:

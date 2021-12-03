@@ -109,12 +109,6 @@ if test "x$PYTHON3" = "x"; then
 	AC_MSG_ERROR([Python3 is needed. Install python3 please.])
 fi
 
-# ------- check for pep8 --------
-AC_CHECK_PROGS([PEP8], [pep8], [])
-if test "x$PEP8" = "x"; then
-	AC_MSG_ERROR([pep8 is needed to check python coding style. Install pep8 please.])
-fi
-
 # -------- check whether enable zfs support --------
 AC_MSG_CHECKING([whether enable zfs support])
 AC_ARG_ENABLE([zfs],

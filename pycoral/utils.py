@@ -759,3 +759,18 @@ def check_email(email):
     if (re.fullmatch(regex, email)):
         return 0
     return -1
+
+
+def check_mac(mac_address, capital_letters=True):
+    """
+    Check mac address is valid.
+    Either format of 52:54:00:AE:E3:41, or
+    52-54-00-AE-E3-41
+    """
+    if capital_letters:
+        regex = r'^([0-9A-F]{2}[:]){5}([0-9A-F]{2})$'
+    else:
+        regex = r'^([0-9a-f]{2}[:]){5}([0-9a-f]{2})$'
+    if (re.fullmatch(regex, mac_address)):
+        return 0
+    return -1

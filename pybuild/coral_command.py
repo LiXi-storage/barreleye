@@ -17,7 +17,8 @@ def build(coral_command,
           e2fsprogs=None,
           collectd=None,
           enable_zfs=False, enable_devel=False,
-          disable_plugin=None, tsinghua_mirror=False):
+          disable_plugin=None,
+          tsinghua_mirror=False):
     """
     Build the Coral ISO.
     :param debug: Whether to dump debug logs into files, default: False.
@@ -82,6 +83,23 @@ def build(coral_command,
 
 
 build_common.coral_command_register("build", build)
+
+
+def plugins(coral_command):
+    """
+    List the plugins of Coral.
+    """
+    # pylint: disable=unused-argument
+    plugin_str = ""
+    for plugin in build_common.CORAL_RELEASE_PLUGIN_DICT.values():
+        if plugin_str == "":
+            plugin_str = plugin.cpt_plugin_name
+        else:
+            plugin_str += "," + plugin.cpt_plugin_name
+    sys.stdout.write(plugin_str + '\n')
+
+
+build_common.coral_command_register("plugins", plugins)
 
 
 def main():

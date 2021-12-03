@@ -1,10 +1,9 @@
 """
 Library for building Coral
 """
-import os
 import re
 import filelock
-# pylint: disable=unused-import
+# pylint: disable=unused-import,too-many-lines
 # Local libs
 from pycoral import ssh_host
 from pycoral import constant
@@ -23,12 +22,6 @@ PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/releases/d
 # The sha1sum of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_URL
 PYINSTALLER_TARBALL_SHA1SUM = "972f24ef11cf69875daa2ebd4804c5f505c0fec8"
-# The url of pdsh tarball. Need to update together with
-# PDSH_TARBALL_SHA1SUM
-PDSH_TARBALL_URL = "https://github.com/chaos/pdsh/releases/download/pdsh-2.34/pdsh-2.34.tar.gz"
-# The sha1sum of pdsh tarball. Need to update together with
-# PDSH_TARBALL_URL
-PDSH_TARBALL_SHA1SUM = "c7bdd20c5ba211b0ae80339c671c602d6a3a5a66"
 
 
 def merge_list(list_x, list_y):
@@ -92,100 +85,16 @@ def download_dependent_rpms_rhel7(log, host, target_cpu, packages_dir,
     return 0
 
 
-def build_pdsh(log, workspace, host, target_cpu, type_cache,
-               packages_dir, extra_package_fnames):
-    """
-    Build pdsh since RHEL8 does not have pdsh in EPEL.
-
-    Building process is quick, so no need to cache the RPMs.
-    """
-    # pylint: disable=too-many-locals
-    tarball_url = PDSH_TARBALL_URL
-    tarball_fname = os.path.basename(tarball_url)
-    package_dirname = tarball_fname[:-7]
-    tarball_fpath = type_cache + "/" + tarball_fname
-    src_dir = workspace + "/" + package_dirname
-    ret = host.sh_download_file(log, tarball_url, tarball_fpath,
-                                PDSH_TARBALL_SHA1SUM)
-    if ret:
-        log.cl_error("failed to download PDSH sourcecode tarball")
-        return -1
-
-    # pdsh-2.34.tar.gz has two problems:
-    #
-    # 1. File README.QsNet is missing.
-    # 2. The file name should be rebaned to pdsh-2.34-1.tar.gz from
-    #    pdsh-2.34.tar.gz. Otherwise rpmbuild will fail.
-    #
-    # Not sure whether other versions have the same problem.
-    spec_file = src_dir + "/pdsh.spec"
-    build_tarball_fpath = src_dir + "-1.tar.gz"
-    build_dir = workspace + "/pdsh_build"
-    cmds = ["rm -f %s/pdsh-*" % packages_dir,
-            "cd %s && tar xzf %s" % (workspace, tarball_fpath),
-            "sed -i 's/ README.QsNet//g' %s" % spec_file,
-            "cd %s && tar czf %s %s" %
-            (workspace, build_tarball_fpath, package_dirname),
-            "mkdir -p %s" % build_dir,
-            'rpmbuild -ta %s --define="_topdir %s"' %
-            (build_tarball_fpath, build_dir)]
-    for command in cmds:
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-    rpm_dir = build_dir + "/RPMS/" + target_cpu
-    rpm_fnames = host.sh_get_dir_fnames(log, rpm_dir)
-    if rpm_fnames is None:
-        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
-                     rpm_dir,
-                     host.sh_hostname)
-        return -1
-
-    for rpm_fname in rpm_fnames:
-        rpm_fpath = rpm_dir + "/" + rpm_fname
-        command = "cp -a %s %s" % (rpm_fpath, packages_dir)
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-    extra_package_fnames += rpm_fnames
-
-    return 0
-
-
-def download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
-                                  packages_dir, type_cache, dependent_rpms,
-                                  extra_package_fnames):
+def download_dependent_rpms_rhel8(log, host, packages_dir,
+                                  dependent_rpms, extra_package_fnames):
     """
     Download dependent RPMs for RHEL8
     """
     # pylint: disable=too-many-locals
-    ret = build_pdsh(log, workspace, host, target_cpu, type_cache,
-                     packages_dir, extra_package_fnames)
-    if ret:
-        log.cl_error("failed to build PDSH")
-        return -1
-
     command = ("dnf download --resolve --alldeps --destdir %s" %
                (packages_dir))
 
     for rpm_name in dependent_rpms:
-        if rpm_name == "pdsh":
-            continue
         command += " " + rpm_name
 
     log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
@@ -305,8 +214,8 @@ def check_package_rpms(log, host, packages_dir, dependent_rpms,
     return 0
 
 
-def download_dependent_rpms(log, workspace, host, distro, target_cpu,
-                            packages_dir, type_cache, extra_package_fnames,
+def download_dependent_rpms(log, host, distro, target_cpu,
+                            packages_dir, extra_package_fnames,
                             extra_rpm_names):
     """
     Download dependent RPMs
@@ -335,8 +244,7 @@ def download_dependent_rpms(log, workspace, host, distro, target_cpu,
                                             packages_dir, dependent_rpms,
                                             extra_package_fnames)
     elif distro == ssh_host.DISTRO_RHEL8:
-        ret = download_dependent_rpms_rhel8(log, workspace, host, target_cpu,
-                                            packages_dir, type_cache,
+        ret = download_dependent_rpms_rhel8(log, host, packages_dir,
                                             dependent_rpms,
                                             extra_package_fnames)
     if ret:
@@ -430,13 +338,11 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
 
     if distro == ssh_host.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
-        dependent_rpms += ["python-pep8",  # Needed for Python codes check
-                           "python36-psutil"]  # Used by Python codes
+        dependent_rpms += ["python36-psutil"]  # Used by Python codes
     else:
         assert distro == ssh_host.DISTRO_RHEL8
         dependent_rpms += ["python3-pylint",  # Needed for Python codes check
                            "python3-psutil"]  # Used by Python codes
-        dependent_pips += ["pep8"]  # Needed for Python codes check
 
         rpms = prepare_install_modulemd_tools(log, host)
         if rpms is None:
@@ -605,6 +511,41 @@ def install_e2fsprogs_rpm(log, local_host, lustre_dist):
     return 0
 
 
+def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
+                                 need_lustre_rpms, install_lustre,
+                                 lustre_rpms_dir, e2fsprogs_rpms_dir,
+                                 extra_iso_fnames):
+    """
+    Handling Lustre/E2fsprogs RPMs
+    """
+    # pylint: disable=too-many-locals,too-many-branches,unused-argument
+    default_lustre_rpms_dir = (iso_cache + "/" +
+                               constant.LUSTRE_RPM_DIR_BASENAME)
+    default_e2fsprogs_rpms_dir = (iso_cache + "/" +
+                                  constant.E2FSPROGS_RPM_DIR_BASENAME)
+    if not need_lustre_rpms and not install_lustre:
+        if lustre_rpms_dir is not None:
+            log.cl_warning("option [--lustre %s] has been ignored since "
+                           "no need to have Lustre RPMs",
+                           lustre_rpms_dir)
+        if e2fsprogs_rpms_dir is not None:
+            log.cl_warning("option [--e2fsprogs %s] has been ignored since "
+                           "no need to have Lustre RPMs",
+                           e2fsprogs_rpms_dir)
+    else:
+        if lustre_rpms_dir is None:
+            lustre_rpms_dir = default_lustre_rpms_dir
+        if e2fsprogs_rpms_dir is None:
+            e2fsprogs_rpms_dir = default_e2fsprogs_rpms_dir
+
+    lustre_distribution = None
+    if need_lustre_rpms or install_lustre:
+        if lustre_distribution is None:
+            log.cl_error("Lustre distribution is needed unexpectedly")
+            return -1
+    return 0
+
+
 def build(log, source_dir, workspace,
           cache=constant.CORAL_BUILD_CACHE,
           lustre_rpms_dir=None,
@@ -703,10 +644,6 @@ def build(log, source_dir, workspace,
     iso_cache = type_cache + "/" + constant.ISO_CACHE_FNAME
     # Directory path of package under ISO cache
     packages_dir = iso_cache + "/" + constant.BUILD_PACKAGES
-    default_lustre_rpms_dir = (iso_cache + "/" +
-                               constant.LUSTRE_RPM_DIR_BASENAME)
-    default_e2fsprogs_rpms_dir = (iso_cache + "/" +
-                                  constant.E2FSPROGS_RPM_DIR_BASENAME)
 
     if not need_collectd:
         if collectd is not None:
@@ -715,21 +652,6 @@ def build(log, source_dir, workspace,
                            collectd)
     elif collectd is not None:
         sync_cache_back = False
-
-    if not need_lustre_rpms and not install_lustre:
-        if lustre_rpms_dir is not None:
-            log.cl_warning("option [--lustre %s] has been ignored since "
-                           "no need to have Lustre RPMs",
-                           lustre_rpms_dir)
-        if e2fsprogs_rpms_dir is not None:
-            log.cl_warning("option [--e2fsprogs %s] has been ignored since "
-                           "no need to have Lustre RPMs",
-                           e2fsprogs_rpms_dir)
-    else:
-        if lustre_rpms_dir is None:
-            lustre_rpms_dir = default_lustre_rpms_dir
-        if e2fsprogs_rpms_dir is None:
-            e2fsprogs_rpms_dir = default_e2fsprogs_rpms_dir
 
     command = ("mkdir -p %s" % workspace)
     retval = local_host.sh_run(log, command)
@@ -747,6 +669,16 @@ def build(log, source_dir, workspace,
                                  shared_type_cache)
     if ret:
         log.cl_error("failed to get shared build cache")
+        return -1
+
+    # Do this after copying ISO cache, and before cpt_build when Lustre rpms
+    # should have been installed.
+    ret = handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
+                                       need_lustre_rpms, install_lustre,
+                                       lustre_rpms_dir, e2fsprogs_rpms_dir,
+                                       extra_iso_fnames)
+    if ret:
+        log.cl_error("failed on Lustre/e2fsprogs RPMs")
         return -1
 
     target_cpu = local_host.sh_target_cpu(log)
@@ -775,19 +707,21 @@ def build(log, source_dir, workspace,
                      retval.cr_stderr)
         return -1
 
+    option_dict = {}
+    option_dict["collectd"] = collectd
     for plugin in plugins:
         ret = plugin.cpt_build(log, workspace, local_host, source_dir,
                                target_cpu, type_cache, iso_cache,
                                packages_dir, extra_iso_fnames,
                                extra_package_fnames, extra_rpm_names,
-                               collectd)
+                               option_dict)
         if ret:
             log.cl_error("failed to build plugin [%s]",
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = download_dependent_rpms(log, workspace, local_host, distro,
-                                  target_cpu, packages_dir, type_cache,
+    ret = download_dependent_rpms(log, local_host, distro,
+                                  target_cpu, packages_dir,
                                   extra_package_fnames, extra_rpm_names)
     if ret:
         log.cl_error("failed to download dependent rpms")
@@ -812,12 +746,6 @@ def build(log, source_dir, workspace,
     if ret:
         log.cl_error("failed to download pip3 packages")
         return -1
-
-    lustre_distribution = None
-    if need_lustre_rpms or install_lustre:
-        if lustre_distribution is None:
-            log.cl_error("Lustre distribution is needed unexpectedly")
-            return -1
 
     contents = ([constant.BUILD_PACKAGES, constant.BUILD_PIP] +
                 extra_iso_fnames)

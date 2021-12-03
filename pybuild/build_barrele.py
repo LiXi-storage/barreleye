@@ -866,11 +866,12 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                  extra_package_fnames, extra_rpm_names, collectd):
+                  extra_package_fnames, extra_rpm_names, option_dict):
         """
         Build the plugin
         """
         # pylint: disable=unused-argument,no-self-use
+        collectd = option_dict["collectd"]
         ret = build_barreleye(log, workspace, local_host, type_cache,
                               target_cpu, iso_cache, packages_dir, collectd,
                               extra_iso_fnames, extra_package_fnames,
