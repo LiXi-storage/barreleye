@@ -726,14 +726,15 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
 
 
 def get_status_dict(log, host, command, ignore_exit_status=True,
-                    strip_value=False):
+                    expect_failure=False, strip_value=False):
     """
     Return status dict from stdout of command with format of "$KEY: $VALUE"
     """
+    # pylint: disable=too-many-branches
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         # Some commands still print fields when return failure
-        if ignore_exit_status:
+        if ignore_exit_status or expect_failure:
             log.cl_debug("failed to run command [%s] on host [%s], "
                          "ret = %d, stdout = [%s], stderr = [%s]",
                          command, host.sh_hostname,
@@ -746,6 +747,13 @@ def get_status_dict(log, host, command, ignore_exit_status=True,
                          retval.cr_exit_status, retval.cr_stdout,
                          retval.cr_stderr)
             return None
+    elif expect_failure:
+        log.cl_error("unexpected success of command [%s] on host [%s], "
+                     "ret = %d, stdout = [%s], stderr = [%s]",
+                     command, host.sh_hostname,
+                     retval.cr_exit_status, retval.cr_stdout,
+                     retval.cr_stderr)
+        return None
 
     lines = retval.cr_stdout.splitlines()
     status_dict = {}

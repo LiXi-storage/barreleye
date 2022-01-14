@@ -1468,9 +1468,9 @@ class BarreleServer():
         Return the Influxdb version, e.g. 1.8.4-1.x86_64
         """
         host = self.bes_server_host
-        version = host.sh_rpm_version(log, "influxdb-")
-        if version is None:
-            log.cl_error("failed to get the Collectd RPM version on host [%s]",
+        ret, version = host.sh_rpm_version(log, "influxdb-")
+        if ret or version is None:
+            log.cl_error("failed to get the Influxdb RPM version on host [%s]",
                          host.sh_hostname)
         return version
 
@@ -1479,8 +1479,8 @@ class BarreleServer():
         Return the Grafana version, e.g. 7.3.7-1.x86_64
         """
         host = self.bes_server_host
-        version = host.sh_rpm_version(log, "grafana-")
-        if version is None:
-            log.cl_error("failed to get the Collectd RPM version on host [%s]",
+        ret, version = host.sh_rpm_version(log, "grafana-")
+        if ret or version is None:
+            log.cl_error("failed to get the Grafana RPM version on host [%s]",
                          host.sh_hostname)
         return version

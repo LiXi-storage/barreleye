@@ -454,12 +454,15 @@ def install_lustre_util_rpm(log, local_host, lustre_dist):
     """
     Install Lustre until on local host
     """
-    log.cl_info("installing Lustre util RPM for building")
     command = "rpm -qi %s" % lustre_version.RPM_LUSTRE
     retval = local_host.sh_run(log, command)
     if retval.cr_exit_status == 0:
+        log.cl_info("the needed Lustre util RPM has already been installed on "
+                    "build host [%s]", local_host.sh_hostname)
         return 0
 
+    log.cl_info("installing the Lustre util RPM on build host [%s]",
+                local_host.sh_hostname)
     rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_LUSTRE]
     rpm_fpath = "%s/%s" % (lustre_dist.ldis_lustre_rpm_dir, rpm_name)
     command = "rpm -ivh %s --nodeps" % rpm_fpath
@@ -480,8 +483,6 @@ def install_e2fsprogs_rpm(log, local_host, lustre_dist):
     """
     Install E2fsprogs until on local host
     """
-    log.cl_info("installing E2fsprogs RPM for building")
-
     need_install = False
     retval = local_host.sh_run(log,
                                "rpm -q e2fsprogs --queryformat '%{version}'")
@@ -493,10 +494,12 @@ def install_e2fsprogs_rpm(log, local_host, lustre_dist):
             need_install = True
 
     if not need_install:
-        log.cl_info("the same e2fsprogs RPMs are already installed on "
-                    "host [%s]", local_host.sh_hostname)
+        log.cl_info("the needed e2fsprogs RPMs have already been installed "
+                    "on build host [%s]", local_host.sh_hostname)
         return 0
 
+    log.cl_info("installing E2fsprogs RPM for on build host",
+                local_host.sh_hostname)
     command = "rpm -Uvh %s/*.rpm" % lustre_dist.ldis_e2fsprogs_rpm_dir
     retval = local_host.sh_run(log, command)
     if retval.cr_exit_status:
@@ -512,7 +515,8 @@ def install_e2fsprogs_rpm(log, local_host, lustre_dist):
 
 
 def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
-                                 need_lustre_rpms, install_lustre,
+                                 plugins_need_lustre_rpms,
+                                 plugins_need_install_lustre,
                                  lustre_rpms_dir, e2fsprogs_rpms_dir,
                                  extra_iso_fnames):
     """
@@ -523,7 +527,8 @@ def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
                                constant.LUSTRE_RPM_DIR_BASENAME)
     default_e2fsprogs_rpms_dir = (iso_cache + "/" +
                                   constant.E2FSPROGS_RPM_DIR_BASENAME)
-    if not need_lustre_rpms and not install_lustre:
+    if (len(plugins_need_lustre_rpms) == 0 and
+            len(plugins_need_install_lustre) == 0):
         if lustre_rpms_dir is not None:
             log.cl_warning("option [--lustre %s] has been ignored since "
                            "no need to have Lustre RPMs",
@@ -539,11 +544,59 @@ def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
             e2fsprogs_rpms_dir = default_e2fsprogs_rpms_dir
 
     lustre_distribution = None
-    if need_lustre_rpms or install_lustre:
+    if (len(plugins_need_lustre_rpms) != 0 or
+            len(plugins_need_install_lustre) != 0):
         if lustre_distribution is None:
             log.cl_error("Lustre distribution is needed unexpectedly")
             return -1
     return 0
+
+
+def build_packages(log, workspace, local_host, source_dir, target_cpu,
+                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
+                   extra_package_fnames, extra_rpm_names, option_dict,
+                   plugins):
+    """
+    Build the packages in cpt_packages
+    """
+    # pylint: disable=too-many-locals
+    package_dict = {}
+    for plugin in plugins:
+        plugin_name = plugin.cpt_plugin_name
+        for package_name in plugin.cpt_packages:
+            if package_name not in build_common.CORAL_PACKAGE_DICT:
+                log.cl_error("package [%s] required by plugin [%s] is not defined",
+                             package_name, plugin_name)
+                return -1
+            package = build_common.CORAL_PACKAGE_DICT[package_name]
+            if package_name not in package_dict:
+                package_dict[package_name] = package
+
+    for package in package_dict.values():
+        package_name = package.cpb_package_name
+        ret = package.cpb_build(log, workspace, local_host, source_dir,
+                                target_cpu, type_cache, iso_cache,
+                                packages_dir, extra_iso_fnames,
+                                extra_package_fnames, extra_rpm_names,
+                                option_dict)
+        if ret:
+            log.cl_error("failed to build package [%s]",
+                         package_name)
+            return -1
+    return 0
+
+
+def get_plugin_str(plugins):
+    """
+    Return a string of plugins
+    """
+    plugin_str = ""
+    for plugin in plugins:
+        if plugin_str == "":
+            plugin_str = plugin.cpt_plugin_name
+        else:
+            plugin_str += "," + plugin.cpt_plugin_name
+    return plugin_str
 
 
 def build(log, source_dir, workspace,
@@ -599,21 +652,17 @@ def build(log, source_dir, workspace,
         log.cl_error("everything has been disabled, nothing to build")
         return -1
 
-    need_lustre_rpms = False
-    need_collectd = False
-    install_lustre = False
-    enabled_plugin_str = ""
+    plugins_need_lustre_rpms = []
+    plugins_need_collectd = []
+    plugins_need_install_lustre = []
+    enabled_plugin_str = get_plugin_str(plugins)
     for plugin in plugins:
-        if enabled_plugin_str == "":
-            enabled_plugin_str = plugin.cpt_plugin_name
-        else:
-            enabled_plugin_str += "," + plugin.cpt_plugin_name
         if plugin.cpt_need_lustre_rpms:
-            need_lustre_rpms = True
+            plugins_need_lustre_rpms.append(plugin)
         if plugin.cpt_need_collectd:
-            need_collectd = True
+            plugins_need_collectd.append(plugin)
         if plugin.cpt_install_lustre:
-            install_lustre = True
+            plugins_need_install_lustre.append(plugin)
 
     type_fname = constant.CORAL_BUILD_CACHE_TYPE_OPEN
     if type_fname == constant.CORAL_BUILD_CACHE_TYPE_OPEN:
@@ -645,7 +694,7 @@ def build(log, source_dir, workspace,
     # Directory path of package under ISO cache
     packages_dir = iso_cache + "/" + constant.BUILD_PACKAGES
 
-    if not need_collectd:
+    if len(plugins_need_collectd) == 0:
         if collectd is not None:
             log.cl_warning("option [--collectd %s] has been ignored since "
                            "no need to have Collectd RPMs",
@@ -674,7 +723,8 @@ def build(log, source_dir, workspace,
     # Do this after copying ISO cache, and before cpt_build when Lustre rpms
     # should have been installed.
     ret = handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
-                                       need_lustre_rpms, install_lustre,
+                                       plugins_need_lustre_rpms,
+                                       plugins_need_install_lustre,
                                        lustre_rpms_dir, e2fsprogs_rpms_dir,
                                        extra_iso_fnames)
     if ret:
@@ -709,6 +759,15 @@ def build(log, source_dir, workspace,
 
     option_dict = {}
     option_dict["collectd"] = collectd
+
+    ret = build_packages(log, workspace, local_host, source_dir, target_cpu,
+                         type_cache, iso_cache, packages_dir, extra_iso_fnames,
+                         extra_package_fnames, extra_rpm_names, option_dict,
+                         plugins)
+    if ret:
+        log.cl_error("failed to build packages")
+        return -1
+
     for plugin in plugins:
         ret = plugin.cpt_build(log, workspace, local_host, source_dir,
                                target_cpu, type_cache, iso_cache,

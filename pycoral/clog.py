@@ -13,6 +13,7 @@ import inspect
 import sys
 import traceback
 
+from pycoral import constant
 from pycoral import utils
 
 LOG_DEBUG_FNAME = "debug.log"
@@ -563,4 +564,4 @@ def fini_log(log):
     """
     return GLOBAL_LOGS.cls_log_fini(log)
 
-ERROR_MSG = colorful_message(COLOR_RED, "error")
+ERROR_MSG = colorful_message(COLOR_RED, constant.CMD_MSG_ERROR)

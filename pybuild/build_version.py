@@ -1,5 +1,5 @@
 """
-Coral command
+Version of Corals
 """
 import os
 import sys

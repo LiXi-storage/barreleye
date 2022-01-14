@@ -1,5 +1,5 @@
 """
-Python library for Pylustre
+Python library for Coral
 """
 __all__ = ["clog",
            "constant",

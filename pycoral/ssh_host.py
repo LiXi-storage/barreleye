@@ -38,11 +38,30 @@ LONGEST_TIME_REBOOT = 240
 # The longest time that a simple command should finish
 LONGEST_SIMPLE_COMMAND_TIME = 600
 # Yum install is slow, so use a larger timeout value
-LONGEST_TIME_YUM_INSTALL = LONGEST_SIMPLE_COMMAND_TIME * 2
+LONGEST_TIME_YUM_INSTALL = LONGEST_SIMPLE_COMMAND_TIME * 3
 # RPM install is slow, so use a larger timeout value
 LONGEST_TIME_RPM_INSTALL = LONGEST_SIMPLE_COMMAND_TIME * 2
 # The longest time that a issue reboot would stop the SSH server
 LONGEST_TIME_ISSUE_REBOOT = 10
+
+
+def rpm_name2version(log, rpm_name):
+    """
+    From RPM name to version.
+    collectd-5.12.0.barreleye0-1.el7.x86_64 -> 5.12.0.barreleye0-1.el7.x86_64
+    """
+    minus_index = -1
+    for current_index in range(len(rpm_name) - 1):
+        if (rpm_name[current_index] == "-" and
+                rpm_name[current_index + 1].isdigit()):
+            minus_index = current_index
+            break
+    if minus_index == -1:
+        log.cl_error("RPM [%s] on host [%s] does not have expected format",
+                     rpm_name)
+        return None
+    rpm_version = rpm_name[minus_index + 1:]
+    return rpm_version
 
 
 def sh_escape(command):
@@ -3804,6 +3823,8 @@ class SSHHost():
         """
         command = "rpm -qa | grep %s" % rpm_keyword
         retval = self.sh_run(log, command)
+        if retval.cr_exit_status == 1 and retval.cr_stdout == "":
+            return 0, None
         if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -3812,7 +3833,7 @@ class SSHHost():
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
-            return None
+            return -1, None
         rpm_names = retval.cr_stdout.splitlines()
         if len(rpm_names) == 0:
             log.cl_error("unexpected stdout of command [%s] on host [%s], "
@@ -3822,28 +3843,23 @@ class SSHHost():
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
-            return None
+            return -1, None
         version = None
         for rpm_name in rpm_names:
-            minus_index = -1
-            for current_index in range(len(rpm_name) - 1):
-                if (rpm_name[current_index] == "-" and
-                        rpm_name[current_index + 1].isdigit()):
-                    minus_index = current_index
-                    break
-            if minus_index == -1:
-                log.cl_error("RPM [%s] on host [%s] does not have expected format",
+            rpm_version = rpm_name2version(log, rpm_name)
+            if rpm_version is None:
+                log.cl_error("failed to get version of RPM [%s] on host [%s]",
                              rpm_name, self.sh_hostname)
-                return None
-            rpm_version = rpm_name[minus_index + 1:]
+                return -1, None
+
             if version is None:
                 version = rpm_version
             elif rpm_version != version:
                 log.cl_error("RPM [%s] on host [%s] has unexpected version "
                              "[%s],  expected [%s]", rpm_name, rpm_version,
                              version)
-                return None
-        return version
+                return -1, None
+        return 0, version
 
     def sh_ip_addresses(self, log):
         """
@@ -3865,7 +3881,7 @@ class SSHHost():
 
     def sh_download_file(self, log, url, fpath, expected_checksum,
                          output_fname=None, checksum_command="sha1sum",
-                         use_curl=False):
+                         use_curl=False, no_check_certificate=False):
         """
         Download file and check checksum after downloading.
         Use existing file if checksum is expected.
@@ -3926,6 +3942,11 @@ class SSHHost():
             else:
                 download_command = ("wget %s -O %s" %
                                     (url, output_fname))
+
+        # Curl does not care about certificate
+        if not use_curl and no_check_certificate:
+            download_command += " --no-check-certificate"
+
         command = ("mkdir -p %s && cd %s && %s" %
                    (target_dir, target_dir, download_command))
         log.cl_info("running command [%s] on host [%s]",
@@ -4342,6 +4363,78 @@ class SSHHost():
                          retval.cr_stderr)
             return None
         return mac
+
+    def sh_ip_delete(self, log, ip_address, cidr):
+        """
+        Delete an IP from the host
+        """
+        subnet = ip_address + "/" + str(cidr)
+        interface = self.sh_ip_subnet2interface(log, subnet)
+        if interface is None:
+            log.cl_error("failed to get the interface of subnet [%s] "
+                         "on host [%s]", subnet, self.sh_hostname)
+            return -1
+
+        command = ("ip address delete %s dev %s" %
+                   (subnet, interface))
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        ip_addresses = self.sh_ip_addresses(log)
+        if ip_addresses is None:
+            log.cl_error("failed to get IP addresses of host [%s]",
+                         self.sh_hostname)
+            return -1
+        if ip_address in ip_addresses:
+            log.cl_error("host [%s] still has IP [%s] after removal",
+                         self.sh_hostname, ip_address)
+            return -1
+        return 0
+
+    def sh_ip_add(self, log, ip_address, cidr):
+        """
+        Add IP to a host.
+        # A number, CIDR from network mask, e.g. 22
+        """
+        subnet = ip_address + "/" + str(cidr)
+        interface = self.sh_ip_subnet2interface(log, subnet)
+        if interface is None:
+            log.cl_error("failed to get the interface of subnet [%s] "
+                         "on host [%s]", subnet, self.sh_hostname)
+            return -1
+
+        command = ("ip address add %s dev %s" %
+                   (subnet, interface))
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        ip_addresses = self.sh_ip_addresses(log)
+        if ip_addresses is None:
+            log.cl_error("failed to get IP addresses of NFS server [%s]",
+                         self.sh_hostname)
+            return -1
+        if ip_address not in ip_addresses:
+            log.cl_error("NFS server [%s] still does not have IP [%s] after "
+                         "adding it",
+                         self.sh_hostname, ip_address)
+            return -1
+        return 0
 
 
 def get_local_host(ssh=True, host_type=SSHHost):

@@ -478,8 +478,8 @@ class BarreleAgent():
         Return the Collectd version, e.g. 5.12.0.barreleye0-1.el7.x86_64
         """
         host = self.bea_host
-        version = host.sh_rpm_version(log, "collectd-")
-        if version is None:
+        ret, version = host.sh_rpm_version(log, "collectd-")
+        if ret or version is None:
             log.cl_error("failed to get the Collectd RPM version on host [%s]",
                          host.sh_hostname)
         return version

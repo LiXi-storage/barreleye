@@ -18,6 +18,40 @@ CORAL_RELEASE_PLUGIN_DICT = {}
 CORAL_DEVEL_PLUGIN_DICT = {}
 # Lock to prevent parallel RPM check/install
 RPM_INSTALL_LOCK = constant.CORAL_LOG_DIR + "/rpm_install"
+# Key is the name of the package under ISO, value is CoralPackageBuild()
+CORAL_PACKAGE_DICT = {}
+
+
+class CoralFileDownload():
+    """
+    Download of packages
+    """
+    # pylint: disable=too-few-public-methods
+    def __init__(self, url, sha1sum, fname=None, no_check_certificate=False):
+        # URL of the file
+        self.cfd_url = url
+        # Sha1sum of the file
+        self.cfd_sha1sum = sha1sum
+        # filename
+        if fname is None:
+            self.cfd_fname = os.path.basename(url)
+        else:
+            self.cfd_fname = fname
+        # Whether need to ignore certificate when downloading
+        self.cfd_no_check_certificate = no_check_certificate
+
+    def cfd_download(self, log, host, dirpath):
+        """
+        Download file to dir
+        """
+        fpath = dirpath + "/" + self.cfd_fname
+        ret = host.sh_download_file(log, self.cfd_url, fpath,
+                                    self.cfd_sha1sum,
+                                    no_check_certificate=self.cfd_no_check_certificate)
+        if ret:
+            log.cl_error("failed to download Nettle tarball")
+            return -1
+        return 0
 
 
 class CoralCommand():
@@ -53,13 +87,14 @@ def coral_command_register(command_name, obj):
 
 class CoralPluginType():
     """
-    Each resource has this type
+    Each Coral plugin has this type
     """
     # pylint: disable=too-few-public-methods
     def __init__(self, plugin_name,
                  build_dependent_pips=None, is_devel=True,
                  need_lustre_rpms=False, need_collectd=False,
-                 install_lustre=False):
+                 install_lustre=False,
+                 packages=None):
         # The name of the plugin
         self.cpt_plugin_name = plugin_name
         # Whether the plugin is only for devel
@@ -74,6 +109,10 @@ class CoralPluginType():
         self.cpt_build_dependent_pips = build_dependent_pips
         # Whether install Lustre library RPM for build
         self.cpt_install_lustre = install_lustre
+        if packages is None:
+            self.cpt_packages = []
+        else:
+            self.cpt_packages = packages
 
     def cpt_build_dependent_rpms(self, distro):
         """
@@ -114,6 +153,37 @@ def coral_plugin_register(plugin):
     else:
         CORAL_RELEASE_PLUGIN_DICT[plugin_name] = plugin
     CORAL_PLUGIN_DICT[plugin_name] = plugin
+
+
+class CoralPackageBuild():
+    """
+    Each package has this build type
+    """
+    # pylint: disable=too-few-public-methods
+    def __init__(self, package_name):
+        # The name of the package
+        self.cpb_package_name = package_name
+
+    def cpb_build(self, log, workspace, local_host, source_dir, target_cpu,
+                  type_cache, iso_cache, packages_dir, extra_iso_fnames,
+                  extra_package_fnames, extra_rpm_names, option_dict):
+        """
+        Build the package
+        """
+        # pylint: disable=unused-argument,no-self-use
+        return 0
+
+
+def coral_package_register(package):
+    """
+    Register a new package
+    """
+    package_name = package.cpb_package_name
+    if package_name in CORAL_PACKAGE_DICT:
+        logging.error("package [%s] has already been registered",
+                      package_name)
+        sys.exit(1)
+    CORAL_PACKAGE_DICT[package_name] = package
 
 
 def install_pip3_package_from_file(log, host, type_cache, tarball_url,

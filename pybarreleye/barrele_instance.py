@@ -119,6 +119,7 @@ class BarreleInstance():
         """
         Install RPMs on the cluster
         """
+
         ret = self._bei_get_collectd_rpm_types(log)
         if ret:
             log.cl_error("failed to get Collectd RPM types")
