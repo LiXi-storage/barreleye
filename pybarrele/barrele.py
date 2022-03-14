@@ -8,12 +8,12 @@ from pycoral import version
 from pycoral import clog
 from pycoral import constant
 from pycoral import lustre_version
-from pybarreleye import barrele_instance
-from pybarreleye import barrele_constant
-from pybarreleye import barrele_collectd
+from pybarrele import barrele_instance
+from pybarrele import barrele_constant
+from pybarrele import barrele_collectd
 
 
-def init_env(config_fpath, logdir, log_to_file):
+def init_env(config_fpath, logdir, log_to_file, iso):
     """
     Init log and instance for commands that needs it
     """
@@ -26,7 +26,8 @@ def init_env(config_fpath, logdir, log_to_file):
                                                                 barrele_config,
                                                                 config_fpath,
                                                                 log_to_file,
-                                                                log_dir_is_default)
+                                                                log_dir_is_default,
+                                                                iso)
     if barreleye_instance is None:
         log.cl_error("failed to init Barreleye instance")
         cmd_general.cmd_exit(log, 1)
@@ -59,10 +60,11 @@ class BarreleClusterCommand():
         """
         log, barreleye_instance = init_env(self._bcc_config_fpath,
                                            self._bcc_logdir,
-                                           self._bcc_log_to_file)
+                                           self._bcc_log_to_file,
+                                           self._bcc_iso)
         cmd_general.check_argument_bool(log, "erase_influxdb", erase_influxdb)
         cmd_general.check_argument_bool(log, "drop_database", drop_database)
-        rc = barreleye_instance.bei_cluster_install(log, iso=self._bcc_iso,
+        rc = barreleye_instance.bei_cluster_install(log,
                                                     erase_influxdb=erase_influxdb,
                                                     drop_database=drop_database)
         cmd_general.cmd_exit(log, rc)
@@ -696,7 +698,8 @@ class BarreleServerCommand():
         """
         log, barreleye_instance = init_env(self._bsc_config_fpath,
                                            self._bsc_logdir,
-                                           self._bsc_log_to_file)
+                                           self._bsc_log_to_file,
+                                           self._bsc_iso)
         server = barreleye_instance.bei_barreleye_server
         servers = [server]
         ret = print_servers(log, barreleye_instance, servers, status=True,
@@ -709,7 +712,8 @@ class BarreleServerCommand():
         """
         log, barreleye_instance = init_env(self._bsc_config_fpath,
                                            self._bsc_logdir,
-                                           self._bsc_log_to_file)
+                                           self._bsc_log_to_file,
+                                           self._bsc_iso)
         server = barreleye_instance.bei_barreleye_server
         log.cl_stdout(server.bes_server_host.sh_hostname)
         cmd_general.cmd_exit(log, 0)
@@ -734,7 +738,8 @@ class BarreleAgentCommand():
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
-                                           self._bac_log_to_file)
+                                           self._bac_log_to_file,
+                                           self._bac_iso)
         cmd_general.check_argument_bool(log, "status", status)
         agents = list(barreleye_instance.bei_agent_dict.values())
         ret = print_agents(log, barreleye_instance, agents, status=status)
@@ -747,7 +752,8 @@ class BarreleAgentCommand():
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
-                                           self._bac_log_to_file)
+                                           self._bac_log_to_file,
+                                           self._bac_iso)
         host = cmd_general.check_argument_str(log, "host", host)
         if host not in barreleye_instance.bei_agent_dict:
             log.cl_error("host [%s] is not configured as Barreleye agent",
@@ -766,7 +772,8 @@ class BarreleAgentCommand():
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
-                                           self._bac_log_to_file)
+                                           self._bac_log_to_file,
+                                           self._bac_iso)
         host = cmd_general.check_argument_str(log, "host", host)
 
         hostnames = cmd_general.parse_list_string(log, host)
@@ -784,7 +791,8 @@ class BarreleAgentCommand():
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
-                                           self._bac_log_to_file)
+                                           self._bac_log_to_file,
+                                           self._bac_iso)
         host = cmd_general.check_argument_str(log, "host", host)
 
         hostnames = cmd_general.parse_list_string(log, host)

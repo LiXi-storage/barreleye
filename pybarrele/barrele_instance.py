@@ -8,10 +8,10 @@ from pycoral import constant
 from pycoral import install_common
 from pycoral import ssh_host
 from pycoral import cmd_general
-from pybarreleye import barrele_constant
-from pybarreleye import barrele_collectd
-from pybarreleye import barrele_server
-from pybarreleye import barrele_agent
+from pybarrele import barrele_constant
+from pybarrele import barrele_collectd
+from pybarrele import barrele_server
+from pybarrele import barrele_agent
 
 # Default collect interval in seconds
 BARRELE_COLLECT_INTERVAL = 60
@@ -30,7 +30,7 @@ class BarreleInstance():
     """
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, workspace, config, config_fpath, log_to_file,
-                 logdir_is_default, local_host, collect_interval,
+                 logdir_is_default, iso_fpath, local_host, collect_interval,
                  continuous_query_periods, jobstat_pattern, lustre_fallback_version,
                  enable_lustre_exp_mdt, enable_lustre_exp_ost, host_dict,
                  agent_dict, barreleye_server):
@@ -79,6 +79,8 @@ class BarreleInstance():
         #
         # Key is RPM type. Value is RPM fname.
         self.bei_collectd_rpm_type_dict = None
+        # ISO file path
+        self.bei_iso_fpath = iso_fpath
 
     def _bei_get_collectd_rpm_types(self, log):
         """
@@ -177,12 +179,13 @@ class BarreleInstance():
             return -1
         return 0
 
-    def bei_cluster_install(self, log, iso=None, erase_influxdb=False,
+    def bei_cluster_install(self, log, erase_influxdb=False,
                             drop_database=False):
         """
         Install Barrele on all host (could include localhost).
         """
         # Gives a little bit time for canceling the command
+        iso = self.bei_iso_fpath
         if erase_influxdb:
             log.cl_warning("data and metadata of Influxdb on host [%s] "
                            "will be all erased",
@@ -304,7 +307,7 @@ def parse_server_config(log, config, config_fpath, host_dict):
 
 
 def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
-                          logdir_is_default):
+                          logdir_is_default, iso_fpath):
     """
     Parse the config and init the instance
     """
@@ -478,7 +481,7 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
 
     local_host = ssh_host.get_local_host()
     instance = BarreleInstance(workspace, config, config_fpath, log_to_file,
-                               logdir_is_default, local_host, collect_interval,
+                               logdir_is_default, iso_fpath, local_host, collect_interval,
                                continuous_query_periods, jobstat_pattern,
                                lustre_fallback_version, enable_lustre_exp_mdt,
                                enable_lustre_exp_ost, host_dict,

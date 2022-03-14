@@ -7,8 +7,8 @@ from pycoral import clog
 from pycoral import cmd_general
 from pycoral import ssh_host
 
-
-LANGUAGES = ["zh", "en"]
+# pic is not really a language, but it will be in the shared directory.
+LANGUAGES = ["zh", "en", "pic"]
 
 
 class CoralDocFile():

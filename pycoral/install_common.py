@@ -293,7 +293,9 @@ class CoralInstallationHost():
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, workspace, host, is_local, iso_dir, pip_libs,
                  dependent_rpms, send_fpath_dict, need_backup_fpaths,
-                 coral_reinstall=True, tsinghua_mirror=False):
+                 coral_reinstall=True, tsinghua_mirror=False,
+                 disable_selinux=True, disable_firewalld=True,
+                 change_sshd_max_startups=True, config_rsyslog=True):
         self.cih_workspace = workspace
         # ISO dir that configured in repo file
         self.cih_iso_dir = iso_dir
@@ -326,6 +328,14 @@ class CoralInstallationHost():
         self.cih_preserve_services = []
         # Whether to use YUM and pip mirror from Tsinghua University
         self.cih_tsinghua_mirror = tsinghua_mirror
+        # Whether disable SELinux on the host
+        self.cih_disable_selinux = disable_selinux
+        # Whether disable Firewalld on the host
+        self.cih_disable_firewalld = disable_firewalld
+        # Whether change sshd max startups on the host
+        self.cih_change_sshd_max_startups = change_sshd_max_startups
+        # Whether to change rsyslog to avoid flood of login
+        self.cih_config_rsyslog = config_rsyslog
 
     def _cih_send_iso_dir(self, log):
         """
@@ -665,19 +675,22 @@ class CoralInstallationHost():
 
         return 0
 
-    def cih_install(self, log, repo_config_fpath, disable_selinux=True,
-                    disable_firewalld=True, change_sshd_max_startups=True):
+    def cih_install(self, log, repo_config_fpath):
         """
         Install the RPMs and pip packages on a host, and send the files
         :param send_fpath_dict: key is the fpath on localhost, value is the
         fpath on remote host.
         """
         # pylint: disable=too-many-statements,too-many-branches,too-many-locals
+        disable_selinux = self.cih_disable_selinux
+        disable_firewalld = self.cih_disable_firewalld
+        change_sshd_max_startups = self.cih_change_sshd_max_startups
         pip_libs = self.cih_pip_libs
         dependent_rpms = self.cih_dependent_rpms
         send_fpath_dict = self.cih_send_fpath_dict
         need_backup_fpaths = self.cih_need_backup_fpaths
         coral_reinstall = self.cih_coral_reinstall
+        config_rsyslog = self.cih_config_rsyslog
         host = self.cih_host
         hostname = host.sh_hostname
         # only support RHEL7 series
@@ -691,11 +704,12 @@ class CoralInstallationHost():
                          distro, hostname)
             return -1
 
-        ret = self._cih_config_rsyslog(log)
-        if ret:
-            log.cl_error("failed to configure rsyslog on host [%s]",
-                         hostname)
-            return -1
+        if config_rsyslog:
+            ret = self._cih_config_rsyslog(log)
+            if ret:
+                log.cl_error("failed to configure rsyslog on host [%s]",
+                             hostname)
+                return -1
 
         if disable_selinux:
             ret = self._cih_disable_selinux(log)
@@ -867,8 +881,10 @@ class CoralInstallationCluster():
 
     def cic_add_hosts(self, hosts, pip_libs, dependent_rpms,
                       send_fpath_dict, need_backup_fpaths,
-                      coral_reinstall=True,
-                      tsinghua_mirror=False):
+                      coral_reinstall=True, tsinghua_mirror=False,
+                      disable_selinux=True, disable_firewalld=True,
+                      change_sshd_max_startups=True,
+                      config_rsyslog=True):
         """
         Add installation host.
         """
@@ -881,7 +897,11 @@ class CoralInstallationCluster():
                                                       send_fpath_dict,
                                                       need_backup_fpaths,
                                                       coral_reinstall=coral_reinstall,
-                                                      tsinghua_mirror=tsinghua_mirror)
+                                                      tsinghua_mirror=tsinghua_mirror,
+                                                      disable_selinux=disable_selinux,
+                                                      disable_firewalld=disable_firewalld,
+                                                      change_sshd_max_startups=change_sshd_max_startups,
+                                                      config_rsyslog=config_rsyslog)
             self.cic_installation_hosts.append(installation_host)
 
     def cic_install(self, log, parallelism=10):
@@ -911,11 +931,18 @@ class CoralInstallationCluster():
 
         args_array = []
         thread_ids = []
+        hosts = []
         for installation_host in self.cic_installation_hosts:
             args = (installation_host, self.cic_repo_config_fpath)
             args_array.append(args)
             thread_id = "host_install_%s" % installation_host.cih_host.sh_hostname
             thread_ids.append(thread_id)
+            hosts.append(installation_host.cih_host)
+
+        ret = ssh_host.check_clocks_diff(log, hosts, max_diff=60)
+        if ret:
+            log.cl_error("too much clock difference between hosts")
+            return -1
 
         parallel_execute = parallel.ParallelExecute(log,
                                                     self.cic_workspace,

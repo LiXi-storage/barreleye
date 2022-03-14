@@ -160,9 +160,19 @@ class CoralPackageBuild():
     Each package has this build type
     """
     # pylint: disable=too-few-public-methods
-    def __init__(self, package_name):
+    def __init__(self, package_name, depend_package_names=None):
         # The name of the package
         self.cpb_package_name = package_name
+        # The packages to build before building this package. This is
+        # useful when need to install other newly buildt packages.
+        self.cpb_depend_package_names = depend_package_names
+
+    def cpb_build_dependent_rpms(self, distro):
+        """
+        Return the RPMs needed to install before building
+        """
+        # pylint: disable=unused-argument,no-self-use
+        return []
 
     def cpb_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,

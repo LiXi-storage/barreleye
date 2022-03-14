@@ -7,7 +7,7 @@ from http import HTTPStatus
 from pycoral import utils
 from pycoral import lustre_version
 from pycoral import ssh_host
-from pybarreleye import barrele_collectd
+from pybarrele import barrele_collectd
 
 
 class BarreleAgent():

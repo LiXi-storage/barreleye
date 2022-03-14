@@ -24,7 +24,7 @@ EXTRA_DIST = \
 	detect-distro.sh \
 	doc \
 	example_configs/barreleye.toml \
-	pybarreleye/*.py \
+	pybarrele/*.py \
 	pybuild/*.py \
 	pycoral/*.py \
 	version

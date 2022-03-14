@@ -2,7 +2,7 @@ PYTHON_COMMANDS = \
 	../barrele \
 	../coral
 
-PYTHON_LIB_FILES = $(wildcard ../pybuild/*.py ../pybarreleye/*.py ../pycoral/*.py)
+PYTHON_LIB_FILES = $(wildcard ../pybuild/*.py ../pybarrele/*.py ../pycoral/*.py)
 PYTHON_FILES = $(PYTHON_LIB_FILES) $(PYTHON_COMMANDS)
 PYTHON_CHECKS = $(PYTHON_FILES:%=%.python_checked)
 

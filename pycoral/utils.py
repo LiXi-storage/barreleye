@@ -417,14 +417,19 @@ def mkdir(dirname):
 WAIT_CONDITION_QUIT = 8192
 
 
-def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1):
+def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1,
+                   quit_func=None):
     """
     Wait until the condition_func returns 0
 
     The first argument of condition_func should be log
     The other arguments of funct should be args
     The return value should be an integer or a tuple starts with an integer
-    If the integer returned by condition_func is zero, quit waiting
+    If the integer returned by condition_func is zero, quit waiting.
+
+    If quit_func is specified, and its return value is not 0, will quit
+    wait immdiately. The arguments and return values of quit_func are the
+    same with condition_func.
     """
     time_start = time.time()
     while True:
@@ -436,6 +441,15 @@ def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1):
 
         if ret == 0:
             break
+
+        if quit_func is not None:
+            retval = quit_func(log, *args)
+            if isinstance(retval, int):
+                ret = retval
+            else:
+                ret = retval[0]
+            if ret:
+                break
 
         time_now = time.time()
         elapsed = time_now - time_start

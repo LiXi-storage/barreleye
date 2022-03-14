@@ -7,7 +7,7 @@ from pycoral import ssh_host
 from pycoral import clog
 from pycoral import cmd_general
 from pybuild import build_common
-from pybarreleye import barrele_constant
+from pybarrele import barrele_constant
 
 PACAKGE_URL_DICT = {}
 # The URL of Collectd tarball

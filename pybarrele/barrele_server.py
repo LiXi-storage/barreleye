@@ -10,8 +10,8 @@ from http import HTTPStatus
 from slugify import slugify
 import requests
 from pycoral import utils
-from pybarreleye import barrele_constant
-from pybarreleye import barrele_influxdb
+from pybarrele import barrele_constant
+from pybarrele import barrele_influxdb
 
 
 # The Influxdb config fpath
@@ -315,7 +315,6 @@ class BarreleServer():
         """
         Create Barreleye database of Influxdb
         """
-        # The service might have not fully started now, so wait a little bit
         host = self.bes_server_host
         if drop_database:
             ret = self._bes_influxdb_drop_database(log)
@@ -334,6 +333,27 @@ class BarreleServer():
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
+        return 0
+
+    def _bes_influxdb_check_service(self, log, drop_database=False):
+        """
+        Check whether Influxdb is still up when creating database.
+        """
+        # pylint: disable=unused-argument
+        host = self.bes_server_host
+        service_name = "influxdb"
+
+        ret = host.sh_service_is_active(log, service_name)
+        if ret < 0:
+            log.cl_error("failed to check whether service [%s] is active "
+                         "on host [%s]", service_name, host.sh_hostname)
+            return -1
+
+        if ret == 0:
+            log.cl_error("service [%s] is NOT active on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+
         return 0
 
     def _bes_influxdb_service_start_enable(self, log):
@@ -1120,7 +1140,8 @@ class BarreleServer():
 
         ret = utils.wait_condition(log, self._bes_influxdb_create_database,
                                    (drop_database,),
-                                   timeout=120)
+                                   timeout=600,
+                                   quit_func=self._bes_influxdb_check_service)
         if ret:
             log.cl_error("failed to create Influxdb database")
             return -1

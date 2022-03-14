@@ -302,7 +302,7 @@ def prepare_install_modulemd_tools(log, host):
 
 
 def install_build_dependency(log, workspace, host, distro, target_cpu,
-                             type_cache, plugins, pip_dir,
+                             type_cache, plugins, package_dict, pip_dir,
                              tsinghua_mirror=False):
     """
     Install the dependency of building Coral
@@ -351,12 +351,15 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
             return -1
         dependent_rpms += rpms
 
-    # We need all depdendency for all plugins since no matter they
+    # We need all dependency for all plugins since no matter they
     # are needed or not, the Python codes will be checked, and the Python
     # codes might depend on the RPMs.
     for plugin in build_common.CORAL_PLUGIN_DICT.values():
         dependent_rpms += plugin.cpt_build_dependent_rpms(distro)
         dependent_pips += plugin.cpt_build_dependent_pips
+
+    for package in package_dict.values():
+        dependent_rpms += package.cpb_build_dependent_rpms(distro)
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
                                                  dependent_pips,
@@ -552,12 +555,58 @@ def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
     return 0
 
 
-def build_packages(log, workspace, local_host, source_dir, target_cpu,
-                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                   extra_package_fnames, extra_rpm_names, option_dict,
-                   plugins):
+def resolve_package_build_order(log, package_dict):
     """
-    Build the packages in cpt_packages
+    Put the package into a ordered list according to the dependency.
+    """
+    # pylint: disable=too-many-branches
+    ordered_packages = []
+    former_included = -1
+    while len(ordered_packages) != former_included:
+        former_included = len(ordered_packages)
+        if former_included == len(package_dict):
+            break
+
+        for package in package_dict.values():
+            if package in ordered_packages:
+                continue
+            if package.cpb_depend_package_names is None:
+                ordered_packages.append(package)
+                continue
+            depend_included = True
+            for package_name in package.cpb_depend_package_names:
+                if package_name not in package_dict:
+                    log.cl_error("unknown depend package [%s]",
+                                 package_name)
+                depend = package_dict[package_name]
+                if depend not in ordered_packages:
+                    depend_included = False
+                    break
+            if depend_included:
+                ordered_packages.append(package)
+
+    if former_included != len(package_dict):
+        resolved = ""
+        not_resolved = ""
+        for package in package_dict.values():
+            if package in ordered_packages:
+                if resolved != "":
+                    resolved += ","
+                resolved += package.cpb_package_name
+                continue
+            if not_resolved != "":
+                not_resolved += ","
+            not_resolved += package.cpb_package_name
+        log.cl_error("failed to resolve the build dependency of "
+                     "packages [%s], resolved [%s]",
+                     not_resolved, resolved)
+        return None
+    return ordered_packages
+
+
+def get_needed_packages(log, plugins):
+    """
+    Return a dict of packages needed to build.
     """
     # pylint: disable=too-many-locals
     package_dict = {}
@@ -565,14 +614,55 @@ def build_packages(log, workspace, local_host, source_dir, target_cpu,
         plugin_name = plugin.cpt_plugin_name
         for package_name in plugin.cpt_packages:
             if package_name not in build_common.CORAL_PACKAGE_DICT:
-                log.cl_error("package [%s] required by plugin [%s] is not defined",
+                log.cl_error("package [%s] required by plugin [%s] is "
+                             "not defined",
                              package_name, plugin_name)
-                return -1
+                return None
             package = build_common.CORAL_PACKAGE_DICT[package_name]
             if package_name not in package_dict:
                 package_dict[package_name] = package
 
-    for package in package_dict.values():
+    while True:
+        added = False
+        packages = list(package_dict.values())
+        for package in packages:
+            if package.cpb_depend_package_names is None:
+                continue
+            for package_name in package.cpb_depend_package_names:
+                if package_name in package_dict:
+                    continue
+                if package_name not in build_common.CORAL_PACKAGE_DICT:
+                    log.cl_error("unknown package [%s]", package_name)
+                    return None
+                package_dict[package_name] = \
+                    build_common.CORAL_PACKAGE_DICT[package_name]
+                added = True
+        if not added:
+            break
+
+    return package_dict
+
+
+def build_packages(log, workspace, local_host, source_dir, target_cpu,
+                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
+                   extra_package_fnames, extra_rpm_names, option_dict,
+                   package_dict):
+    """
+    Build the packages in cpt_packages.
+    """
+    # pylint: disable=too-many-locals
+    ordered_packages = resolve_package_build_order(log, package_dict)
+    if ordered_packages is None:
+        return -1
+
+    package_str = ""
+    for package in ordered_packages:
+        if package_str != "":
+            package_str += ","
+        package_str += package.cpb_package_name
+    log.cl_info("building packages [%s]", package_str)
+
+    for package in ordered_packages:
         package_name = package.cpb_package_name
         ret = package.cpb_build(log, workspace, local_host, source_dir,
                                 target_cpu, type_cache, iso_cache,
@@ -737,9 +827,14 @@ def build(log, source_dir, workspace,
                      local_host.sh_hostname)
         return -1
 
+    package_dict = get_needed_packages(log, plugins)
+    if package_dict is None:
+        log.cl_error("failed to get the needed packages")
+        return -1
+
     ret = install_build_dependency(log, workspace, local_host, distro,
                                    target_cpu, type_cache, plugins,
-                                   build_pip_dir,
+                                    package_dict, build_pip_dir,
                                    tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install dependency for building")
@@ -763,7 +858,7 @@ def build(log, source_dir, workspace,
     ret = build_packages(log, workspace, local_host, source_dir, target_cpu,
                          type_cache, iso_cache, packages_dir, extra_iso_fnames,
                          extra_package_fnames, extra_rpm_names, option_dict,
-                         plugins)
+                         package_dict)
     if ret:
         log.cl_error("failed to build packages")
         return -1

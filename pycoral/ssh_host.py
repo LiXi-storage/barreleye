@@ -1752,22 +1752,6 @@ class SSHHost():
 
         return rpm_infos["checksum_data"]
 
-    def sh_sha256sum(self, log, fpath):
-        """
-        Calculate the sha256sum of a file
-        """
-        command = "sha256sum %s | awk '{print $1}'" % fpath
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command, self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return None
-        return retval.cr_stdout.strip()
-
     def sh_virsh_dominfo(self, log, hostname, quiet=False):
         """
         Get the virsh dominfo of a domain
@@ -2676,11 +2660,18 @@ class SSHHost():
         """
         Start and enable a service
         """
+        skip_wait = False
         if restart:
             ret = self.sh_service_restart(log, service_name)
             command = "restart"
         else:
-            ret = self.sh_service_start(log, service_name)
+            command = ("systemctl is-active %s" % (service_name))
+            retval = self.sh_run(log, command)
+            if retval.cr_stdout == "active\n":
+                skip_wait = True
+                ret = 0
+            else:
+                ret = self.sh_service_start(log, service_name)
             command = "start"
         if ret:
             log.cl_error("failed to %s service [%s] on host [%s]",
@@ -2692,6 +2683,9 @@ class SSHHost():
             log.cl_error("failed to enable service [%s] on host [%s]",
                          service_name, self.sh_hostname)
             return -1
+
+        if skip_wait:
+            return 0
 
         command = ("systemctl status %s" % service_name)
         ret = self.sh_wait_update(log, command, diff_exit_status=0,
@@ -3066,6 +3060,39 @@ class SSHHost():
             return -1
         return 0
 
+    def sh_get_checksum(self, log, path, checksum_command="sha256sum"):
+        """
+        Get a file's checksum.
+        """
+        command = "%s %s" % (checksum_command, path)
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return None
+
+        lines = retval.cr_stdout.splitlines()
+        if len(lines) != 1:
+            log.cl_error("unexpected output of command [%s] on host [%s], "
+                         "stdout = [%s]",
+                         command, self.sh_hostname, retval.cr_stdout)
+            return None
+
+        fields = lines[0].split()
+        if len(fields) != 2:
+            log.cl_error("unexpected field number of output of command "
+                         "[%s] on host [%s], stdout = [%s]",
+                         command, self.sh_hostname, retval.cr_stdout)
+            return None
+
+        calculated_checksum = fields[0]
+        return calculated_checksum
+
     def sh_check_checksum(self, log, path, expected_checksum,
                           checksum_command="sha256sum"):
         """
@@ -3079,33 +3106,14 @@ class SSHHost():
         if exists == 0:
             return -1
 
-        command = "%s %s" % (checksum_command, path)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+        calculated_checksum = self.sh_get_checksum(log, path,
+                                                   checksum_command=checksum_command)
+        if calculated_checksum is None:
+            log.cl_error("failed to calculate the checksum of file [%s] on "
+                         "host [%s]",
+                         path, self.sh_hostname)
             return -1
 
-        lines = retval.cr_stdout.splitlines()
-        if len(lines) != 1:
-            log.cl_error("unexpected output of command [%s] on host [%s], "
-                         "stdout = [%s]",
-                         command, self.sh_hostname, retval.cr_stdout)
-            return -1
-
-        fields = lines[0].split()
-        if len(fields) != 2:
-            log.cl_error("unexpected field number of output of command "
-                         "[%s] on host [%s], stdout = [%s]",
-                         command, self.sh_hostname, retval.cr_stdout)
-            return -1
-
-        calculated_checksum = fields[0]
         if expected_checksum != calculated_checksum:
             log.cl_error("unexpected [%s] checksum [%s] of file [%s] on "
                          "host [%s], expected [%s]",
@@ -4566,3 +4574,44 @@ def get_or_add_host_to_dict(log, host_dict, hostname, ssh_key,
                          hostname, host.sh_identity_file, ssh_key)
             return None
     return host
+
+
+def check_clock_diff(log, host0, host1, max_diff=60):
+    """
+    Return -1 if the clock diff is too large.
+    """
+    seconds0 = host0.sh_epoch_seconds(log)
+    if seconds0 < 0:
+        log.cl_error("failed to get epoch seconds of host [%s]",
+                     host0.sh_hostname)
+        return -1
+
+    seconds1 = host1.sh_epoch_seconds(log)
+    if seconds1 < 0:
+        log.cl_error("failed to get epoch seconds of host [%s]",
+                     host1.sh_hostname)
+        return -1
+
+    if seconds0 + max_diff < seconds1 or seconds1 + max_diff < seconds0:
+        log.cl_error("diff of clocks of host [%s] and [%s] is larger "
+                     "than [%s] seconds",
+                     host0.sh_hostname, host1.sh_hostname, max_diff)
+        return -1
+    return 0
+
+
+def check_clocks_diff(log, hosts, max_diff=60):
+    """
+    Return -1 if the clocks of the hosts differ a lot.
+    """
+    if len(hosts) < 2:
+        return 0
+    host = hosts[0]
+    for compare_host in hosts[1:]:
+        ret = check_clock_diff(log, compare_host, host, max_diff=max_diff)
+        if ret:
+            log.cl_error("clocks of host [%s] and [%s] differ a lot",
+                         host.sh_hostname,
+                         compare_host.sh_hostname)
+            return -1
+    return 0

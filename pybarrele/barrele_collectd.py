@@ -5,7 +5,7 @@ Library for generating collectd config
 import re
 import collections
 from pycoral import lustre_version
-from pybarreleye import barrele_constant
+from pybarrele import barrele_constant
 
 LIBCOLLECTDCLIENT_TYPE_NAME = "libcollectdclient"
 COLLECTD_TYPE_NAME = "collectd"
