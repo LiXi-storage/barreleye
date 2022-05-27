@@ -88,6 +88,7 @@ CORAL_DEPENDENT_RPMS = ["git",  # For build anything from Git repository
                         "lsof",  # Needed by Lustre test scriot.
                         "net-snmp-libs",  # needed by Lustre RPM
                         "net-snmp-agent-libs",  # needed by Lustre RPM
+                        "net-tools",  # netstat is needed by Lustre test RPM
                         "nfs-utils",
                         "pciutils",
                         "pdsh",  # Lustre test need to run remote commands
@@ -103,9 +104,9 @@ CORAL_DEPENDENT_RPMS = ["git",  # For build anything from Git repository
 CORAL_DEPENDENT_PIPS = []
 
 # The message to use in commands
-CMD_MSG_ERROR = "<error>"
-CMD_MSG_NONE = "<none>"
-CMD_MSG_UNKNOWN = "<unknown>"
+CMD_MSG_ERROR = "@error@"
+CMD_MSG_NONE = "@none@"
+CMD_MSG_UNKNOWN = "@unknown@"
 
 TITLE_CURRENT_RELEASE = "Current Release"
 

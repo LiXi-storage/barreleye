@@ -18,10 +18,12 @@ from pybuild import build_doc
 
 # The url of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_SHA1SUM
-PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/releases/download/v4.3/pyinstaller-4.3.tar.gz"
+PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/archive/refs/tags/v4.10.tar.gz"
 # The sha1sum of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_URL
-PYINSTALLER_TARBALL_SHA1SUM = "972f24ef11cf69875daa2ebd4804c5f505c0fec8"
+PYINSTALLER_TARBALL_SHA1SUM = "60c595f5cbe66223d33c6edf1bb731ab9f02c3de"
+# "v4.10.tar.gz" is not a good name, specify the fname to save.
+PYINSTALLER_TABALL_FNAME = "pyinstaller-4.10.tar.gz"
 
 
 def merge_list(list_x, list_y):
@@ -270,10 +272,12 @@ def install_pyinstaller(log, host, type_cache, tsinghua_mirror=False):
         return 0
 
     tarball_url = PYINSTALLER_TARBALL_URL
+    tarball_fname = PYINSTALLER_TABALL_FNAME
     expected_sha1sum = PYINSTALLER_TARBALL_SHA1SUM
     ret = build_common.install_pip3_package_from_file(log, host, type_cache,
                                                       tarball_url,
                                                       expected_sha1sum,
+                                                      tarball_fname=tarball_fname,
                                                       tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install pip package of pyinstaller")
@@ -325,7 +329,7 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                      command, host.sh_hostname)
         return -1
 
-    dependent_pips = []
+    dependent_pips = ["wheel"]  # Needed for pyinstaller
     dependent_rpms = ["createrepo",  # To create the repo in ISO
                       "e2fsprogs-devel",  # Needed for ./configure
                       "genisoimage",  # Generate the ISO image

@@ -454,7 +454,7 @@ def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1,
         time_now = time.time()
         elapsed = time_now - time_start
 
-        if elapsed < timeout:
+        if timeout is None or elapsed < timeout:
             if sleep_interval > 0:
                 time.sleep(sleep_interval)
             continue

@@ -325,7 +325,7 @@ class BarreleServer():
                    barrele_constant.BARRELE_INFLUXDB_DATABASE_NAME)
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
+            log.cl_debug("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
                          host.sh_hostname,
@@ -1138,6 +1138,8 @@ class BarreleServer():
                          "host [%s]", service_name, host.sh_hostname)
             return -1
 
+        log.cl_info("waiting until Influxdb runs well on host [%s]",
+                    host.sh_hostname)
         ret = utils.wait_condition(log, self._bes_influxdb_create_database,
                                    (drop_database,),
                                    timeout=600,

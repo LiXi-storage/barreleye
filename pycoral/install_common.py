@@ -83,6 +83,8 @@ def yum_repo_install(log, host, repo_fpath, rpms):
     for rpm in rpms:
         command += " %s" % rpm
 
+    log.cl_info("running command [%s] on host [%s]",
+                command, host.sh_hostname)
     retval = host.sh_run(log, command, timeout=ssh_host.LONGEST_TIME_YUM_INSTALL)
     if retval.cr_exit_status != 0:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -1020,7 +1022,7 @@ def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
             new_missing_rpms.append(rpm)
     if len(new_missing_rpms) != 0:
         if "epel-release" in new_missing_rpms:
-            log.cl_error("rpms %s is missing after yum install",
+            log.cl_error("rpms %s are missing after yum install",
                          new_missing_rpms)
             return -1
         if "epel-release" in missing_rpms:
@@ -1028,7 +1030,24 @@ def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
             # tsinghua_yum.
             ret = yum_install_rpm_from_internet(log, host, new_missing_rpms,
                                                 tsinghua_mirror=tsinghua_mirror)
-            return ret
+            if ret:
+                log.cl_error("failed to install RPMs after installing epel-release")
+                return -1
+
+            new_missing_rpms = []
+            for rpm in rpms:
+                ret = host.sh_rpm_query(log, rpm)
+                if ret != 0:
+                    new_missing_rpms.append(rpm)
+            if len(new_missing_rpms) != 0:
+                log.cl_error("rpms %s are still missing after yum install "
+                             "with new EPEL",
+                             new_missing_rpms)
+                return -1
+        else:
+            log.cl_error("rpms %s are still missing after yum install with EPEL",
+                         new_missing_rpms)
+            return -1
     return 0
 
 
@@ -1044,10 +1063,14 @@ def yum_replace_to_tsinghua(log, host):
         log.cl_error("failed to check whether file [%s] exists on host [%s]",
                      config_fpath, host.sh_hostname)
         return -1
+
     if ret:
+        # New version of epel-release changes all download.fedoraproject.org to
+        # download.example
         command = """sed -e 's!^metalink=!#metalink=!g' \
     -e 's!^#baseurl=!baseurl=!g' \
     -e 's!//download\.fedoraproject\.org/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
+    -e 's!//download\.example/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
     -e 's!http://mirrors\.tuna!https://mirrors.tuna!g' \
     -i /etc/yum.repos.d/epel*.repo"""
         retval = host.sh_run(log, command)
@@ -1061,22 +1084,30 @@ def yum_replace_to_tsinghua(log, host):
                          retval.cr_stderr)
             return -1
 
-    # Centos-base should have been installed
-    command = """sed -e 's|^mirrorlist=|#mirrorlist=|g' \
--e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' \
--i.bak \
-/etc/yum.repos.d/CentOS-*.repo
-"""
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
+    # Centos-base might be using different name, skip if so.
+    path_pattern = "/etc/yum.repos.d/CentOS-*.repo"
+    fnames = host.sh_resolve_path(log, path_pattern, quiet=True)
+    if fnames is None:
+        log.cl_error("failed to get fnames of pattern [%s] of host [%s]",
+                     path_pattern, host.sh_hostname)
         return -1
+
+    if len(fnames) > 0:
+        command = """sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+    -e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' \
+    -i.bak \
+    /etc/yum.repos.d/CentOS-*.repo
+    """
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
     return 0
 
 

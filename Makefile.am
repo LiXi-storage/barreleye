@@ -75,7 +75,7 @@ dist/barrele:
 	mkdir -p dist
 	$(PYINSTALLER_CMD) barrele
 
-EXE_BINS = $(addprefix dist/, $(EXES)) 
+EXE_BINS = $(addprefix dist/, $(EXES))
 
 exes: $(EXE_BINS)
 

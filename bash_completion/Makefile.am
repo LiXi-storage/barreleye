@@ -11,4 +11,4 @@ COMPLETIONS = barrele
 clean-local:
 	rm -f $(COMPLETIONS)
 
-all: all-am $(COMPLETIONS) 
+all: all-am $(COMPLETIONS)

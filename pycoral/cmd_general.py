@@ -74,14 +74,15 @@ def check_argument_fpath(fpath):
 
 
 def init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                      prefix="", identity=None, force_stdout_color=False,
-                      force_stderr_color=False, console_format=clog.FMT_NORMAL):
+                      identity=None, force_stdout_color=False,
+                      force_stderr_color=False,
+                      console_format=clog.FMT_NORMAL):
     """
     Init log and workspace for commands that needs it
     """
     # pylint: disable=too-many-branches
     if identity is None:
-        identity = prefix + get_identity()
+        identity = get_identity()
     else:
         if (not isinstance(identity, bool)) and isinstance(identity, int):
             identity = str(identity)
@@ -147,12 +148,12 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
 
 
 def init_env(config_fpath, logdir, log_to_file, logdir_is_default,
-             prefix="", identity=None, console_format=clog.FMT_NORMAL):
+             identity=None, console_format=clog.FMT_NORMAL):
     """
     Init log, workspace and config for commands that needs it
     """
     log, workspace = init_env_noconfig(logdir, log_to_file, logdir_is_default,
-                                       prefix=prefix, identity=identity,
+                                       identity=identity,
                                        console_format=console_format)
     if (not isinstance(config_fpath, bool)) and isinstance(config_fpath, int):
         config_fpath = str(config_fpath)
@@ -946,6 +947,24 @@ def check_argument_str(log, name, value):
                          allow_int=True, allow_bool=False)
     if isinstance(value, int):
         value = str(value)
+    return value
+
+
+def check_release_str(log, name, value):
+    """
+    Check the argument is valid Lustre release name. If not, exit.
+    """
+    value = check_argument_str(log, name, value)
+    for char in value:
+        if char.isalnum() or char in ["_", "@", ".", "-"]:
+            continue
+        log.cl_error("invalid character [%s] in value [%s] for argument "
+                     "[--%s]", char, value, name)
+        cmd_exit(log, -1)
+    if value in (".", ".."):
+        log.cl_error("invalid value [%s] for argument "
+                     "[--%s]", value, name)
+        cmd_exit(log, -1)
     return value
 
 

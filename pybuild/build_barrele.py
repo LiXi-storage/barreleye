@@ -61,7 +61,7 @@ GRAFANA_PIECHART_PANEL_URL = ("https://github.com/grafana/piechart-panel/"
 GRAFANA_PIECHART_PANEL_SHA1SUM = "2b3c33afd865af4575d87a83e3d45e61acf8273a"
 PACAKGE_URL_DICT["grafana_piechart_panel"] = GRAFANA_PIECHART_PANEL_URL
 # RPMs needed by building collectd
-COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
+COLLECTD_BUILD_DEPENDENT_RPMS = ["libcurl-devel",
                                  "ganglia-devel",
                                  "gtk2-devel",
                                  "iptables-devel",
@@ -87,7 +87,7 @@ COLLECTD_BUILD_DEPENDENT_RPMS = ["curl-devel",
                                  "openldap-devel",
                                  "perl-ExtUtils-Embed",
                                  "postgresql-devel",
-                                 "python2-devel",
+                                 "python-devel",
                                  "qpid-proton-c-devel",
                                  "riemann-c-client-devel",
                                  "rrdtool-devel",

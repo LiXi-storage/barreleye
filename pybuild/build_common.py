@@ -4,6 +4,7 @@ Common library for building
 import os
 import logging
 import sys
+import traceback
 import filelock
 from pycoral import constant
 from pycoral import utils
@@ -197,15 +198,17 @@ def coral_package_register(package):
 
 
 def install_pip3_package_from_file(log, host, type_cache, tarball_url,
-                                   expected_sha1sum, tsinghua_mirror=False):
+                                   expected_sha1sum, tarball_fname=None, tsinghua_mirror=False):
     """
     Install pip3 package and cache it for future usage
     """
-    tarball_fname = os.path.basename(tarball_url)
+    if tarball_fname is None:
+        tarball_fname = os.path.basename(tarball_url)
     tarball_fpath = type_cache + "/" + tarball_fname
 
     ret = host.sh_download_file(log, tarball_url, tarball_fpath,
-                                expected_sha1sum)
+                                expected_sha1sum,
+                                output_fname=tarball_fname)
     if ret:
         log.cl_error("failed to download Pyinstaller")
         return -1
@@ -377,3 +380,30 @@ def get_build_path():
             time_util.local_strftime(time_util.utcnow(),
                                      "%Y-%m-%d-%H_%M_%S-") +
             utils.random_word(8))
+
+
+def file_replace_key_words(log, input_fpath, output_fpath, keyword_dict):
+    """
+    Replace key words in input file and save to output file.
+    """
+    try:
+        with open(input_fpath, "r", encoding='utf-8') as input_file:
+            content = input_file.read()
+    except:
+        log.cl_error("failed to read file [%s]: %s",
+                     input_fpath,
+                     traceback.format_exc())
+        return -1
+
+    for key, value in keyword_dict.items():
+        content = content.replace(key, value)
+
+    try:
+        with open(output_fpath, "w", encoding='utf-8') as output:
+            output.write(content)
+    except:
+        log.cl_error("failed to write file [%s]: %s",
+                     output_fpath,
+                     traceback.format_exc())
+        return -1
+    return 0

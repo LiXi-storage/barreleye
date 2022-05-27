@@ -2929,16 +2929,22 @@ class SSHHost():
 
         lines = retval.cr_stdout.splitlines()
         if len(lines) != 1:
-            log.cl_error("unexpected stat result of path [%s] on host [%s], "
-                         "stdout = [%s]",
-                         path, self.sh_hostname, retval.cr_stdout)
+            log.cl_error("unexpected line number in stdout of command [%s] "
+                         "on host [%s], ret = [%d], "
+                         "stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname, retval.cr_exit_status,
+                         retval.cr_stdout, retval.cr_stderr)
             return -1
 
         fields = lines[0].split()
         if len(fields) != 2:
-            log.cl_error("unexpected field number of stat result for "
-                         "path [%s] on host [%s], stdout = [%s]",
-                         path, self.sh_hostname, retval.cr_stdout)
+            log.cl_error("unexpected field number in stdout of command [%s] "
+                         "on host [%s], ret = [%d], "
+                         "stdout = [%s], stderr = [%s]",
+                         command,
+                         self.sh_hostname, retval.cr_exit_status,
+                         retval.cr_stdout, retval.cr_stderr)
             return -1
 
         blocks = 1
@@ -2946,10 +2952,12 @@ class SSHHost():
             try:
                 field_number = int(field, 10)
             except ValueError:
-                log.cl_error("unexpected field [%d] with value [%s] for path "
-                             "[%s] on host [%s], stdout = [%s]",
-                             field_number, field, path, self.sh_hostname,
-                             retval.cr_stdout)
+                log.cl_error("invalid field [%s] in stdout of command [%s] "
+                             "on host [%s], ret = [%d], "
+                             "stdout = [%s], stderr = [%s]",
+                             field, command,
+                             self.sh_hostname, retval.cr_exit_status,
+                             retval.cr_stdout, retval.cr_stderr)
                 return -1
             blocks *= field_number
 
@@ -3125,7 +3133,7 @@ class SSHHost():
     def sh_resolve_path(self, log, path_pattern, quiet=False):
         """
         Resolve a path pattern to a path
-        Wildcard can be used in the patthern.
+        Wildcard can be used in the pattern.
         """
         # Need -d otherwise directory will list its content
         command = ("ls -d %s" % (path_pattern))
