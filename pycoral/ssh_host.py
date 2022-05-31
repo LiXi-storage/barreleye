@@ -313,11 +313,11 @@ class SSHHost():
                              retval.cr_stderr)
                 return None
             if (retval.cr_stdout.startswith("CentOS Linux release 7.") or
-                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 7.")):
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux release 7.")):
                 self.sh_cached_distro = DISTRO_RHEL7
                 return DISTRO_RHEL7
             if (retval.cr_stdout.startswith("CentOS Linux release 8.") or
-                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 8.")):
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux release 8.")):
                 self.sh_cached_distro = DISTRO_RHEL8
                 return DISTRO_RHEL8
             if (retval.cr_stdout.startswith("CentOS Linux release 6.") or
