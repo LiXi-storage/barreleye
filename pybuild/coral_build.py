@@ -838,7 +838,7 @@ def build(log, source_dir, workspace,
 
     ret = install_build_dependency(log, workspace, local_host, distro,
                                    target_cpu, type_cache, plugins,
-                                    package_dict, build_pip_dir,
+                                   package_dict, build_pip_dir,
                                    tsinghua_mirror=tsinghua_mirror)
     if ret:
         log.cl_error("failed to install dependency for building")
