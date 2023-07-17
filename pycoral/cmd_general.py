@@ -6,18 +6,17 @@ import sys
 import logging
 import traceback
 import os
-import time
 import socket
 
 import prettytable
 import toml
 import yaml
-from pycoral import lyaml
-from pycoral import constant
 from pycoral import clog
 from pycoral import time_util
 from pycoral import utils
 
+# The pattern of identity generateed by get_identity()
+IDENTITY_PATTERN = "20*"
 
 def get_identity():
     """
@@ -48,7 +47,7 @@ def load_config(log, config_fpath):
         error = traceback.format_exc()
         try:
             with open(config_fpath, 'r', encoding='utf-8') as config_fd:
-                config = yaml.load(config_fd)
+                config = yaml.load(config_fd, Loader=yaml.FullLoader)
         except:
             log.cl_error("failed to load file [%s] using TOML format: %s",
                          config_fpath, error)
@@ -58,19 +57,24 @@ def load_config(log, config_fpath):
     return config
 
 
-def check_argument_fpath(fpath):
+def check_argument_fpath(log, local_host, fpath):
     """
     Check the fpath is valid
     """
     if (not isinstance(fpath, bool)) and isinstance(fpath, int):
         fpath = str(fpath)
     if not isinstance(fpath, str):
-        print("ERROR: invalid file path [%s], should be a string" % fpath,
-              file=sys.stderr)
-        sys.exit(1)
+        log.cl_error("invalid file path [%s], should be a string",
+                    fpath)
+        cmd_exit(log, 1)
     elif len(fpath) == 0:
-        print("ERROR: empty file path", file=sys.stderr)
-        sys.exit(1)
+        log.cl_error("empty file path")
+        cmd_exit(log, 1)
+    real_path = local_host.sh_real_path(log, fpath)
+    if real_path is None:
+        log.cl_error("failed to get the real path of [%s]", fpath)
+        cmd_exit(log, 1)
+    return real_path
 
 
 def init_env_noconfig(logdir, log_to_file, logdir_is_default,
@@ -502,192 +506,15 @@ def print_field(log, field_name, value):
     log.cl_stdout("%s%s", field, value)
 
 
-def cmd_exit(log, exist_status):
+def cmd_exit(log, exit_status):
     """
     Print message and exit
     """
-    if exist_status:
-        log.cl_debug("command failed with status %s", exist_status)
+    if exit_status:
+        log.cl_debug("command failed with status %s", exit_status)
     else:
         log.cl_debug("command succeeded")
-    sys.exit(exist_status)
-
-
-TEST_SKIPPED = 1
-
-
-def run_test(log, workspace, only_test_names, first_test_names,
-             local_host, reverse_order, start, stop, skip_basic,
-             test_functs, args):
-    """
-    Run test.
-    If only is specified together with start/stop, start/stop option will
-    be ignored.
-    If only is specified together with reverse_order, reverse_order option
-    will be ignored.
-    Only/first tests can repeat tests, e.g. first=testA,testA would repeat
-    testA for twice.
-    :param skip_basic: Do not run basic test.
-    :param test_functs: A list of function that has the argument types of:
-        test_funct(log, test_workspace, *args)
-    """
-    # pylint: disable=too-many-branches,too-many-locals
-    # pylint: disable=too-many-statements,global-statement
-    test_dict = {}
-    for test_funct in test_functs:
-        test_dict[test_funct.__name__] = test_funct
-
-    if len(test_functs) == 0:
-        log.cl_error("no test to run")
-        return -1
-
-    if test_functs[0].__name__ != "basic":
-        log.cl_error("the first test is not [basic]")
-        return -1
-    basic_test = test_functs[0]
-
-    # Reverse order won't change the order of first tests
-    selected_tests = []
-    if first_test_names is not None:
-        for test_name in first_test_names:
-            if test_name not in test_dict:
-                log.cl_error("first test [%s] does not exist", test_name)
-                return -1
-            test_funct = test_dict[test_name]
-            selected_tests.append(test_funct)
-
-    if only_test_names is not None:
-        for test_name in only_test_names:
-            if test_name not in test_dict:
-                log.cl_error("only test [%s] does not exist", test_name)
-                return -1
-            test_funct = test_dict[test_name]
-            selected_tests.append(test_funct)
-    else:
-        start_index = 0
-        if start is not None:
-            if start not in test_dict:
-                log.cl_error("start test [%s] does not exist", start)
-                return -1
-            for test_funct in test_functs:
-                if test_funct.__name__ == start:
-                    break
-                start_index += 1
-            if start_index == len(test_functs):
-                log.cl_error("failed to find the index of start test [%s]",
-                             start)
-                return -1
-
-        stop_index = len(test_functs) - 1
-        if stop is not None:
-            if stop not in test_dict:
-                log.cl_error("stop test [%s] does not exist", stop)
-                return -1
-            stop_index = 0
-            for test_funct in test_functs:
-                if test_funct.__name__ == stop:
-                    break
-                stop_index += 1
-
-            if stop_index == len(test_functs):
-                log.cl_error("failed to find the index of start test [%s]",
-                             stop)
-                return -1
-
-        if stop_index < start_index:
-            log.cl_error("start test [%s] is behind stop test [%s]",
-                         start, stop)
-            return -1
-
-        test_index = 0
-        for test_funct in test_functs:
-            if test_index > stop_index:
-                break
-            if test_index >= start_index:
-                selected_tests.append(test_funct)
-            test_index += 1
-
-        if len(selected_tests) == 0:
-            pass
-        elif selected_tests[0].__name__ != "basic":
-            if reverse_order:
-                selected_tests.reverse()
-            if not skip_basic:
-                selected_tests.insert(0, basic_test)
-        elif reverse_order:
-            other_tests = selected_tests[1:]
-            other_tests.reverse()
-            if skip_basic:
-                selected_tests = other_tests
-            else:
-                selected_tests = [basic_test] + other_tests
-
-    if (len(selected_tests) > 0 and selected_tests[0].__name__ != "basic" and
-            not skip_basic):
-        selected_tests.insert(0, basic_test)
-
-    if skip_basic:
-        former_selected_tests = selected_tests
-        selected_tests = []
-        for selected_test in former_selected_tests:
-            if selected_test.__name__ == "basic":
-                continue
-            selected_tests.append(selected_test)
-
-    table = prettytable.PrettyTable()
-    table.field_names = ["Test name", "Result", "Duration"]
-
-    exit_status = 0
-    for test_func in selected_tests:
-        test_name = test_func.__name__
-        if exit_status:
-            table.add_row([test_name, "Not Started", "0 seconds"])
-            continue
-
-        test_workspace = (workspace + "/" +
-                          time_util.local_strftime(time_util.utcnow(),
-                                                   "%Y-%m-%d-%H_%M_%S") +
-                          "-" + test_name + "-" + utils.random_word(8))
-        command = "mkdir -p %s" % test_workspace
-        retval = local_host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         local_host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            table.add_row([test_name, "Not Started", "0 seconds"])
-            exit_status = -1
-            continue
-
-        log.cl_info("starting test [%s]", test_name)
-        start_time = time.time()
-        ret = test_func(log, test_workspace, *args)
-        duration_time = time.time() - start_time
-        if ret < 0:
-            log.cl_error("test [%s] failed, duration %f seconds", test_name,
-                         duration_time)
-            table.add_row([test_name, "Failed", "%f seconds" % duration_time])
-            exit_status = -1
-            continue
-        if ret == TEST_SKIPPED:
-            log.cl_warning("test [%s] skipped, duration %f seconds", test_name,
-                           duration_time)
-            table.add_row([test_name, "Skipped", "%f seconds" % duration_time])
-        else:
-            log.cl_info("test [%s] passed, duration %f seconds", test_name,
-                        duration_time)
-            table.add_row([test_name, "Passed", "%f seconds" % duration_time])
-
-    for test_funct in test_functs:
-        if test_funct not in selected_tests:
-            test_name = test_funct.__name__
-            table.add_row([test_name, "Excluded", "0"])
-
-    log.cl_stdout(table)
-    return exit_status
+    sys.exit(exit_status)
 
 
 def get_table_field(log, host, field_number, command, ignore_status=False):
@@ -716,7 +543,7 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
     for line in lines:
         fields = line.split()
         if len(fields) < field_number + 1:
-            log.cl_error("no field with index [%d] in output [%s] of "
+            log.cl_error("no field with index [%d] in stdout [%s] of "
                          "command [%s] on host [%s]",
                          field_number, retval.cr_stdout, command,
                          host.sh_hostname)
@@ -727,7 +554,8 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
 
 
 def get_status_dict(log, host, command, ignore_exit_status=True,
-                    expect_failure=False, strip_value=False):
+                    expect_failure=False, strip_value=False,
+                    quiet=False):
     """
     Return status dict from stdout of command with format of "$KEY: $VALUE"
     """
@@ -742,18 +570,20 @@ def get_status_dict(log, host, command, ignore_exit_status=True,
                          retval.cr_exit_status, retval.cr_stdout,
                          retval.cr_stderr)
         else:
-            log.cl_error("failed to run command [%s] on host [%s], "
+            if not quiet:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = %d, stdout = [%s], stderr = [%s]",
+                             command, host.sh_hostname,
+                             retval.cr_exit_status, retval.cr_stdout,
+                             retval.cr_stderr)
+            return None
+    elif expect_failure:
+        if not quiet:
+            log.cl_error("unexpected success of command [%s] on host [%s], "
                          "ret = %d, stdout = [%s], stderr = [%s]",
                          command, host.sh_hostname,
                          retval.cr_exit_status, retval.cr_stdout,
                          retval.cr_stderr)
-            return None
-    elif expect_failure:
-        log.cl_error("unexpected success of command [%s] on host [%s], "
-                     "ret = %d, stdout = [%s], stderr = [%s]",
-                     command, host.sh_hostname,
-                     retval.cr_exit_status, retval.cr_stdout,
-                     retval.cr_stderr)
         return None
 
     lines = retval.cr_stdout.splitlines()
@@ -761,31 +591,38 @@ def get_status_dict(log, host, command, ignore_exit_status=True,
     for line in lines:
         if len(line) == 0:
             continue
+        if strip_value:
+            line = line.strip()
         split_index = line.find(": ")
         if split_index < 0:
             split_index = line.find(":\t")
 
         if split_index < 0:
-            log.cl_error("can not find [: ] or [:\t] in output line [%s] of "
-                         "command [%s]", line, command)
+            if not quiet:
+                log.cl_error("can not find [: ] or [:\t] in output line [%s] of "
+                             "command [%s]", line, command)
             return None
         if split_index == 0:
-            log.cl_error("no key before [: ] or [:\t] in output line [%s] of "
-                         "command [%s]", line, command)
+            if not quiet:
+                log.cl_error("no key before [: ] or [:\t] in output line [%s] of "
+                             "command [%s]", line, command)
             return None
         if split_index + 2 >= len(line):
-            log.cl_error("no value after [: ] or [:\t] in output line [%s] of "
-                         "command [%s]", line, command)
+            if not quiet:
+                log.cl_error("no value after [: ] or [:\t] in output line [%s] of "
+                             "command [%s]", line, command)
             return None
         key = line[0:split_index]
         value = line[split_index + 2:]
         if strip_value:
             value = value.strip()
             if len(value) == 0:
-                log.cl_error("empty value for key [%s]", key)
+                if not quiet:
+                    log.cl_error("empty value for key [%s]", key)
         if key in status_dict:
-            log.cl_error("multiple values for key [%s] of command [%s]",
-                         key, command)
+            if not quiet:
+                log.cl_error("multiple values for key [%s] of command [%s]",
+                             key, command)
             return None
         status_dict[key] = value
     return status_dict
@@ -950,18 +787,50 @@ def check_argument_str(log, name, value):
     return value
 
 
-def check_release_str(log, name, value):
+def lustre_release_name_is_valid(value):
+    """
+    Check whether Lustre release string is valid.
+    """
+    for char in value:
+        if char.isalnum() or char in ["_", "@", ".", "-"]:
+            continue
+        return -1
+    if value in (".", ".."):
+        return -1
+    return 0
+
+
+def check_lustre_release_name(log, name, value):
     """
     Check the argument is valid Lustre release name. If not, exit.
     """
     value = check_argument_str(log, name, value)
-    for char in value:
-        if char.isalnum() or char in ["_", "@", ".", "-"]:
-            continue
-        log.cl_error("invalid character [%s] in value [%s] for argument "
-                     "[--%s]", char, value, name)
+    if lustre_release_name_is_valid(value):
+        log.cl_error("invalid value [%s] for argument "
+                     "[--%s]", value, name)
         cmd_exit(log, -1)
+    return value
+
+
+def coral_release_name_is_valid(value):
+    """
+    Check whether Coral release string is valid.
+    """
+    for char in value:
+        if char.isalnum() or char in ["_", "."]:
+            continue
+        return -1
     if value in (".", ".."):
+        return -1
+    return 0
+
+
+def check_coral_release_name(log, name, value):
+    """
+    Check the argument is valid Coral release name. If not, exit.
+    """
+    value = check_argument_str(log, name, value)
+    if coral_release_name_is_valid(value):
         log.cl_error("invalid value [%s] for argument "
                      "[--%s]", value, name)
         cmd_exit(log, -1)
@@ -981,9 +850,9 @@ def check_argument_list_str(log, name, value):
         ret_value = ""
         for item in value:
             if ret_value == "":
-                ret_value = item
+                ret_value = str(item)
             else:
-                ret_value += "," + item
+                ret_value += "," + str(item)
         value = ret_value
     return value
 
@@ -1138,176 +1007,6 @@ def coral_parse_version_extra(extra):
     return prefix, index_number
 
 
-class CoralVersionInfo():
-    """
-    The version info in the Coral ISO
-    """
-    # pylint: disable=too-few-public-methods
-    def __init__(self, release_name, distro_short, target_cpu, release_date):
-        # Release name printed by "./coral version show"
-        self.cvi_release_name = release_name
-        # Short distro, e.g. el7 or el8
-        self.cvi_distro_short = distro_short
-        # Target CPU, e.g. x86_64
-        self.cvi_target_cpu = target_cpu
-        # Seconds since the epoch.
-        self.cvi_release_date = release_date
-
-    def cvi_release_info_dump(self, log, fpath):
-        """
-        Dump the release info to a file.
-        """
-        prefix = """#
-# Version information of the Coral release.
-#
-"""
-        config = {}
-        config[constant.CORAL_STR_RELEASE_NAME] = self.cvi_release_name
-        config[constant.CORAL_STR_RELEASE_DATE] = self.cvi_release_date
-        return lyaml.write_yaml_config(log, prefix, config, fpath)
-
-    def cvi_dump(self, log, fpath):
-        """
-        Dump the info to a file.
-        """
-        prefix = """#
-# Version information of the Coral ISO.
-#
-"""
-        config = {}
-        config[constant.CORAL_STR_RELEASE_NAME] = self.cvi_release_name
-        config[constant.CORAL_STR_TARGET_CPU] = self.cvi_target_cpu
-        config[constant.CORAL_STR_DISTRO_SHORT] = self.cvi_distro_short
-        config[constant.CORAL_STR_RELEASE_DATE] = self.cvi_release_date
-        return lyaml.write_yaml_config(log, prefix, config, fpath)
-
-
-def read_release_info_file(log, release_info_fpath):
-    """
-    Get Coral version from release info file. Return the release name and
-    release date.
-    """
-    yaml_content = lyaml.read_yaml_file(log, release_info_fpath)
-    if yaml_content is None:
-        return None, None
-
-    release_name = utils.config_value(yaml_content,
-                                      constant.CORAL_STR_RELEASE_NAME)
-    if release_name is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_NAME,
-                     release_info_fpath)
-        return None, None
-
-    release_date_str = utils.config_value(yaml_content,
-                                          constant.CORAL_STR_RELEASE_DATE)
-    if release_date_str is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_DATE,
-                     release_info_fpath)
-        return None, None
-
-    try:
-        release_date = int(release_date_str)
-    except:
-        log.cl_error("invalid release date [%s] in version file [%s]",
-                     release_date_str, release_info_fpath)
-        return None, None
-
-    return release_name, release_date
-
-
-def get_version_from_version_file(log, version_file):
-    """
-    Get Coral version from version file in ISO dir. Return CoralVersionInfo.
-    """
-    yaml_content = lyaml.read_yaml_file(log, version_file)
-    if yaml_content is None:
-        return None
-
-    release_name = utils.config_value(yaml_content,
-                                      constant.CORAL_STR_RELEASE_NAME)
-    if release_name is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_NAME,
-                     version_file)
-        return None
-
-    target_cpu = utils.config_value(yaml_content,
-                                    constant.CORAL_STR_TARGET_CPU)
-    if target_cpu is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_TARGET_CPU,
-                     version_file)
-        return None
-
-    distro_short = utils.config_value(yaml_content,
-                                      constant.CORAL_STR_DISTRO_SHORT)
-    if distro_short is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_DISTRO_SHORT,
-                     version_file)
-        return None
-
-    release_date_str = utils.config_value(yaml_content,
-                                          constant.CORAL_STR_RELEASE_DATE)
-    if release_date_str is None:
-        log.cl_error("can NOT find [%s] in version file [%s]",
-                     constant.CORAL_STR_RELEASE_DATE,
-                     version_file)
-        return None
-
-    try:
-        release_date = int(release_date_str)
-    except:
-        log.cl_error("invalid release date [%s] in version file [%s]",
-                     release_date_str, version_file)
-        return None
-
-    coral_version_info = CoralVersionInfo(release_name, distro_short, target_cpu,
-                                          release_date)
-
-    return coral_version_info
-
-
-def get_version_from_iso_file(log, workspace, local_host, iso_path):
-    """
-    Get Coral version and CPU arch from ISO file. Return CoralVersionInfo.
-    """
-    mnt_path = workspace + "/mnt"
-    command = ("mkdir -p %s && mount -o loop %s %s" %
-               (mnt_path, iso_path, mnt_path))
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     local_host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None
-
-    version_file = mnt_path + "/" + constant.CORAL_ISO_VERSION_FNAME
-    coral_version_info = get_version_from_version_file(log, version_file)
-    if coral_version_info is None:
-        log.cl_error("failed to get version from ISO dir [%s] on host [%s]",
-                     mnt_path, local_host.sh_hostname)
-
-    command = ("umount %s" % (mnt_path))
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     local_host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None
-    return coral_version_info
-
-
 def get_version_from_iso_fname(log, fname):
     """
     Get Coral version from ISO file name
@@ -1364,3 +1063,45 @@ def get_version_from_iso_fname(log, fname):
     distro_short = remain[point + 1:]
     version = remain[:point]
     return version, distro_short, target_cpu
+
+
+def parse_command_multi_line(log, message, start_keyword):
+    """
+    This function returns a list of commands inlined in text message. The
+    command should start with a @start_keyword with optional blank characters
+    (space and horizontal tab).
+
+    A long command can be cutted into multiple lines by adding backslash "\"
+    before the newlines. Backslash can seperate the command at any place,
+    even inside the same word. Backslash will NOT escape any character. Any
+    thing like "\\", "\n", "\r" or "\"" will be taken as the string itself,
+    and will not be escaped to special charaters. Tailing "\" of commit
+    message with no follow-up line is allowed, but that usually means a
+    mistyping.
+    """
+    lines = message.splitlines()
+    cmds = []
+
+    command = None
+    for line in lines:
+        if command is not None:
+            if line.endswith("\\"):
+                line = line[:-1]
+                command += line
+                continue
+            command += line
+            cmds.append(command)
+            command = None
+        elif line.startswith(start_keyword):
+            if line.endswith("\\"):
+                line = line[:-1]
+                command = line
+                continue
+            command = line
+            cmds.append(command)
+            command = None
+    if command is not None:
+        log.cl_warning("unfinished escape of newline after [%s]",
+                       command)
+        cmds.append(command)
+    return cmds

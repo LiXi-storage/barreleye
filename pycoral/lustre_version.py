@@ -133,6 +133,25 @@ LUSTRE_VERSION_ES6_0 = LustreVersion(LUSTRE_VERSION_NAME_ES6_0,
 LUSTRE_VERSION_DICT[LUSTRE_VERSION_NAME_ES6_0] = LUSTRE_VERSION_ES6_0
 
 
+B2_15_PATTERNS = {
+    RPM_IOKIT: r"^(lustre-iokit-2\.15.+\.rpm)$",
+    RPM_KERNEL: r"^(kernel-3.+\.rpm)$",
+    RPM_KMOD: r"^(kmod-lustre-2\.15.+\.rpm)$",
+    RPM_LUSTRE: r"^(lustre-2\.15.+\.rpm)$",
+    RPM_OSD_LDISKFS: r"^(kmod-lustre-osd-ldiskfs-2\.15.+\.rpm)$",
+    RPM_OSD_LDISKFS_MOUNT: r"^(lustre-osd-ldiskfs-mount-2\.15.+\.rpm)$",
+    RPM_OSD_ZFS: r"^(kmod-lustre-osd-zfs-2\.15.+\.rpm)$",
+    RPM_OSD_ZFS_MOUNT: r"^(lustre-osd-zfs-mount-2\.15.+\.rpm)$",
+    RPM_TESTS: r"^(lustre-tests-2.+\.rpm)$",
+    RPM_TESTS_KMOD: r"^(kmod-lustre-tests-2.+\.rpm)$",
+}
+LUSTRE_VERSION_NAME_2_15 = "2.15"
+LUSTRE_VERSION_2_15 = LustreVersion(LUSTRE_VERSION_NAME_2_15,
+                                     B2_15_PATTERNS,
+                                     0)
+LUSTRE_VERSION_DICT[LUSTRE_VERSION_NAME_2_15] = LUSTRE_VERSION_2_15
+
+
 def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False,
                                    skip_test=False):
     """

@@ -7,9 +7,8 @@ import requests
 
 class BarreleInfluxdbClient():
     """
-    The :class:`~.InfluxDBClient` object holds information necessary to
-    connect to InfluxDB. Requests can be made to InfluxDB directly through
-    the client.
+    This object holds information necessary to connect to InfluxDB. Requests
+    can be made to InfluxDB directly through the client.
     """
     # pylint: disable=too-few-public-methods
     def __init__(self, hostname, database):
@@ -28,7 +27,7 @@ class BarreleInfluxdbClient():
         """
         Send a query to InfluxDB.
         :param epoch: response timestamps to be in epoch format either 'h',
-            'm', 's', 'ms', 'u', or 'ns',defaults to `None` which is
+            'm', 's', 'ms', 'u', or 'ns', defaults to `None` which is
             RFC3339 UTC format with nanosecond precision
         :type epoch: str
         """

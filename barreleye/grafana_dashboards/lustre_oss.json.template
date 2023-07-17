@@ -4644,7 +4644,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "alias": "Minimum Number of Incoming  Create Requests",
+              "alias": "Minimum Number of Incoming Create Requests",
               "dsType": "influxdb",
               "groupBy": [],
               "measurement": "ost_create_stats_req_qdepth_min",

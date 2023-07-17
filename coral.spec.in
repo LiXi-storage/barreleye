@@ -17,7 +17,7 @@ Prefix: %{_prefix}
 
 Release: @CORAL_RELEASE@%{?dist}
 
-Summary: coral - Libraries for Coral
+Summary: coral - Tools for Coral
 License: MIT
 Group: Applications/System
 Source0: @PACKAGE@-%{version}.tar.gz
@@ -50,8 +50,7 @@ including the file system services, clients, storages, networks and machines.
 	--libdir=%{_libdir} \
 	--includedir=%{_includedir} \
 	--prefix=%{_prefix}
-make
-#make check
+make -j8
 make exes
 
 %install

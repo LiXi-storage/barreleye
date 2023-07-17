@@ -114,7 +114,7 @@ def check_doc(log, doc_dir):
 
 class CoralDocCommand():
     """
-    Commands to for building doc.
+    Commands for building doc.
     """
     # pylint: disable=too-few-public-methods
     def _init(self, log_to_file):

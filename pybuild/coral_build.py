@@ -8,13 +8,14 @@ import filelock
 from pycoral import ssh_host
 from pycoral import constant
 from pycoral import lustre_version
-from pycoral import install_common
 from pycoral import cmd_general
-from pybuild import build_constant
+from pycoral import install_common
 from pybuild import build_barrele
 from pybuild import build_common
-from pybuild import build_version
+from pybuild import build_constant
 from pybuild import build_doc
+from pybuild import build_release_info
+from pybuild import build_version
 
 # The url of pyinstaller tarball. Need to update together with
 # PYINSTALLER_TARBALL_SHA1SUM
@@ -311,7 +312,7 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
     """
     Install the dependency of building Coral
     """
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-branches
     if tsinghua_mirror:
         ret = install_common.yum_replace_to_tsinghua(log, host)
         if ret:
@@ -338,7 +339,8 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                       "libyaml-devel",  # yaml C functions.
                       "json-c-devel",  # Needed by json C functions
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
-                      "wget"]  # Needed by downloading from web
+                      "wget",  # Needed by downloading from web
+                      "yum-utils"]  # Commnad like "yumdb sync"
 
     if distro == ssh_host.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
@@ -354,6 +356,21 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                          host.sh_hostname)
             return -1
         dependent_rpms += rpms
+
+    # Upgrade pip3 first since python packages might need new pip3 to install
+    command = "pip3 install --upgrade pip"
+    if tsinghua_mirror:
+        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
 
     # We need all dependency for all plugins since no matter they
     # are needed or not, the Python codes will be checked, and the Python
@@ -391,49 +408,6 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
     return 0
 
 
-def get_shared_build_cache_locked(log, host, workspace,
-                                  shared_cache):
-    """
-    Get the shared build cache
-    """
-    command = ("mkdir -p %s && cp -a %s %s" %
-               (shared_cache, shared_cache, workspace))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-    return 0
-
-
-def get_shared_build_cache(log, host, workspace, shared_cache):
-    """
-    Get the shared build cache
-    """
-    # pylint: disable=abstract-class-instantiated
-    log.cl_info("copying shared cache from [%s] to [%s] on host [%s]",
-                shared_cache, workspace, host.sh_hostname)
-    lock_file = build_constant.CORAL_BUILD_CACHE_LOCK
-    lock = filelock.FileLock(lock_file)
-    ret = 0
-    try:
-        with lock.acquire(timeout=600):
-            ret = get_shared_build_cache_locked(log, host, workspace,
-                                                shared_cache)
-            lock.release()
-    except filelock.Timeout:
-        ret = -1
-        log.cl_error("someone else is holding lock of file [%s] for more "
-                     "than 10 minutes, aborting",
-                     lock_file)
-    return ret
-
-
 def sync_shared_build_cache(log, host, private_cache, shared_parent):
     """
     Sync from the local cache to shared cache
@@ -447,7 +421,6 @@ def sync_shared_build_cache(log, host, private_cache, shared_parent):
     try:
         with lock.acquire(timeout=600):
             ret = host.sh_sync_two_dirs(log, private_cache, shared_parent)
-            lock.release()
     except filelock.Timeout:
         ret = -1
         log.cl_error("someone else is holding lock of file [%s] for more "
@@ -492,21 +465,28 @@ def install_e2fsprogs_rpm(log, local_host, lustre_dist):
     """
     need_install = False
     retval = local_host.sh_run(log,
-                               "rpm -q e2fsprogs --queryformat '%{version}'")
+                               "rpm -q e2fsprogs --queryformat '%{version}-%{release}'")
     if retval.cr_exit_status:
+        log.cl_info("e2fsprogs missing, installing [%s] on build host [%s]",
+                    lustre_dist.ldis_e2fsprogs_version,
+                    local_host.sh_hostname)
         need_install = True
     else:
         current_version = retval.cr_stdout
         if lustre_dist.ldis_e2fsprogs_version != current_version:
+            log.cl_info("need e2fsprogs [%s], only have [%s], upgrading on "
+                        "build host [%s]",
+                        lustre_dist.ldis_e2fsprogs_version, current_version,
+                        local_host.sh_hostname)
             need_install = True
 
     if not need_install:
-        log.cl_info("the needed e2fsprogs RPMs have already been installed "
-                    "on build host [%s]", local_host.sh_hostname)
+        log.cl_info("the needed e2fsprogs [%s] have already been installed "
+                    "on build host [%s]",
+                    lustre_dist.ldis_e2fsprogs_version,
+                    local_host.sh_hostname)
         return 0
 
-    log.cl_info("installing E2fsprogs RPM for on build host",
-                local_host.sh_hostname)
     command = "rpm -Uvh %s/*.rpm" % lustre_dist.ldis_e2fsprogs_rpm_dir
     retval = local_host.sh_run(log, command)
     if retval.cr_exit_status:
@@ -531,7 +511,7 @@ def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
     """
     # pylint: disable=too-many-locals,too-many-branches,unused-argument
     default_lustre_rpms_dir = (iso_cache + "/" +
-                               constant.LUSTRE_RPM_DIR_BASENAME)
+                               constant.CORAL_LUSTRE_RELEASE_BASENAME)
     default_e2fsprogs_rpms_dir = (iso_cache + "/" +
                                   constant.E2FSPROGS_RPM_DIR_BASENAME)
     if (len(plugins_need_lustre_rpms) == 0 and
@@ -746,6 +726,17 @@ def build(log, source_dir, workspace,
         log.cl_error("everything has been disabled, nothing to build")
         return -1
 
+    plugin_dict = {}
+    for plugin in plugins:
+        plugin_dict[plugin.cpt_plugin_name] = plugin
+    for plugin in plugins:
+        for plugin_name in plugin.cpt_plugins:
+            if plugin_name not in plugin_dict:
+                log.cl_error("plugin [%s] depends on plugin [%s], "
+                             "but the later is disabled",
+                             plugin.cpt_plugin_name, plugin_name)
+                return -1
+
     plugins_need_lustre_rpms = []
     plugins_need_collectd = []
     plugins_need_install_lustre = []
@@ -808,8 +799,8 @@ def build(log, source_dir, workspace,
                      retval.cr_stderr)
         return -1
 
-    ret = get_shared_build_cache(log, local_host, workspace,
-                                 shared_type_cache)
+    ret = build_common.get_shared_build_cache(log, local_host, workspace,
+                                              shared_type_cache)
     if ret:
         log.cl_error("failed to get shared build cache")
         return -1
@@ -885,27 +876,7 @@ def build(log, source_dir, workspace,
         log.cl_error("failed to download dependent rpms")
         return -1
 
-    pip_dir = iso_cache + "/" + constant.BUILD_PIP
-    command = ("mkdir -p %s" % (pip_dir))
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     local_host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
-    ret = install_common.download_pip3_packages(log, local_host, pip_dir,
-                                                constant.CORAL_DEPENDENT_PIPS,
-                                                tsinghua_mirror=tsinghua_mirror)
-    if ret:
-        log.cl_error("failed to download pip3 packages")
-        return -1
-
-    contents = ([constant.BUILD_PACKAGES, constant.BUILD_PIP] +
+    contents = ([constant.BUILD_PACKAGES] +
                 extra_iso_fnames)
     ret = local_host.sh_check_dir_content(log, iso_cache, contents,
                                           cleanup=True)

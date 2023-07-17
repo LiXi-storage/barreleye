@@ -226,10 +226,10 @@ def install_pip3_packages_from_cache(log, local_host, pip_packages,
     return 0
 
 
-def install_dependency_from_iso(log, workspace, local_host, iso_dir,
-                                missing_rpms, missing_pips, name):
+def install_rpms_from_iso(log, workspace, local_host, iso_dir,
+                          missing_rpms, name):
     """
-    Install the dependent RPMs and pip packages after ISO is synced
+    Install the dependent RPMs after ISO is synced
     """
     repo_config_fpath = ("%s/%s.repo" % (workspace, name))
     packages_dir = iso_dir + "/" + constant.BUILD_PACKAGES
@@ -253,15 +253,6 @@ def install_dependency_from_iso(log, workspace, local_host, iso_dir,
                      missing_rpms, local_host.sh_hostname)
         return -1
 
-    pip_dir = iso_dir + "/" + constant.BUILD_PIP
-    ret = install_pip3_packages_from_cache(log, local_host, missing_pips,
-                                           pip_dir)
-    if ret:
-        log.cl_error("failed to install missing pip packages %s in dir "
-                     "[%s] on localhost [%s]",
-                     missing_pips, pip_dir, local_host.sh_hostname)
-        return -1
-
     return 0
 
 
@@ -275,7 +266,7 @@ def coral_rpm_reinstall(log, host, iso_path):
     # Use RPM upgrade so that the running services will be restarted by RPM
     # scripts.
     command = ("rpm -Uvh %s/coral-*.rpm --force --nodeps" % (package_dir))
-    retval = host.sh_run(log, command)
+    retval = host.sh_run(log, command, timeout=None)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -806,6 +797,7 @@ class CoralInstallationHost():
                 log.cl_error("failed to install Coral RPMs on host [%s]",
                              hostname)
                 return -1
+
             ret = self._cih_services_preserve(log)
             if ret:
                 log.cl_error("failed to preserve Coral services on host [%s]",
@@ -943,17 +935,15 @@ class CoralInstallationCluster():
 
         ret = ssh_host.check_clocks_diff(log, hosts, max_diff=60)
         if ret:
-            log.cl_error("too much clock difference between hosts")
+            log.cl_error("failed to check clock difference between hosts")
             return -1
 
-        parallel_execute = parallel.ParallelExecute(log,
-                                                    self.cic_workspace,
+        parallel_execute = parallel.ParallelExecute(self.cic_workspace,
                                                     "install",
                                                     cluster_host_install,
                                                     args_array,
-                                                    thread_ids=thread_ids,
-                                                    parallelism=parallelism)
-        ret = parallel_execute.pe_run()
+                                                    thread_ids=thread_ids)
+        ret = parallel_execute.pe_run(log, parallelism=parallelism)
         if ret:
             log.cl_error("failed to install hosts in parallel")
             return -1
@@ -1218,8 +1208,7 @@ def command_missing_packages_rhel7():
     try:
         import yaml
     except ImportError:
-        list_add(missing_rpms, "python36-PyYAML")
-        list_add(missing_rpms, "epel-release")
+        list_add(missing_pips, "PyYAML")
 
     try:
         import dateutil
@@ -1307,7 +1296,8 @@ def download_pip3_packages(log, host, pip_dir, pip_packages,
 
 
 def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
-                             lazy_prepare=True, tsinghua_mirror=False):
+                             extra_rpms, lazy_prepare=True,
+                             tsinghua_mirror=False):
     """
     Install Lustre and Coral packages on a host
     """
@@ -1315,8 +1305,9 @@ def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
                                                iso_dir)
     send_fpath_dict = {}
     need_backup_fpaths = []
-    install_cluster.cic_add_hosts([host], constant.CORAL_DEPENDENT_PIPS,
-                                  constant.CORAL_DEPENDENT_RPMS,
+    pip_libs = []
+    rpms = extra_rpms + constant.CORAL_DEPENDENT_RPMS
+    install_cluster.cic_add_hosts([host], pip_libs, rpms,
                                   send_fpath_dict,
                                   need_backup_fpaths,
                                   coral_reinstall=True,

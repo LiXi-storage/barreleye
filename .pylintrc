@@ -1,2 +1,5 @@
 [TYPECHECK]
-disable=line-too-long,anomalous-backslash-in-string,invalid-name,superfluous-parens,bare-except,too-many-return-statements,too-many-arguments,consider-using-f-string,unsupported-membership-test,unsubscriptable-object
+disable=line-too-long,anomalous-backslash-in-string,invalid-name,superfluous-parens,bare-except,too-many-return-statements,too-many-arguments,consider-using-f-string,unsupported-membership-test,unsubscriptable-object,abstract-class-instantiated
+# zmq.{LINGER,REQ,ROUTER,NOBLOCK} are dynamically generated and so pylint
+# doesn't see them, causing false positives.
+generated-members=LINGER,REQ,ROUTER,NOBLOCK,RCVTIMEO

@@ -176,8 +176,7 @@ AS_IF([test "x$enable_zfs" = xyes ], [
 	LIBS=$saved_libs
 ])
 
-
-# -------- whether disable Barreleye plugin --------
+# -------- whether enable Barreleye plugin --------
 AC_MSG_CHECKING([whether enable Barreleye plugin])
 AC_ARG_ENABLE([barrele],
     AC_HELP_STRING([--disable-barrele],

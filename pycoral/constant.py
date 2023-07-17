@@ -54,19 +54,24 @@ ISO_FNAME = "iso"
 # ISO dir
 CORAL_ISO_DIR = CORAL_LOG_DIR + "/" + ISO_FNAME
 CORAL_BUILD_LOG_DIR_BASENAME = "coral_build"
-LUSTRE_RPM_DIR_BASENAME = "lustre"
+CORAL_LUSTRE_RELEASE_BASENAME = "lustre_release"
 # Lustre dir under the ISO dir
 CORAL_ISO_LUSTRE_DIR = (CORAL_ISO_DIR +
-                        "/" + LUSTRE_RPM_DIR_BASENAME)
+                        "/" + CORAL_LUSTRE_RELEASE_BASENAME)
 # Basename of SRPMS
 SRPMS_DIR_BASENAME = "SRPMS"
 # Basename of RPMS
 RPMS_DIR_BASENAME = "RPMS"
-LUSTRE_DIR_BASENAMES = [SRPMS_DIR_BASENAME, RPMS_DIR_BASENAME]
+LUSTRE_RELEASE_INFO_FNAME = "lustre_release_info.yaml"
+LUSTRE_DIR_BASENAMES = [SRPMS_DIR_BASENAME, RPMS_DIR_BASENAME,
+                        LUSTRE_RELEASE_INFO_FNAME]
 E2FSPROGS_DIR_BASENAMES = [SRPMS_DIR_BASENAME, RPMS_DIR_BASENAME]
 # Lustre SRPM dir
 CORAL_ISO_LUSTRE_SRPM_DIR = (CORAL_ISO_LUSTRE_DIR +
                              "/" + SRPMS_DIR_BASENAME)
+# Lustre RPM dir
+CORAL_ISO_LUSTRE_RPM_DIR = (CORAL_ISO_LUSTRE_DIR +
+                            "/" + RPMS_DIR_BASENAME)
 E2FSPROGS_RPM_DIR_BASENAME = "e2fsprogs"
 CORAL_ISO_E2FSPROGS_DIR = (CORAL_ISO_DIR +
                            "/" + E2FSPROGS_RPM_DIR_BASENAME)
@@ -74,34 +79,32 @@ CORAL_ISO_E2FSPROGS_DIR = (CORAL_ISO_DIR +
 #
 # RPM needed by almost all use cases of Coral.
 #
-CORAL_DEPENDENT_RPMS = ["git",  # For build anything from Git repository
-                        "libyaml",  # For loading config, needed by lctl too.
-                        "rsync",  # For syncing files
+CORAL_DEPENDENT_RPMS = ["attr",  # Needed by Lustre test RPM
                         "bash-completion",  # For bash completion
-                        "unzip",  # For unpacking tarballs
-                        "attr",  # Needed by Lustre test RPM
                         "bc",  # Needed by Lustre test RPM
-                        "dbench",  # Needed by Lustre test RPM
                         "bzip2",
+                        "dbench",  # Needed by Lustre test RPM
+                        "git",  # For build anything from Git repository
                         "kexec-tools",  # In case of kernel crash
+                        "libyaml",  # For loading config, needed by lctl too.
                         "linux-firmware",  # Needed by Lustre Linux kernel.
                         "lsof",  # Needed by Lustre test scriot.
                         "net-snmp-libs",  # needed by Lustre RPM
                         "net-snmp-agent-libs",  # needed by Lustre RPM
                         "net-tools",  # netstat is needed by Lustre test RPM
                         "nfs-utils",
+                        "p7zip",  # 7z command for extracting ISO
+                        "p7zip-plugins",  # 7z command for extracting ISO
                         "pciutils",
                         "pdsh",  # Lustre test need to run remote commands
                         "perl-File-Path",  # Needed by lustre-iokit.
                         "psmisc",  # For fuser/killall command
+                        "rsync",  # For syncing files
                         "selinux-policy-targeted",  # Needed by Lustre Linux kernel.
                         "sg3_utils",
                         "sysstat",
-                        "yum-utils"]  # Yum commands.
-
-# The pip needed by almost all Coral use cases.
-# No package is needed since they should have been packaged by pyinstaller.
-CORAL_DEPENDENT_PIPS = []
+                        "yum-utils",  # Yum commands.
+                        "unzip"]  # For unpacking tarballs
 
 # The message to use in commands
 CMD_MSG_ERROR = "@error@"
@@ -110,8 +113,7 @@ CMD_MSG_UNKNOWN = "@unknown@"
 
 TITLE_CURRENT_RELEASE = "Current Release"
 
-CORAL_ISO_VERSION_FNAME = "VERSION.yaml"
-CORAL_RELEASE_INFO_FNAME = "release_info.yaml"
+CORAL_RELEASE_INFO_FNAME = "coral_release_info.yaml"
 
 # The constant in VERSION of iso
 CORAL_STR_RELEASE_NAME = "release_name"

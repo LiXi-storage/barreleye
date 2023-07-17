@@ -6,7 +6,6 @@ since this might cause failure of commands that uses this
 library to install python packages.
 """
 
-
 import os
 import errno
 import time
@@ -22,6 +21,8 @@ import string
 import stat
 import socket
 import re
+import traceback
+import base64
 
 
 def read_one_line(filename):
@@ -318,7 +319,7 @@ class CommandJob():
             for file_obj in write_ready:
                 # we can write PIPE_BUF bytes without blocking
                 # POSIX requires PIPE_BUF is >= 512
-                file_obj.write(self.cj_string_stdin[:512])
+                file_obj.write(self.cj_string_stdin[:512].encode('utf-8'))
                 self.cj_string_stdin = self.cj_string_stdin[512:]
                 # no more input data, close stdin, remove it from the select
                 # set
@@ -596,6 +597,7 @@ def random_kvm_mac():
 
 SYMBOLS = {
     'customary': ('B', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'),
+    'customary_with_byte': ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'),
     'customary_ext': ('byte', 'kilo', 'mega', 'giga', 'tera', 'peta', 'exa',
                       'zetta', 'iotta'),
     'iec': ('Bi', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi', 'Yi'),
@@ -788,3 +790,58 @@ def check_mac(mac_address, capital_letters=True):
     if (re.fullmatch(regex, mac_address)):
         return 0
     return -1
+
+
+def file_replace_key_words(log, input_fpath, output_fpath, keyword_dict):
+    """
+    Replace key words in input file and save to output file.
+    """
+    try:
+        with open(input_fpath, "r", encoding='utf-8') as input_file:
+            content = input_file.read()
+    except:
+        log.cl_error("failed to read file [%s]: %s",
+                     input_fpath,
+                     traceback.format_exc())
+        return -1
+
+    for key, value in keyword_dict.items():
+        content = content.replace(key, value)
+
+    try:
+        with open(output_fpath, "w", encoding='utf-8') as output:
+            output.write(content)
+    except:
+        log.cl_error("failed to write file [%s]: %s",
+                     output_fpath,
+                     traceback.format_exc())
+        return -1
+    return 0
+
+
+def is_base64_encoded(log, encoded):
+    """
+    Check whether a string is base64 encoded or not.
+    """
+    # pylint: disable=broad-except
+    try:
+        if isinstance(encoded, str):
+            encoded_bytes = bytes(encoded, 'ascii')
+        elif isinstance(encoded, bytes):
+            encoded_bytes = encoded
+        else:
+            log.cl_error("argument must be string or bytes")
+            return False
+        log.cl_debug("%s vs. %s", base64.b64encode(base64.b64decode(encoded_bytes)),
+                     encoded_bytes)
+        return base64.b64encode(base64.b64decode(encoded_bytes)) == encoded_bytes
+    except Exception:
+        return False
+
+def isascii(check_string):
+    """
+    Check whether all characters of a string is ASCII.
+
+    Python 3.8.5+ has str.isascii()
+    """
+    return all(ord(char) < 128 for char in check_string)

@@ -93,13 +93,8 @@ coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA) rpms
 	rm -f coral-*.iso
 	rm -f coral-*_SHA256SUM
 	cp -a $(ISO_CACHE_PATH) $(ISO_PATH)
-	echo -n "release_name: " > $(ISO_PATH)/VERSION.yaml
-	./coral version show >> $(ISO_PATH)/VERSION.yaml
-	echo >> $(ISO_PATH)/VERSION.yaml
-	echo "distro_short: $(DISTRO_SHORT)" >> $(ISO_PATH)/VERSION.yaml
-	echo "target_cpu: $(target_cpu)" >> $(ISO_PATH)/VERSION.yaml
-	echo -n "release_date: " >> $(ISO_PATH)/VERSION.yaml
-	date +%s >> $(ISO_PATH)/VERSION.yaml
+	./coral release_info save $(DISTRO_SHORT) $(target_cpu) coral_release_info.yaml
+	cp coral_release_info.yaml $(ISO_PATH)
 	cp $(CORAL_RPMS) $(PACKAGE_PATH)
 	createrepo $(PACKAGE_PATH)
 	@if [ "$(DISTRO_SHORT)" = "el8" ]; then \

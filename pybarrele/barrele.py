@@ -8,6 +8,7 @@ from pycoral import version
 from pycoral import clog
 from pycoral import constant
 from pycoral import lustre_version
+from pycoral import ssh_host
 from pybarrele import barrele_instance
 from pybarrele import barrele_constant
 from pybarrele import barrele_collectd
@@ -22,6 +23,9 @@ def init_env(config_fpath, logdir, log_to_file, iso):
                                                           logdir,
                                                           log_to_file,
                                                           log_dir_is_default)
+    local_host = ssh_host.get_local_host(ssh=False)
+    if iso is not None:
+        iso = cmd_general.check_argument_fpath(log, local_host, iso)
     barreleye_instance = barrele_instance.barrele_init_instance(log, workspace,
                                                                 barrele_config,
                                                                 config_fpath,
@@ -372,14 +376,12 @@ def print_agents(log, barreleye_instance, agents, status=False,
             thread_id = "agent_status_%s" % hostname
             thread_ids.append(thread_id)
 
-        parallel_execute = parallel.ParallelExecute(log,
-                                                    barreleye_instance.bei_workspace,
+        parallel_execute = parallel.ParallelExecute(barreleye_instance.bei_workspace,
                                                     "agent_status",
                                                     agent_status_init,
                                                     args_array,
-                                                    thread_ids=thread_ids,
-                                                    parallelism=10)
-        ret = parallel_execute.pe_run()
+                                                    thread_ids=thread_ids)
+        ret = parallel_execute.pe_run(log, parallelism=10)
         if ret:
             log.cl_error("failed to init fields %s for agents",
                          field_names)
@@ -658,14 +660,12 @@ def print_servers(log, barreleye_instance, servers, status=False,
             thread_id = "server_status_%s" % hostname
             thread_ids.append(thread_id)
 
-        parallel_execute = parallel.ParallelExecute(log,
-                                                    barreleye_instance.bei_workspace,
+        parallel_execute = parallel.ParallelExecute(barreleye_instance.bei_workspace,
                                                     "server_status",
                                                     server_status_init,
                                                     args_array,
-                                                    thread_ids=thread_ids,
-                                                    parallelism=10)
-        ret = parallel_execute.pe_run()
+                                                    thread_ids=thread_ids)
+        ret = parallel_execute.pe_run(log, parallelism=10)
         if ret:
             log.cl_error("failed to init fields %s for servers",
                          field_names)
@@ -829,8 +829,6 @@ class BarreleCommand():
         self._bec_logdir = log
         self._bec_log_to_file = debug
         self._bec_iso = iso
-        if iso is not None:
-            cmd_general.check_argument_fpath(iso)
         self.cluster._init(config, log, debug, iso)
         self.agent._init(config, log, debug, iso)
         self.server._init(config, log, debug, iso)

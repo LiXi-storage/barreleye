@@ -1315,9 +1315,6 @@ class BarreleServer():
         continuous_query = InfluxdbContinuousQuery("ost_stats_bytes",
                                                    ["fs_name", "optype"])
         continuous_queries.append(continuous_query)
-        continuous_query = InfluxdbContinuousQuery("ost_kbytesinfo_used",
-                                                   ["fs_name", "optype"])
-        continuous_queries.append(continuous_query)
         measure_meants = ["ost_brw_stats_page_discontiguous_rpc_samples",
                           "ost_brw_stats_block_discontiguous_rpc_samples",
                           "ost_brw_stats_fragmented_io_samples",

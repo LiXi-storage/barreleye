@@ -4,11 +4,11 @@ Common library for building
 import os
 import logging
 import sys
-import traceback
 import filelock
 from pycoral import constant
 from pycoral import utils
 from pycoral import time_util
+from pybuild import build_constant
 
 
 # Key is plugin name, value is CoralPluginType()
@@ -90,12 +90,13 @@ class CoralPluginType():
     """
     Each Coral plugin has this type
     """
-    # pylint: disable=too-few-public-methods
+    # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, plugin_name,
                  build_dependent_pips=None, is_devel=True,
                  need_lustre_rpms=False, need_collectd=False,
                  install_lustre=False,
-                 packages=None):
+                 packages=None,
+                 plugins=None):
         # The name of the plugin
         self.cpt_plugin_name = plugin_name
         # Whether the plugin is only for devel
@@ -110,10 +111,16 @@ class CoralPluginType():
         self.cpt_build_dependent_pips = build_dependent_pips
         # Whether install Lustre library RPM for build
         self.cpt_install_lustre = install_lustre
+        # Package names that this plugin depend on
         if packages is None:
             self.cpt_packages = []
         else:
             self.cpt_packages = packages
+        # Plugin names this plugin depend on
+        if plugins is None:
+            self.cpt_plugins = []
+        else:
+            self.cpt_plugins = plugins
 
     def cpt_build_dependent_rpms(self, distro):
         """
@@ -286,7 +293,6 @@ def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
         with lock.acquire(timeout=600):
             ret = reinstall_rpm(log, host, packages_dir, rpm_name_prefix,
                                 rpm_fname)
-            lock.release()
     except filelock.Timeout:
         ret = -1
         log.cl_error("someone else is holding lock of file [%s] for more "
@@ -382,28 +388,44 @@ def get_build_path():
             utils.random_word(8))
 
 
-def file_replace_key_words(log, input_fpath, output_fpath, keyword_dict):
-    """
-    Replace key words in input file and save to output file.
-    """
-    try:
-        with open(input_fpath, "r", encoding='utf-8') as input_file:
-            content = input_file.read()
-    except:
-        log.cl_error("failed to read file [%s]: %s",
-                     input_fpath,
-                     traceback.format_exc())
-        return -1
 
-    for key, value in keyword_dict.items():
-        content = content.replace(key, value)
-
-    try:
-        with open(output_fpath, "w", encoding='utf-8') as output:
-            output.write(content)
-    except:
-        log.cl_error("failed to write file [%s]: %s",
-                     output_fpath,
-                     traceback.format_exc())
+def get_shared_build_cache_locked(log, host, workspace,
+                                  shared_cache):
+    """
+    Get the shared build cache
+    """
+    command = ("mkdir -p %s && cp -a %s %s" %
+               (shared_cache, shared_cache, workspace))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
     return 0
+
+
+def get_shared_build_cache(log, host, workspace, shared_cache):
+    """
+    Get the shared build cache
+    """
+    # pylint: disable=abstract-class-instantiated
+    log.cl_info("copying shared cache from [%s] to [%s] on host [%s]",
+                shared_cache, workspace, host.sh_hostname)
+    lock_file = build_constant.CORAL_BUILD_CACHE_LOCK
+    lock = filelock.FileLock(lock_file)
+    ret = 0
+    try:
+        with lock.acquire(timeout=600):
+            ret = get_shared_build_cache_locked(log, host, workspace,
+                                                shared_cache)
+    except filelock.Timeout:
+        ret = -1
+        log.cl_error("someone else is holding lock of file [%s] for more "
+                     "than 10 minutes, aborting",
+                     lock_file)
+    return ret

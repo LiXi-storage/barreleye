@@ -50,10 +50,8 @@ class WatchedIO(io.TextIOWrapper):
     """
     # pylint: disable=too-few-public-methods
     def __init__(self, buffered_io, func, args):
-        if buffered_io is None:
-            self.wi_io = False
-        else:
-            self.wi_io = True
+        self.wi_has_buffered_io = bool(buffered_io is not None)
+        if self.wi_has_buffered_io:
             super().__init__(buffered_io)
         self.wi_func = func
         self.wi_args = args
@@ -66,27 +64,30 @@ class WatchedIO(io.TextIOWrapper):
         there will be some error, so need to ignore it.
         """
         # pylint: disable=bare-except
+        if (not self.wi_has_buffered_io) and self.wi_func is None:
+            return
         data = str(data, encoding='utf-8', errors='ignore')
-        if self.wi_io:
+        if self.wi_has_buffered_io:
             try:
                 super().write(data)
             except:
                 logging.error("failed to write data: %s",
                               traceback.format_exc())
-        self.wi_func(self.wi_args, data)
+        if self.wi_func is not None:
+            self.wi_func(self.wi_args, data)
 
     def close(self):
         """
         Close
         """
-        if self.wi_io:
+        if self.wi_has_buffered_io:
             super().close()
 
     def flush(self):
         """
         Flush
         """
-        if self.wi_io:
+        if self.wi_has_buffered_io:
             super().flush()
 
 
