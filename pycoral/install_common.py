@@ -1282,7 +1282,7 @@ def download_pip3_packages(log, host, pip_dir, pip_packages,
         command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
     for pip_package in pip_packages:
         command += " " + pip_package
-    retval = host.sh_run(log, command)
+    retval = host.sh_run(log, command, timeout=None)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",

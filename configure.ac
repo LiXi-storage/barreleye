@@ -4,7 +4,7 @@ AC_CONFIG_SRCDIR(./pycoral/ssh_host.py)
 AC_CANONICAL_SYSTEM
 AC_CONFIG_HEADERS(config.h)
 
-AM_INIT_AUTOMAKE([tar-pax dist-bzip2 foreign])
+AM_INIT_AUTOMAKE([tar-pax dist-bzip2 foreign subdir-objects])
 AM_EXTRA_RECURSIVE_TARGETS([check_clean])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_LANG(C)

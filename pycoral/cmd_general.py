@@ -65,7 +65,7 @@ def check_argument_fpath(log, local_host, fpath):
         fpath = str(fpath)
     if not isinstance(fpath, str):
         log.cl_error("invalid file path [%s], should be a string",
-                    fpath)
+                     fpath)
         cmd_exit(log, 1)
     elif len(fpath) == 0:
         log.cl_error("empty file path")

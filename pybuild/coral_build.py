@@ -143,17 +143,10 @@ def download_dependent_rpms_rhel8(log, host, packages_dir,
                      host.sh_hostname, command,
                      retval.cr_stdout)
         return -1
-    first_line = lines[0]
-    expected_prefix = "Last metadata expiration check:"
-    if not first_line.startswith(expected_prefix):
-        log.cl_error("unexpected first line [%s] of command [%s] on host "
-                     "[%s], stdout = [%s], expected prefix [%s]",
-                     first_line, host.sh_hostname, command,
-                     retval.cr_stdout,
-                     expected_prefix)
-        return -1
-    lines = lines[1:]
-    for line in lines:
+    # The first line either starts with "Last metadata expiration check:"
+    # for RHEL7 or "Copr repo for modulemd-tools-epel owned by fros" for
+    # RHEL8. Skip it.
+    for line in lines[1:]:
         match = exist_regular.match(line)
         if match:
             rpm_fname = match.group("rpm_fname")
@@ -331,8 +324,7 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
         return -1
 
     dependent_pips = ["wheel"]  # Needed for pyinstaller
-    dependent_rpms = ["createrepo",  # To create the repo in ISO
-                      "e2fsprogs-devel",  # Needed for ./configure
+    dependent_rpms = ["e2fsprogs-devel",  # Needed for ./configure
                       "genisoimage",  # Generate the ISO image
                       "git",  # Needed by building anything from Git repository.
                       "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
@@ -344,10 +336,12 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
 
     if distro == ssh_host.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
-        dependent_rpms += ["python36-psutil"]  # Used by Python codes
+        dependent_rpms += ["createrepo",  # To create the repo in ISO
+                           "python36-psutil"]  # Used by Python codes
     else:
         assert distro == ssh_host.DISTRO_RHEL8
-        dependent_rpms += ["python3-pylint",  # Needed for Python codes check
+        dependent_rpms += ["createrepo_c",  # To create the repo in ISO
+                           "python3-pylint",  # Needed for Python codes check
                            "python3-psutil"]  # Used by Python codes
 
         rpms = prepare_install_modulemd_tools(log, host)
@@ -376,7 +370,12 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
     # are needed or not, the Python codes will be checked, and the Python
     # codes might depend on the RPMs.
     for plugin in build_common.CORAL_PLUGIN_DICT.values():
-        dependent_rpms += plugin.cpt_build_dependent_rpms(distro)
+        rpms = plugin.cpt_build_dependent_rpms(distro)
+        if rpms is None:
+            log.cl_error("failed to get the dependet RPMs for building [%s]",
+                         plugin.cpt_plugin_name)
+            return -1
+        dependent_rpms += rpms
         dependent_pips += plugin.cpt_build_dependent_pips
 
     for package in package_dict.values():

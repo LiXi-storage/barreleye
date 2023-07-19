@@ -147,8 +147,8 @@ B2_15_PATTERNS = {
 }
 LUSTRE_VERSION_NAME_2_15 = "2.15"
 LUSTRE_VERSION_2_15 = LustreVersion(LUSTRE_VERSION_NAME_2_15,
-                                     B2_15_PATTERNS,
-                                     0)
+                                    B2_15_PATTERNS,
+                                    0)
 LUSTRE_VERSION_DICT[LUSTRE_VERSION_NAME_2_15] = LUSTRE_VERSION_2_15
 
 

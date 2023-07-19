@@ -124,7 +124,8 @@ class CoralPluginType():
 
     def cpt_build_dependent_rpms(self, distro):
         """
-        Return the RPMs needed to install before building
+        Return the RPMs needed to install before building.
+        Return None on failure.
         """
         # pylint: disable=unused-argument,no-self-use
         return []
