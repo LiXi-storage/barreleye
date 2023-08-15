@@ -60,6 +60,8 @@ TEMPLATE_DATASOURCE_NAME = "$BARRELEYE_DATASOURCE_NAME"
 GRAFANA_FOLDER_DISABLED = "Disabled"
 # Grafana folders
 GRAFANA_FOLDERS = [GRAFANA_FOLDER_DISABLED]
+# The name of Grafana service
+GRAFANA_SERVICE_NAME = "grafana-server"
 
 
 def sed_replacement_escape(path):
@@ -421,17 +423,16 @@ class BarreleServer():
         Reinstall Grafana
         """
         host = self.bes_server_host
-        service_name = "grafana-server"
-        ret = host.sh_service_restart(log, service_name)
+        ret = host.sh_service_restart(log, GRAFANA_SERVICE_NAME)
         if ret:
             log.cl_error("failed to restart service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
+                         GRAFANA_SERVICE_NAME, host.sh_hostname)
             return -1
 
-        ret = host.sh_service_enable(log, service_name)
+        ret = host.sh_service_enable(log, GRAFANA_SERVICE_NAME)
         if ret:
             log.cl_error("failed to start service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
+                         GRAFANA_SERVICE_NAME, host.sh_hostname)
             return -1
 
         ret = utils.wait_condition(log, self._bes_grafana_try_connect,
@@ -1044,13 +1045,14 @@ class BarreleServer():
         Reinstall Grafana
         """
         host = self.bes_server_host
-        service_name = "grafana-server"
         log.cl_info("restarting and enabling service [%s] on host [%s]",
-                    service_name, host.sh_hostname)
+                    GRAFANA_SERVICE_NAME, host.sh_hostname)
+
+
         ret = self._bes_grafana_service_restart_and_enable(log)
         if ret:
-            log.cl_error("failed to restart or enable service [%s] on "
-                         "host [%s]", service_name,
+            log.cl_error("failed to restart and enable Grafana service on "
+                         "host [%s]",
                          host.sh_hostname)
             return -1
 

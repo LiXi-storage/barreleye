@@ -149,12 +149,16 @@ class BarreleAgent():
                                                                    skip_kernel=True,
                                                                    skip_test=True)
         if version is None:
-            log.cl_warning("failed to match Lustre version according to RPM "
-                           "names on host [%s], using default [%s]",
-                           self.bea_host.sh_hostname,
-                           lustre_fallback_version.lv_name)
-            self.bea_lustre_version = lustre_fallback_version
-        else:
+            version, _ = lustre_version.match_lustre_version_from_rpms(log,
+                                                                       rpm_fnames,
+                                                                       client=True)
+            if version is None:
+                log.cl_warning("failed to match Lustre version according to RPM "
+                               "names on host [%s], using default [%s]",
+                               self.bea_host.sh_hostname,
+                               lustre_fallback_version.lv_name)
+                self.bea_lustre_version = lustre_fallback_version
+        if version is not None:
             log.cl_info("detected Lustre version [%s] on host [%s]",
                         version.lv_name,
                         self.bea_host.sh_hostname)

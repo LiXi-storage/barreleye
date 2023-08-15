@@ -787,9 +787,9 @@ def check_argument_str(log, name, value):
     return value
 
 
-def lustre_release_name_is_valid(value):
+def name_is_valid(value):
     """
-    Check whether Lustre release string is valid.
+    Check a name is valid
     """
     for char in value:
         if char.isalnum() or char in ["_", "@", ".", "-"]:
@@ -798,6 +798,13 @@ def lustre_release_name_is_valid(value):
     if value in (".", ".."):
         return -1
     return 0
+
+
+def lustre_release_name_is_valid(value):
+    """
+    Check whether Lustre release string is valid.
+    """
+    return name_is_valid(value)
 
 
 def check_lustre_release_name(log, name, value):
@@ -816,13 +823,7 @@ def coral_release_name_is_valid(value):
     """
     Check whether Coral release string is valid.
     """
-    for char in value:
-        if char.isalnum() or char in ["_", "."]:
-            continue
-        return -1
-    if value in (".", ".."):
-        return -1
-    return 0
+    return name_is_valid(value)
 
 
 def check_coral_release_name(log, name, value):

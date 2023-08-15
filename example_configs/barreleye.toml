@@ -36,7 +36,7 @@ jobstat_pattern = "unknown"
 # The Lustre version to use, if the Lustre RPMs installed on the agent(s)
 # is not with the supported version.
 #
-# To get the list of suppoerted versions, please run "barrele lustre_versions".
+# To get the list of supported versions, please run "barrele lustre_versions".
 #
 # Default value: "2.12"
 lustre_fallback_version = "2.12"

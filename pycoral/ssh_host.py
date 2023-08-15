@@ -3509,7 +3509,7 @@ class SSHHost():
 
         for fname in contents:
             if fname not in existing_fnames:
-                log.cl_error("can not find necessary content [%s] under "
+                log.cl_error("failed to find necessary content [%s] under "
                              "directory [%s] of host [%s]", fname, directory,
                              self.sh_hostname)
                 return -1

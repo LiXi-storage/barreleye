@@ -12,6 +12,7 @@ M4_DESTINE_FILES = ime-1.1.m4 \
 	lustre-b_es5_1.m4 \
 	lustre-b_es5_2.m4 \
 	lustre-b_es6_0.m4 \
+	lustre-b_es6_1.m4 \
 	lustre-2.13.m4 \
 	sfa-3.0.m4 \
 	sfa-11.0.m4 \

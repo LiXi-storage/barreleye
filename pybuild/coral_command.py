@@ -4,10 +4,12 @@ Coral command
 # pylint: disable=unused-import
 import sys
 import os
+import traceback
 from fire import Fire
 from pycoral import constant
 from pycoral import cmd_general
 from pycoral import ssh_host
+from pycoral import lustre_version
 from pybuild import coral_build
 from pybuild import build_common
 
@@ -99,6 +101,58 @@ def plugins(coral_command):
 
 
 build_common.coral_command_register("plugins", plugins)
+
+
+def detect_lustre(coral_command, fpath):
+    """
+    Detect the Lustre version from RPM names.
+    :param fpath: The file path that saves RPM names with or with out .rpm suffix.
+    """
+    # pylint: disable=protected-access
+    source_dir = os.getcwd()
+    identity = build_common.get_build_path()
+    logdir_is_default = True
+    log, _ = cmd_general.init_env_noconfig(source_dir,
+                                           coral_command._cc_log_to_file,
+                                           logdir_is_default,
+                                           identity=identity)
+
+    try:
+        with open(fpath, "r", encoding='utf-8') as fd:
+            lines = fd.readlines()
+    except:
+        log.cl_error("failed to read file [%s]: %s",
+                     fpath, traceback.format_exc())
+        cmd_general.cmd_exit(log, -1)
+
+    rpm_fnames = []
+    for line in lines:
+        line = line.strip()
+        fields = line.split()
+        for rpm_fname in fields:
+            if not rpm_fname.endswith(".rpm"):
+                rpm_fname += ".rpm"
+            rpm_fnames.append(rpm_fname)
+            log.cl_info("RPM: %s", rpm_fname)
+
+    version, _ = lustre_version.match_lustre_version_from_rpms(log,
+                                                               rpm_fnames,
+                                                               skip_kernel=True,
+                                                               skip_test=True)
+    if version is None:
+        version, _ = lustre_version.match_lustre_version_from_rpms(log,
+                                                                   rpm_fnames,
+                                                                   client=True)
+        if version is None:
+            log.cl_error("failed to match Lustre version according to RPM names")
+            cmd_general.cmd_exit(log, -1)
+        log.cl_stdout("Lustre client: %s", version.lv_name)
+        cmd_general.cmd_exit(log, 0)
+    log.cl_stdout("Lustre server: %s", version)
+    cmd_general.cmd_exit(log, 0)
+
+
+build_common.coral_command_register("detect_lustre", detect_lustre)
 
 
 def main():
