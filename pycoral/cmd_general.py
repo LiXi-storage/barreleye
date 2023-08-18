@@ -70,6 +70,9 @@ def check_argument_fpath(log, local_host, fpath):
     elif len(fpath) == 0:
         log.cl_error("empty file path")
         cmd_exit(log, 1)
+    if fpath[0] != '/':
+        cwd = os.getcwd()
+        fpath = cwd + "/" + fpath
     real_path = local_host.sh_real_path(log, fpath)
     if real_path is None:
         log.cl_error("failed to get the real path of [%s]", fpath)

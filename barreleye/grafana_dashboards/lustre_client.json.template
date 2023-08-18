@@ -16,38 +16,16 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1691588612905,
+  "iteration": 1692325875474,
   "links": [],
   "panels": [
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 199,
-      "panels": [],
-      "repeat": "client_uuid",
-      "scopedVars": {
-        "client_uuid": {
-          "selected": true,
-          "text": "ffff967fb61cc800",
-          "value": "ffff967fb61cc800"
-        }
-      },
-      "title": "Client operations latency",
-      "type": "row"
-    },
     {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
       "dashes": false,
       "datasource": "$BARRELEYE_DATASOURCE_NAME",
-      "description": "",
+      "description": "The write throughput on this client.",
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -57,13 +35,13 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 6,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
-        "y": 1
+        "y": 0
       },
       "hiddenSeries": false,
-      "id": 126,
+      "id": 205,
       "legend": {
         "avg": false,
         "current": false,
@@ -75,66 +53,27 @@
       },
       "lines": true,
       "linewidth": 1,
-      "links": [],
       "nullPointMode": "null",
       "options": {
         "alertThreshold": true
       },
-      "paceLength": 10,
       "percentage": false,
       "pluginVersion": "7.3.7",
-      "pointradius": 5,
+      "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "scopedVars": {
-        "client_uuid": {
-          "selected": true,
-          "text": "ffff967fb61cc800",
-          "value": "ffff967fb61cc800"
-        }
-      },
       "seriesOverrides": [],
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
       "targets": [
         {
-          "alias": "",
-          "dsType": "influxdb",
+          "alias": "Write Throughput",
           "groupBy": [],
-          "measurement": "client_stats_close_max",
+          "measurement": "client_stats_write_bytes_sum",
           "orderByTime": "ASC",
           "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_read_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
           "refId": "A",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              }
-            ]
-          ],
-          "tags": [
-            {
-              "key": "client_uuid",
-              "operator": "=",
-              "value": "ffff8c277475e800"
-            }
-          ]
-        },
-        {
-          "groupBy": [],
-          "measurement": "client_stats_write_max",
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_write_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "B",
           "resultFormat": "time_series",
           "select": [
             [
@@ -153,1012 +92,13 @@
               "value": "/^$client_uuid$/"
             }
           ]
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_open_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "C",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_close_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "D",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_mmap_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "E",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_page_fault_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "F",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_page_mkwrite_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "G",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_seek_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "H",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_fsync_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "I",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_readdir_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "J",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_setattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "K",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_truncate_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "L",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_flock_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "M",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_getattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "N",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_fallocate_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "O",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_create_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "P",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_link_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "Q",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_unlink_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "R",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_symlink_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "S",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_mkdir_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "T",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_rmdir_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "U",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_mknod_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "V",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_rename_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "W",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_statfs_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "X",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_setxattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "Y",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_getxattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "Z",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_listxattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "NA",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_removexattr_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "NA",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        },
-        {
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_inode_permission_max\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
-          "refId": "NA",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Max latency of client operations",
+      "title": "Write Throughput",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1174,8 +114,7 @@
       },
       "yaxes": [
         {
-          "decimals": 0,
-          "format": "ns",
+          "format": "Bps",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1188,7 +127,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": false
+          "show": true
         }
       ],
       "yaxis": {
@@ -1202,7 +141,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$BARRELEYE_DATASOURCE_NAME",
-      "description": "",
+      "description": "The read throughput on this client. Please note this number is NOT necessarily equal to the total read throughput from the OSTs to the client since the client might get the data directly from the client side read cache.",
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -1212,13 +151,13 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 7
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
       },
       "hiddenSeries": false,
-      "id": 90,
+      "id": 206,
       "legend": {
         "avg": false,
         "current": false,
@@ -1230,31 +169,143 @@
       },
       "lines": true,
       "linewidth": 1,
-      "links": [],
       "nullPointMode": "null",
       "options": {
         "alertThreshold": true
       },
-      "paceLength": 10,
       "percentage": false,
       "pluginVersion": "7.3.7",
-      "pointradius": 5,
+      "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "scopedVars": {
-        "client_uuid": {
-          "selected": true,
-          "text": "ffff967fb61cc800",
-          "value": "ffff967fb61cc800"
-        }
-      },
       "seriesOverrides": [],
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
       "targets": [
         {
-          "alias": "",
+          "alias": "Read Throughput",
+          "groupBy": [],
+          "measurement": "client_stats_read_bytes_sum",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "field"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "client_uuid",
+              "operator": "=~",
+              "value": "/^$client_uuid$/"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Read Throughput",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "Bps",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "cacheTimeout": null,
+      "datasource": "$BARRELEYE_DATASOURCE_NAME",
+      "description": "The average latency of different kinds of client operations. High latency can be caused by poor specification of network, servers or/and storages.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "displayMode": "auto",
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ns"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 90,
+      "interval": null,
+      "links": [],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "pluginVersion": "7.3.7",
+      "targets": [
+        {
+          "aggregation": "Last",
+          "alias": "Read",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "dsType": "influxdb",
           "groupBy": [],
           "measurement": "client_stats_close_mean",
@@ -1280,9 +331,17 @@
               "operator": "=",
               "value": "ffff8c277475e800"
             }
-          ]
+          ],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Write",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [],
           "measurement": "client_stats_write_mean",
           "orderByTime": "ASC",
@@ -1307,9 +366,17 @@
               "operator": "=~",
               "value": "/^$client_uuid$/"
             }
-          ]
+          ],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Open",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1327,7 +394,7 @@
           "orderByTime": "ASC",
           "policy": "default",
           "query": "SELECT \"value\" * 1000 FROM \"client_stats_open_mean\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
-          "rawQuery": true,
+          "rawQuery": false,
           "refId": "C",
           "resultFormat": "time_series",
           "select": [
@@ -1344,9 +411,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Close",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1381,9 +456,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Mmap",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1418,9 +501,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Page Fault",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1455,9 +546,16 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1492,9 +590,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Seek",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1529,9 +635,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Fsync",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1566,9 +680,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Readdir",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1603,9 +725,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Setattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1640,9 +770,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Truncate",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1677,9 +815,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Flock",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1714,9 +860,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Getattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1751,9 +905,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Fallocate",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1788,9 +950,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Create",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1825,9 +995,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Link",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1862,9 +1040,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Unlink",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1899,9 +1085,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Symlink",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1936,9 +1130,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Mkdir",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -1973,9 +1175,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Rmdir",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2010,9 +1220,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Mknod",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2047,9 +1265,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Rename",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2084,9 +1310,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Statfs",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2121,9 +1355,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Setxattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2158,9 +1400,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Getxattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2195,9 +1445,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Listxattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2232,9 +1490,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Removexattr",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2269,9 +1535,17 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         },
         {
+          "aggregation": "Last",
+          "alias": "Inode Permission",
+          "decimals": 2,
+          "displayAliasType": "Warning / Critical",
+          "displayType": "Regular",
+          "displayValueWithAlias": "Never",
           "groupBy": [
             {
               "params": [
@@ -2306,50 +1580,15 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [],
+          "units": "none",
+          "valueHandler": "Number Threshold"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
-      "timeRegions": [],
       "timeShift": null,
-      "title": "Average latency of client operations",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "decimals": 0,
-          "format": "ns",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "title": "Latency of Client Operations",
+      "type": "bargauge"
     }
   ],
   "refresh": "1m",
@@ -2389,8 +1628,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "ffff967fb61cc800",
-          "value": "ffff967fb61cc800"
+          "text": "ffff9cca7941f000",
+          "value": "ffff9cca7941f000"
         },
         "datasource": "$BARRELEYE_DATASOURCE_NAME",
         "definition": "SHOW TAG VALUES FROM \"client_stats_open_max\" WITH KEY = client_uuid WHERE \"fs_name\" = '$fs_name'",
@@ -2436,6 +1675,6 @@
   },
   "timezone": "browser",
   "title": "Lustre Client",
-  "uid": "sZOw9ZmGk",
-  "version": 3
+  "uid": "Bj-VYMRSz",
+  "version": 14
 }

@@ -940,7 +940,7 @@ PostCacheChain "PostCache"
                              self.cdc_jobstat_pattern)
                 return -1
 
-        config += """
+            config += """
     <Item>
         Type "mdt_stats_req_waittime"
     </Item>

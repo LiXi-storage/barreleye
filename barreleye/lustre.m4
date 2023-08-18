@@ -603,6 +603,23 @@ OPTION($1 + 1, type_instance, $3, 0)
 OPTION($1 + 1, tsdb_name, client_stats_$3, 0)
 OPTION($1 + 1, tsdb_tags, fs_name=${subpath:fs_name} client_uuid=${subpath:client_uuid}, 0)', 0)')dnl
 dnl
+dnl CLIENT_STATS_ITEM_FOUR_BYTES is differnet with CLIENT_STATS_ITEM_FOUR
+dnl in the sense that it saves derive of sum field rather than gauge. This
+dnl is useful to get read or write bandwidths. 
+dnl $1: number of INDENT
+dnl $2: name of CLIENT_STATS_ITEM_FOUR_BYTES
+dnl $3: unit of ITEM
+define(`CLIENT_STATS_ITEM_FOUR_BYTES',
+	`ELEMENT($1, item,
+	`NAME($1 + 1, client_stats_$2, 1)
+PATTERN($1 + 1, `$2 +([[:digit:]]+) samples \[$3\] ([[:digit:]]+) ([[:digit:]]+) ([[:digit:]]+)', 0)
+CLIENT_STATS_FIELD($1 + 1, 1, $2_samples, number, gauge)
+CLIENT_STATS_FIELD($1 + 1, 2, $2_min, number, gauge)
+CLIENT_STATS_FIELD($1 + 1, 3, $2_max, number, gauge)
+CLIENT_STATS_FIELD($1 + 1, 4, $2_sum, number, derive)
+', 1)')dnl
+dnl
+dnl
 dnl $1: number of INDENT
 dnl $2: name of CLIENT_STATS_ITEM
 dnl $3: unit of ITEM
