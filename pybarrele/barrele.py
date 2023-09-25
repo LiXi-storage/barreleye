@@ -803,6 +803,21 @@ class BarreleAgentCommand():
         ret = barreleye_instance.bei_stop_agents(log, hostnames)
         cmd_general.cmd_exit(log, ret)
 
+    def install(self):
+        """
+        Install the Barreleye agent on the local host.
+
+        This command can be run on a host that has not been configured
+        as agent in barreleye.conf. It is useful when installing standalone
+        agents on hosts with distro of Ubuntu.
+        """
+        log, barreleye_instance = init_env(self._bac_config_fpath,
+                                           self._bac_logdir,
+                                           self._bac_log_to_file,
+                                           self._bac_iso)
+        ret = barreleye_instance.bei_install_agent_locally(log)
+        cmd_general.cmd_exit(log, ret)
+
 
 class BarreleCommand():
     """

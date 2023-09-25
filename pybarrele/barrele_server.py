@@ -992,7 +992,7 @@ class BarreleServer():
             return -1
         return 0
 
-    def _bes_grafana_user_info(self, log, name):
+    def _bes_grafana_user_info(self, log, login):
         """
         Add viewer user
         """
@@ -1001,19 +1001,19 @@ class BarreleServer():
                    "Accept": "application/json"}
 
         url = self.bes_grafana_admin_url("/api/users/lookup?loginOrEmail=%s" %
-                                         (slugify(name)))
+                                         (slugify(login)))
         try:
             response = requests.get(url, headers=headers)
         except:
-            log.cl_error("not able to get users through [%s]: %s",
+            log.cl_error("failed to get user info through [%s]: %s",
                          url, traceback.format_exc())
             return -1, None
         if response.status_code == HTTPStatus.OK:
             return 1, response.json()
         if response.status_code == HTTPStatus.NOT_FOUND:
             return 0, None
-        log.cl_error("got status [%d] when getting user info from Grafana",
-                     response.status_code)
+        log.cl_error("got status [%d] when getting user info through [%s]",
+                     response.status_code, url)
         return -1, None
 
     def _bes_grafana_user_recreate(self, log, name, email_address, login,
@@ -1022,7 +1022,7 @@ class BarreleServer():
         If user doesn't exist, add the user.
         If user exists, remove it first.
         """
-        ret, json_info = self._bes_grafana_user_info(log, "viewer")
+        ret, json_info = self._bes_grafana_user_info(log, login)
         if ret < 0:
             return -1
         if ret == 1:

@@ -1,6 +1,7 @@
 """
 Library for building Barreleye
 """
+# pylint: disable=too-many-lines
 import os
 import stat
 from pycoral import constant
@@ -13,12 +14,15 @@ from pybarrele import barrele_constant
 PACAKGE_URL_DICT = {}
 # The URL of Collectd tarball
 COLLECTD_URL = ("https://github.com/LiXi-storage/collectd/releases/download/"
-                "collectd-5.12.0.brl2/collectd-5.12.0.brl2.tar.bz2")
+                "collectd-5.12.0.brl3/collectd-5.12.0.brl3.tar.bz2")
 # The sha1sum of Collectd tarball. Need to update together with
 # COLLECTD_URL
-COLLECTD_SHA1SUM = "9fb8be9d7c0bf7c84b93ef5bf441d393b081e7d9"
-PACAKGE_URL_DICT["collectd"] = COLLECTD_URL
+COLLECTD_SHA1SUM = "7469694df09576b9e5460a0a6ee8d429af962bda"
+PACAKGE_URL_DICT["collectd"] = COLLECTD_URL# The RPM names of Collectd to check
 
+# The deb names of Collectd to check
+COLLECTD_DEB_NAMES = ["collectd", "collectd-core",
+                      "collectd-utils", "libcollectdclient1"]
 # The RPM names of Collectd to check
 COLLECTD_RPM_NAMES = ["collectd", "collectd-disk", "collectd-filedata",
                       "collectd-sensors", "collectd-ssh",
@@ -102,8 +106,90 @@ COLLECTD_BUILD_DEPENDENT_RHEL7_RPMS = (BARRELEYE_BUILD_DEPENDENT_COMMON_RPMS +
                                        ["postgresql-devel", "python-devel"])
 COLLECTD_BUILD_DEPENDENT_RHEL8_RPMS = (BARRELEYE_BUILD_DEPENDENT_COMMON_RPMS +
                                        ["libpq-devel", "python36-devel"])
+COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS = ["bison",
+                                            "default-jdk",
+                                            "default-libmysqlclient-dev",
+                                            "flex",
+                                            "intel-cmt-cat",
+                                            "javahelper",
+                                            "libatasmart-dev",
+                                            "libcap-dev",
+                                            "libcurl4-gnutls-dev",
+                                            "libcurl4-gnutls-dev",
+                                            "libcurl4-gnutls-dev",
+                                            "libdbi-dev",
+                                            "libdpdk-dev",
+                                            "libesmtp-dev",
+                                            "libganglia1-dev",
+                                            "libgcrypt20-dev",
+                                            "libglib2.0-dev",
+                                            "libgps-dev",
+                                            "libgrpc++-dev",
+                                            "libhiredis-dev",
+                                            "libi2c-dev",
+                                            "libip4tc-dev",
+                                            "libip6tc-dev",
+                                            "libiptc-dev",
+                                            "libiptc-dev",
+                                            "libldap2-dev",
+                                            "liblua5.3-dev",
+                                            "libmemcached-dev",
+                                            "libmicrohttpd-dev",
+                                            "libmnl-dev",
+                                            "libmodbus-dev",
+                                            "libmongoc-dev",
+                                            "libmosquitto-dev",
+                                            "libnotify-dev",
+                                            "libntirpc-dev",
+                                            "libopenipmi-dev",
+                                            "liboping-dev",
+                                            "libpcap0.8-dev",
+                                            "libpcap-dev",
+                                            "libperl-dev",
+                                            "libpq-dev",
+                                            "libprotobuf-c-dev",
+                                            "libprotobuf-dev",
+                                            "libqpid-proton11-dev",
+                                            "librabbitmq-dev",
+                                            "librdkafka-dev",
+                                            "libriemann-client-dev",
+                                            "librrd-dev",
+                                            "libsensors-dev",
+                                            "libslurm-dev",
+                                            "libsnmp-dev",
+                                            "libssh2-1-dev",
+                                            "libudev-dev",
+                                            "libupsclient-dev",
+                                            "libupsclient-dev",
+                                            "libvarnishapi-dev",
+                                            "libvirt-dev",
+                                            "libxen-dev",
+                                            "libxml2-dev",
+                                            "libyajl-dev",
+                                            "libzmq3-dev",
+                                            "perl",
+                                            "protobuf-c-compiler",
+                                            "protobuf-compiler",
+                                            "protobuf-compiler-grpc",
+                                            "python3-dev",
+                                            "riemann-c-client",
+                                            "uthash-dev"]
+BARRELE_BUILD_DEPENDENT_UBUNTU2204_DEBS = (COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS +
+                                           ["bzip2",
+                                            "libattr1-dev",
+                                            "libext2fs-dev",
+                                            "pylint",
+                                            "python3-slugify",
+                                            "python3-pip",
+                                            "genisoimage"])
+
 BARRELEYE_BUILD_DEPENDENT_PIPS = ["requests", "python-slugify"]
 
+# The URL of Collectd debian tarball
+COLLECTD_DEBIAN_URL = "http://deb.debian.org/debian/pool/main/c/collectd/collectd_5.12.0-14.debian.tar.xz"
+# The sha1sum of Collectd debian tarball. Need to update together with
+# COLLECTD_DEBIAN_URL
+COLLECTD_DEBIAN_SHA1SUM = "b78277bee7e55d5a58da9d75a8d1eab9de3ef733"
 
 def get_collectd_rpm_suffix(distro_number, target_cpu,
                             collectd_version_release):
@@ -184,11 +270,11 @@ def get_and_clean_collectd_rpms(log, host, packages_dir,
     return collectd_fnames
 
 
-def remove_collectd_rpms(log, host, packages_dir):
+def remove_collectd_packages(log, host, packages_dir):
     """
-    Remove old Collectd RPMs
+    Remove old Collectd RPMs or debs
     """
-    patterns = ["collectd-*", "libcollectdclient-*"]
+    patterns = ["collectd*", "libcollectdclient*"]
     for pattern in patterns:
         command = "rm -f %s/%s" % (packages_dir, pattern)
         retval = host.sh_run(log, command)
@@ -336,10 +422,10 @@ def build_collectd_rpms(log, host, target_cpu, packages_dir,
     return 0
 
 
-def collectd_build_and_check(log, host, target_cpu, packages_dir,
-                             collectd_src_dir, collectd_version,
-                             collectd_version_release,
-                             tarball_fpath, extra_package_fnames):
+def collectd_build_and_check_rhel(log, host, target_cpu, packages_dir,
+                                  collectd_src_dir, collectd_version,
+                                  collectd_version_release,
+                                  tarball_fpath, extra_package_fnames):
     """
     Check and build Collectd RPMs
     """
@@ -356,7 +442,7 @@ def collectd_build_and_check(log, host, target_cpu, packages_dir,
     elif distro == ssh_host.DISTRO_RHEL8:
         distro_number = "8"
     else:
-        log.cl_error("build on distro [%s] is not supported yet", distro)
+        log.cl_error("build Barreleye on distro [%s] is not supported yet", distro)
         return -1
 
     ret = check_collectd_rpms_integrity(log, existing_rpm_fnames,
@@ -377,7 +463,7 @@ def collectd_build_and_check(log, host, target_cpu, packages_dir,
         return 0
 
     log.cl_debug("building Collectd RPMs")
-    ret = remove_collectd_rpms(log, host, packages_dir)
+    ret = remove_collectd_packages(log, host, packages_dir)
     if ret:
         log.cl_error("failed to remove old Collectd RPMs")
         return -1
@@ -419,7 +505,349 @@ def collectd_build_and_check(log, host, target_cpu, packages_dir,
     return 0
 
 
-def build_collectd_tarball(log, workspace, host, target_cpu, packages_dir,
+def get_collectd_deb_suffix(log, target_cpu,
+                            collectd_version):
+    """
+    Return the suffix of Collectd debs.
+    The suffix starts from "_", e.g.
+    "_5.12.0.brl3_amd64.deb"
+    """
+    if target_cpu == "x86_64":
+        deb_target_cpu = "amd64"
+    else:
+        log.cl_error("unsupported target CPU [%s]", target_cpu)
+        return None
+    return ("_%s_%s.deb" %
+            (collectd_version, deb_target_cpu))
+
+
+def get_collectd_dev_deb_suffix(collectd_version):
+    """
+    Return the suffix of Collectd debs.
+    The suffix starts from "_", e.g.
+    "_5.12.0.brl3_all.deb"
+    """
+    return ("_%s_all.deb" %
+            (collectd_version))
+
+
+def check_collectd_debs_integrity(log, deb_fnames, target_cpu,
+                                  collectd_version, quiet=True):
+    """
+    Check whether the existing Collectd debs are complete.
+    """
+    suffix = get_collectd_deb_suffix(log, target_cpu,
+                                     collectd_version)
+    if suffix is None:
+        return -1
+    for collect_deb_name in COLLECTD_DEB_NAMES:
+        collect_deb_full = collect_deb_name + suffix
+        if collect_deb_full not in deb_fnames:
+            if not quiet:
+                log.cl_error("Deb [%s] does not exist",
+                             collect_deb_full)
+            else:
+                log.cl_debug("Deb [%s] does not exist",
+                             collect_deb_full)
+            return -1
+    return 0
+
+
+def get_and_clean_collectd_debs(log, host, packages_dir,
+                                deb_fnames, target_cpu,
+                                collectd_version,
+                                expect_clean=False):
+    """
+    Return a list of Collectd debs under a directory.
+    If there are other version of Collectd debs, remove them.
+    """
+    # pylint: disable=too-many-locals
+    suffix = get_collectd_deb_suffix(log, target_cpu,
+                                     collectd_version)
+    if suffix is None:
+        return None
+    dev_suffix = get_collectd_dev_deb_suffix(collectd_version)
+
+    prefixes = ["collectd", "libcollectdclient"]
+    collectd_fnames = []
+    for deb_fname in deb_fnames:
+        found = False
+        for prefix in prefixes:
+            if deb_fname.startswith(prefix):
+                found = True
+        if not found:
+            continue
+
+        if not deb_fname.endswith(suffix) and not deb_fname.endswith(dev_suffix):
+            if expect_clean:
+                log.cl_error("Collectd deb [%s] has different suffix, "
+                             "expected [%s]",
+                             deb_fname, suffix)
+                return None
+
+            log.cl_info("Collectd deb [%s] has different suffix, "
+                        "expected [%s], removing",
+                        deb_fname, suffix)
+            fpath = packages_dir + "/" + deb_fname
+            command = ("rm -f %s" % (fpath))
+            retval = host.sh_run(command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return None
+            continue
+        collectd_fnames.append(deb_fname)
+    return collectd_fnames
+
+
+def collectd_tarball_fpath2version(log, tarball_fpath):
+    """
+    Return the Collectd version by parse the tarball fpath.
+    """
+    collectd_tarball_fname = os.path.basename(tarball_fpath)
+    suffix = ".tar.bz2"
+    if not collectd_tarball_fname.endswith(suffix):
+        log.cl_error("tarball [%s] does not end with suffix [%s]",
+                     collectd_tarball_fname, suffix)
+        return None
+
+    prefix = "collectd-"
+    if not collectd_tarball_fname.startswith(prefix):
+        log.cl_error("tarball [%s] does not start with prefix [%s]",
+                     collectd_tarball_fname, prefix)
+        return None
+    collectd_version = collectd_tarball_fname[len(prefix):-len(suffix)]
+    return collectd_version
+
+
+def build_collectd_debs(log, host, source_dir, type_cache,
+                        packages_dir, collectd_build_dir,
+                        collectd_src_dir, tarball_fpath,
+                        collectd_version):
+    """
+    Build Collectd debs on a host
+    """
+    # pylint: disable=too-many-locals
+    collectd_version = collectd_tarball_fpath2version(log, tarball_fpath)
+    if collectd_version is None:
+        return -1
+
+    tarball_fname = os.path.basename(COLLECTD_DEBIAN_URL)
+    tarball_fpath = type_cache + "/" + tarball_fname
+    ret = host.sh_download_file(log, COLLECTD_DEBIAN_URL, tarball_fpath,
+                                COLLECTD_DEBIAN_SHA1SUM)
+    if ret:
+        log.cl_error("failed to download Collectd debian tarball")
+        return -1
+
+    command = "tar xf %s -C %s" % (tarball_fpath, collectd_src_dir)
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    patch_dir = source_dir + "/barreleye/collectd/ubuntu_build_patches"
+    rc = build_common.apply_patches(log, host, collectd_src_dir,
+                                     patch_dir)
+    if rc:
+        log.cl_error("failed to apply ubuntu build patches to [%s]",
+                     collectd_src_dir)
+        return -1
+
+    command = "date -R"
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    changelog_date = retval.cr_stdout.strip()
+
+    changelog_lines = ["collectd (%s) unstable; urgency=medium" % collectd_version,
+                       "",
+                       "  * Automated changelog."
+                       ""
+                       "Coral Packaging Team <maintainer@coralfs.cn>  %s" % changelog_date]
+    changelog_fpath = collectd_src_dir + "/debian/changelog"
+    command = "> %s" % changelog_fpath
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    for changelog_line in changelog_lines:
+        command = ("echo \"%s\" >> %s" %
+                   (changelog_line,
+                    changelog_fpath))
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+    command = "cd %s && dpkg-buildpackage -us -uc -I.git -I.github" % collectd_src_dir
+    log.cl_info("running command [%s] on host [%s]",
+                command, host.sh_hostname)
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    command = ("mv %s/*.deb %s" %
+               (collectd_build_dir, packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def collectd_build_and_check_ubuntu(log, host, source_dir,
+                                    type_cache, target_cpu,
+                                    packages_dir,
+                                    collectd_build_dir,
+                                    collectd_src_dir,
+                                    collectd_version,
+                                    tarball_fpath,
+                                    extra_package_fnames):
+    """
+    If existing Collectd debs are not complete, build them.
+    """
+    existing_deb_fnames = host.sh_get_dir_fnames(log, packages_dir)
+    if existing_deb_fnames is None:
+        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                     packages_dir,
+                     host.sh_hostname)
+        return -1
+
+    ret = check_collectd_debs_integrity(log, existing_deb_fnames,
+                                        target_cpu,
+                                        collectd_version)
+    if ret == 0:
+        log.cl_debug("Collectd debs already exist")
+        collectd_deb_fnames = get_and_clean_collectd_debs(log, host,
+                                                          packages_dir,
+                                                          existing_deb_fnames,
+                                                          target_cpu,
+                                                          collectd_version)
+        if collectd_deb_fnames is None:
+            log.cl_error("failed to get the Collectd deb names")
+            return -1
+        extra_package_fnames += collectd_deb_fnames
+        return 0
+
+    log.cl_debug("building Collectd debs")
+    ret = remove_collectd_packages(log, host, packages_dir)
+    if ret:
+        log.cl_error("failed to remove old Collectd debs")
+        return -1
+
+    ret = build_collectd_debs(log, host, source_dir,
+                              type_cache, packages_dir,
+                              collectd_build_dir,
+                              collectd_src_dir, tarball_fpath,
+                              collectd_version)
+    if ret:
+        log.cl_error("failed to build Collectd debs from src [%s]",
+                     collectd_src_dir)
+        return -1
+
+    existing_deb_fnames = host.sh_get_dir_fnames(log, packages_dir)
+    if existing_deb_fnames is None:
+        log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                     packages_dir,
+                     host.sh_hostname)
+        return -1
+
+    ret = check_collectd_debs_integrity(log, existing_deb_fnames,
+                                        target_cpu,
+                                        collectd_version)
+    if ret == 0:
+        collectd_deb_fnames = get_and_clean_collectd_debs(log, host,
+                                                          packages_dir,
+                                                          existing_deb_fnames,
+                                                          target_cpu,
+                                                          collectd_version)
+        if collectd_deb_fnames is None:
+            log.cl_error("failed to get the Collectd deb names")
+            return -1
+        extra_package_fnames += collectd_deb_fnames
+        return 0
+    return 0
+
+
+def collectd_build_and_check(log, host, source_dir, type_cache,
+                             target_cpu, packages_dir,
+                             collectd_build_dir,
+                             collectd_src_dir, collectd_version,
+                             collectd_version_release,
+                             tarball_fpath, extra_package_fnames):
+    """
+    If existing Collectd packages are not complete, build them.
+    """
+    distro = host.sh_distro(log)
+    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        return collectd_build_and_check_rhel(log, host, target_cpu,
+                                             packages_dir,
+                                             collectd_src_dir,
+                                             collectd_version,
+                                             collectd_version_release,
+                                             tarball_fpath,
+                                             extra_package_fnames)
+    if distro in (ssh_host.DISTRO_UBUNTU2204):
+        return collectd_build_and_check_ubuntu(log, host,
+                                               source_dir,
+                                               type_cache,
+                                               target_cpu,
+                                               packages_dir,
+                                               collectd_build_dir,
+                                               collectd_src_dir,
+                                               collectd_version,
+                                               tarball_fpath,
+                                               extra_package_fnames)
+    return 0
+
+
+def build_collectd_tarball(log, workspace, host, source_dir, type_cache,
+                           target_cpu, packages_dir,
                            tarball_fpath, extra_package_fnames,
                            known_collectd_version=None):
     """
@@ -487,23 +915,29 @@ def build_collectd_tarball(log, workspace, host, target_cpu, packages_dir,
                      "source dir")
         return -1
 
-    ret = collectd_build_and_check(log, host, target_cpu, packages_dir,
-                                   collectd_src_dir, collectd_version,
+    ret = collectd_build_and_check(log, host, source_dir,
+                                   type_cache,
+                                   target_cpu,
+                                   packages_dir,
+                                   collectd_build_dir,
+                                   collectd_src_dir,
+                                   collectd_version,
                                    collectd_version_release,
                                    tarball_fpath, extra_package_fnames)
     if ret:
-        log.cl_error("failed to build and check Collectd RPMs")
+        log.cl_error("failed to build and check Collectd packages")
         return -1
     return 0
 
 
-def download_and_build_collectd(log, workspace, host, type_cache, target_cpu,
+def download_and_build_collectd(log, workspace, host, source_dir,
+                                type_cache, target_cpu,
                                 packages_dir, collectd_url, expected_sha1sum,
                                 extra_package_fnames):
     """
     Download Collectd source code tarball and build
     """
-    log.cl_info("building Collectd RPMs from URL [%s] on host [%s]",
+    log.cl_info("building Collectd packages from URL [%s] on host [%s]",
                 collectd_url, host.sh_hostname)
     tarball_fname = os.path.basename(collectd_url)
     tarball_fpath = type_cache + "/" + tarball_fname
@@ -513,8 +947,8 @@ def download_and_build_collectd(log, workspace, host, type_cache, target_cpu,
         log.cl_error("failed to download Collectd sourcecode tarball")
         return -1
 
-    ret = build_collectd_tarball(log, workspace, host, target_cpu,
-                                 packages_dir, tarball_fpath,
+    ret = build_collectd_tarball(log, workspace, host, source_dir, type_cache,
+                                 target_cpu, packages_dir, tarball_fpath,
                                  extra_package_fnames)
     if ret:
         log.cl_error("failed to build Collectd tarball [%s]",
@@ -523,8 +957,10 @@ def download_and_build_collectd(log, workspace, host, type_cache, target_cpu,
     return 0
 
 
-def build_collectd_dir(log, workspace, host, target_cpu, packages_dir,
-                       origin_collectd_dir, extra_package_fnames):
+def build_collectd_dir(log, workspace, host, source_dir,
+                       type_cache, target_cpu,
+                       packages_dir, origin_collectd_dir,
+                       extra_package_fnames):
     """
     Build Collectd from src dir
     """
@@ -604,7 +1040,8 @@ def build_collectd_dir(log, workspace, host, target_cpu, packages_dir,
         return -1
 
     collectd_tarball_fpath = collectd_dir + "/" + collectd_tarball_fname
-    ret = build_collectd_tarball(log, workspace, host, target_cpu, packages_dir,
+    ret = build_collectd_tarball(log, workspace, host, source_dir,
+                                 type_cache, target_cpu, packages_dir,
                                  collectd_tarball_fpath, extra_package_fnames,
                                  known_collectd_version=collectd_version)
     if ret:
@@ -614,23 +1051,29 @@ def build_collectd_dir(log, workspace, host, target_cpu, packages_dir,
     return 0
 
 
-def build_collectd(log, workspace, host, type_cache, target_cpu, packages_dir,
+def build_collectd(log, workspace, host, source_dir,
+                   type_cache, target_cpu, packages_dir,
                    collectd, extra_package_fnames):
     """
     Build Collectd
     """
     if collectd is None:
-        return download_and_build_collectd(log, workspace, host, type_cache,
-                                           target_cpu, packages_dir, COLLECTD_URL,
+        return download_and_build_collectd(log, workspace, host,
+                                           source_dir,
+                                           type_cache,
+                                           target_cpu,
+                                           packages_dir,
+                                           COLLECTD_URL,
                                            COLLECTD_SHA1SUM,
                                            extra_package_fnames)
 
     stat_result = host.sh_stat(log, collectd)
     if stat_result is not None:
         if stat.S_ISREG(stat_result.st_mode):
-            log.cl_info("building Collectd RPMs from tarball [%s] on host [%s]",
+            log.cl_info("building Collectd packages from tarball [%s] on host [%s]",
                         collectd, host.sh_hostname)
-            ret = build_collectd_tarball(log, workspace, host, target_cpu,
+            ret = build_collectd_tarball(log, workspace, host, source_dir,
+                                         type_cache, target_cpu,
                                          packages_dir, collectd,
                                          extra_package_fnames)
             if ret:
@@ -638,9 +1081,11 @@ def build_collectd(log, workspace, host, type_cache, target_cpu, packages_dir,
                              collectd)
                 return -1
         elif stat.S_ISDIR(stat_result.st_mode):
-            log.cl_info("building Collectd RPMs from dir [%s] on host [%s]",
+            log.cl_info("building Collectd packages from dir [%s] on host [%s]",
                         collectd, host.sh_hostname)
-            ret = build_collectd_dir(log, workspace, host, target_cpu,
+            ret = build_collectd_dir(log, workspace, host, source_dir,
+                                     type_cache,
+                                     target_cpu,
                                      packages_dir, collectd,
                                      extra_package_fnames)
             if ret:
@@ -653,8 +1098,15 @@ def build_collectd(log, workspace, host, type_cache, target_cpu, packages_dir,
             return -1
         return 0
 
-    return download_and_build_collectd(log, workspace, host, type_cache,
-                                       target_cpu, packages_dir, collectd, None,
+    return download_and_build_collectd(log,
+                                       workspace,
+                                       host,
+                                       source_dir,
+                                       type_cache,
+                                       target_cpu,
+                                       packages_dir,
+                                       collectd,
+                                       None,
                                        extra_package_fnames)
 
 
@@ -819,36 +1271,45 @@ def build_grafana_plugins(log, host, type_cache, iso_cache, extra_iso_fnames):
     return 0
 
 
-def build_barreleye(log, workspace, host, type_cache, target_cpu, iso_cache,
+def build_barreleye(log, workspace, host, source_dir,
+                    type_cache, target_cpu, iso_cache,
                     packages_dir, collectd, extra_iso_fnames,
-                    extra_package_fnames, extra_rpm_names):
+                    extra_package_fnames, extra_package_names):
     """
     Build barreleye
     """
-    rc = build_collectd(log, workspace, host, type_cache, target_cpu,
-                        packages_dir, collectd, extra_package_fnames)
+    rc = build_collectd(log, workspace, host, source_dir, type_cache,
+                        target_cpu, packages_dir, collectd,
+                        extra_package_fnames)
     if rc:
         log.cl_error("failed to build Collectd RPMs")
         return -1
 
-    rc = build_grafana_plugins(log, host, type_cache, iso_cache,
-                               extra_iso_fnames)
-    if rc:
-        log.cl_error("failed to download Grafana")
-        return -1
+    distro = host.sh_distro(log)
+    if distro == ssh_host.DISTRO_UBUNTU2204:
+        log.cl_info("skip building server packages for Barreleye "
+                    "since distro [%s] has no server support",
+                    distro)
+        extra_package_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_DEBS
+    else:
+        rc = build_grafana_plugins(log, host, type_cache, iso_cache,
+                                   extra_iso_fnames)
+        if rc:
+            log.cl_error("failed to download Grafana")
+            return -1
 
-    rc = build_grafana(log, host, target_cpu, packages_dir, extra_package_fnames)
-    if rc:
-        log.cl_error("failed to download Grafana")
-        return -1
+        rc = build_grafana(log, host, target_cpu, packages_dir, extra_package_fnames)
+        if rc:
+            log.cl_error("failed to download Grafana")
+            return -1
 
-    rc = build_influxdb(log, host, target_cpu, packages_dir,
-                        extra_package_fnames)
-    if rc:
-        log.cl_error("failed to download Influxdb")
-        return -1
+        rc = build_influxdb(log, host, target_cpu, packages_dir,
+                            extra_package_fnames)
+        if rc:
+            log.cl_error("failed to download Influxdb")
+            return -1
 
-    extra_rpm_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_RPMS
+        extra_package_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_RPMS
     return 0
 
 
@@ -863,28 +1324,32 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
                          is_devel=False,
                          need_collectd=True)
 
-    def cpt_build_dependent_rpms(self, distro):
+    def cpt_build_dependent_packages(self, distro):
         """
         Return the RPMs needed to install before building
         """
+        # pylint: disable=no-self-use
         if distro == ssh_host.DISTRO_RHEL7:
             return COLLECTD_BUILD_DEPENDENT_RHEL7_RPMS
         if distro == ssh_host.DISTRO_RHEL8:
             return COLLECTD_BUILD_DEPENDENT_RHEL8_RPMS
+        if distro == ssh_host.DISTRO_UBUNTU2204:
+            return BARRELE_BUILD_DEPENDENT_UBUNTU2204_DEBS
         return None
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                  extra_package_fnames, extra_rpm_names, option_dict):
+                  extra_package_fnames, extra_package_names, option_dict):
         """
         Build the plugin
         """
         # pylint: disable=unused-argument,no-self-use
         collectd = option_dict["collectd"]
-        ret = build_barreleye(log, workspace, local_host, type_cache,
+        ret = build_barreleye(log, workspace, local_host, source_dir,
+                              type_cache,
                               target_cpu, iso_cache, packages_dir, collectd,
                               extra_iso_fnames, extra_package_fnames,
-                              extra_rpm_names)
+                              extra_package_names)
         if ret:
             log.cl_error("failed to build Barreleye")
             return -1
@@ -975,8 +1440,8 @@ class CoralCollectdCommand():
                          local_host.sh_hostname)
             cmd_general.cmd_exit(log, -1)
 
-        rc = build_collectd(log, workspace, local_host, type_cache,
-                            target_cpu, packages_dir, collectd,
+        rc = build_collectd(log, workspace, local_host, source_dir,
+                            type_cache, target_cpu, packages_dir, collectd,
                             extra_package_fnames)
         if rc:
             log.cl_error("failed to build Collectd RPMs")

@@ -122,7 +122,7 @@ class CoralPluginType():
         else:
             self.cpt_plugins = plugins
 
-    def cpt_build_dependent_rpms(self, distro):
+    def cpt_build_dependent_packages(self, distro):
         """
         Return the RPMs needed to install before building.
         Return None on failure.
@@ -140,7 +140,7 @@ class CoralPluginType():
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                  extra_package_fnames, extra_rpm_names, option_dict):
+                  extra_package_fnames, extra_package_names, option_dict):
         """
         Build the plugin
         """
@@ -176,7 +176,7 @@ class CoralPackageBuild():
         # useful when need to install other newly buildt packages.
         self.cpb_depend_package_names = depend_package_names
 
-    def cpb_build_dependent_rpms(self, distro):
+    def cpb_build_dependent_packages(self, distro):
         """
         Return the RPMs needed to install before building
         """
@@ -430,3 +430,38 @@ def get_shared_build_cache(log, host, workspace, shared_cache):
                      "than 10 minutes, aborting",
                      lock_file)
     return ret
+
+
+def apply_patches(log, host, target_source_dir, patch_dir):
+    """
+    Apply a series of patches. The patches shall be in patch_dir. And they
+    shall have sorted file names like:
+    0000-fname.patch
+    0001-fname.patch
+    ...
+    """
+    patch_fnames = host.sh_get_dir_fnames(log, patch_dir)
+    if patch_fnames is None:
+        log.cl_error("failed to get patches of Mpifileutils under dir [%s] "
+                     "on host [%s]",
+                     patch_dir, host.sh_hostname)
+        return -1
+
+    patch_fnames.sort()
+
+    for patch_fname in patch_fnames:
+        if not patch_fname.endswith(".patch"):
+            continue
+        patch_fpath = patch_dir + "/" + patch_fname
+        command = "cd %s && patch -p1 < %s" % (target_source_dir, patch_fpath)
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+    return 0

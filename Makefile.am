@@ -1,5 +1,12 @@
 SUBDIRS = pybuild
-SUBDIRS += barreleye pycheck bash_completion .
+DIST_SUBDIRS = pybuild
+
+if ENABLE_BARRELE
+SUBDIRS += barreleye
+endif #ENABLE_BARRELE
+SUBDIRS += pycheck bash_completion .
+DIST_SUBDIRS += barreleye pycheck bash_completion .
+
 
 build_dir = `pwd`/build
 rpmbuild_opt =
@@ -23,7 +30,7 @@ EXTRA_DIST = \
 	coral.spec \
 	detect-distro.sh \
 	doc \
-	example_configs/barreleye.toml \
+	example_configs/barreleye.conf.example \
 	pybarrele/*.py \
 	pybuild/*.py \
 	pycoral/*.py \
@@ -48,6 +55,7 @@ clean-local:
 		rm -f $$exe.spec; \
 	done
 	rm -fr coral_build_*
+	rm -fr debian/.debhelper
 
 all: all-am $(CHECKS)
 
@@ -57,46 +65,89 @@ mrproper: maintainer-clean
 	rm -f Makefile.in aclocal.m4 configure
 	rm -f compile depcomp install-sh missing
 
-BARRELEYE_RPM = build/RPMS/$(target_cpu)/coral-barreleye-$(PACKAGE_VERSION)-$(CORAL_RELEASE).$(DISTRO_SHORT)*.$(target_cpu).rpm
+CORAL_PACKAGES =
 
-CORAL_RPMS =
 if ENABLE_BARRELE
 rpmbuild_opt += --with barrele
-CORAL_RPMS += $(BARRELEYE_RPM)
+CORAL_PACKAGES += barreleye
 else
 rpmbuild_opt += --without barrele
 endif
 
-EXES = barrele
 
+EXES =
 PYINSTALLER_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) pyinstaller -F --clean
 
+
+if ENABLE_BARRELE
+EXES += barrele
 dist/barrele:
 	mkdir -p dist
 	$(PYINSTALLER_CMD) barrele
+endif
 
-EXE_BINS = $(addprefix dist/, $(EXES))
+
+EXE_BINS = @DOLLAR@(addprefix dist/, $(EXES))
 
 exes: $(EXE_BINS)
 
 EXTRA_OPTION =
-rpms: coral.spec dist
+ISO_EXTRA =
+
+
+if MAKE_RPMS
+rpms: coral.spec dist Makefile
 	mkdir -p $(build_dir)/BUILD $(build_dir)/SPECS $(build_dir)/SRPMS $(build_dir)/RPMS \
 		&& rpmbuild $(rpmbuild_opt) --define="_topdir $(build_dir)" \
 			--define="_prefix $(prefix)" \
 			$(EXTRA_OPTION) -tb $(distdir).tar.gz \
 		&& echo "RPMs successfully generated in $(build_dir)/RPMS"
+ISO_EXTRA += rpms
+endif #MAKE_RPMS
 
-ISO_EXTRA =
-coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA) rpms
+if MAKE_DEBS
+debs: Makefile
+	VER=$$(echo @VERSION@ | tr '_' '-'); \
+	changelog_version=$$(sed -ne '1s/^coral (\(.*\)).*$$/\1/p' debian/changelog); \
+	if [ "$$changelog_version" != "$$VER" ]; then \
+		echo -e "coral ($$VER) unstable; urgency=low\n\n  * Automated changelog.\n\n -- Coral Packaging Team <maintainer@coralfs.cn>  $$(date -R)\n" > debian/changelog; \
+	fi; \
+	rm -fr debs; \
+	dpkg-buildpackage -us -uc -I.git  || { \
+		rc=$${PIPESTATUS[0]}; \
+		[ $${rc} -gt 1 ] && exit $${rc}; \
+		exit 0; \
+	}; \
+	mkdir -p debs && \
+	mv ../coral-*_$${VER}_*.deb \
+		../coral_$${VER}_*.buildinfo \
+		../coral_$${VER}.tar.gz \
+		../coral_$${VER}.dsc \
+		../coral_$${VER}_*.changes \
+		debs/
+ISO_EXTRA += debs
+endif #MAKE_DEBS
+
+coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA)
 	rm $(ISO_PATH) -fr
 	rm -f coral-*.iso
 	rm -f coral-*_SHA256SUM
 	cp -a $(ISO_CACHE_PATH) $(ISO_PATH)
 	./coral release_info save $(DISTRO_SHORT) $(target_cpu) coral_release_info.yaml
 	cp coral_release_info.yaml $(ISO_PATH)
-	cp $(CORAL_RPMS) $(PACKAGE_PATH)
-	createrepo $(PACKAGE_PATH)
+	mkdir -p $(PACKAGE_PATH)
+	if [ "$(DISTRO_SHORT)" = "ubuntu2204" ]; then \
+		DEB_PACKAGE_VERSION=$$(echo $(PACKAGE_VERSION) | tr '_' '-'); \
+		for CORAL_PACKAGE in $(CORAL_PACKAGES); do \
+			cp debs/coral-$${CORAL_PACKAGE}_$${DEB_PACKAGE_VERSION}_*.deb $(PACKAGE_PATH); \
+		done; \
+	fi
+	if [ "$(DISTRO_SHORT)" = "el7" -o "$(DISTRO_SHORT)" = "el8" ]; then \
+		for CORAL_PACKAGE in $(CORAL_PACKAGES); do \
+			cp build/RPMS/$(target_cpu)/coral-$${CORAL_PACKAGE}-$(PACKAGE_VERSION)-$(CORAL_RELEASE).$(DISTRO_SHORT)*.$(target_cpu).rpm $(PACKAGE_PATH); \
+		done; \
+		createrepo $(PACKAGE_PATH); \
+	fi
 	@if [ "$(DISTRO_SHORT)" = "el8" ]; then \
 		repo2module -s stable $(PACKAGE_PATH) $(PACKAGE_PATH)/modules.yaml; \
 		modifyrepo --mdtype=modules $(PACKAGE_PATH)/modules.yaml $(PACKAGE_PATH)/repodata; \

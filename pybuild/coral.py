@@ -25,9 +25,9 @@ def coral_command_bootstrap(tsinghua_mirror=False):
                      local_host.sh_hostname)
         sys.exit(-1)
 
-    missing_rpms, missing_pips = \
+    missing_packages, missing_pips = \
         install_common.command_missing_packages(distro)
-    if missing_rpms is None:
+    if missing_packages is None:
         log.cl_error("failed to get the missing packages of host [%s]",
                      local_host.sh_hostname)
         sys.exit(-1)
@@ -42,7 +42,8 @@ def coral_command_bootstrap(tsinghua_mirror=False):
                      retval.cr_stderr)
         sys.exit(-1)
 
-    ret = install_common.bootstrap_from_internet(log, local_host, missing_rpms,
+    ret = install_common.bootstrap_from_internet(log, local_host,
+                                                 missing_packages,
                                                  missing_pips,
                                                  constant.CORAL_BUILD_CACHE_PIP_DIR,
                                                  tsinghua_mirror=tsinghua_mirror)

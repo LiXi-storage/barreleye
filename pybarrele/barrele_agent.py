@@ -19,7 +19,7 @@ class BarreleAgent():
                  enable_disk=False, enable_lustre_oss=True,
                  enable_lustre_mds=True, enable_lustre_client=False,
                  enable_infiniband=False):
-        # Barreleye server with thye of BarreleServer
+        # Barreleye server with type of BarreleServer
         self.bea_barreleye_server = barreleye_server
         # Host to run commands.
         self.bea_host = host
@@ -75,7 +75,9 @@ class BarreleAgent():
             return -1
 
         distro = self.bea_host.sh_distro(log)
-        if distro not in [ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8]:
+        if distro not in (ssh_host.DISTRO_RHEL7,
+                          ssh_host.DISTRO_RHEL8,
+                          ssh_host.DISTRO_UBUNTU2204):
             log.cl_error("host [%s] has unsupported distro [%s]",
                          self.bea_host.sh_hostname, distro)
             return -1
@@ -112,7 +114,7 @@ class BarreleAgent():
             return -1
         return 0
 
-    def _bea_check_lustre_version(self, log, lustre_fallback_version):
+    def _bea_check_lustre_version_rpm(self, log, lustre_fallback_version):
         """
         Check the Lustre version according to the installed RPMs
         """
@@ -164,6 +166,81 @@ class BarreleAgent():
                         self.bea_host.sh_hostname)
             self.bea_lustre_version = version
         return 0
+
+    def _bea_check_lustre_version_deb(self, log, lustre_fallback_version):
+        """
+        Check the Lustre version according to the installed debs
+        """
+        # pylint: disable=too-many-return-statements,too-many-branches
+        command = ("apt list --installed | grep lustre-client-modules")
+        retval = self.bea_host.sh_run(log, command)
+        if (retval.cr_exit_status == 1 and retval.cr_stdout == ""):
+            log.cl_info("Lustre deb is not installed on host [%s], "
+                        "using default [%s]",
+                        self.bea_host.sh_hostname,
+                        lustre_fallback_version.lv_name)
+            self.bea_lustre_version = lustre_fallback_version
+            return 0
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.bea_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        deb_lines = retval.cr_stdout.splitlines()
+        if len(deb_lines) != 1:
+            log.cl_error("multiple lines outputed by command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.bea_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        deb_line = deb_lines[0]
+        fields = deb_line.split()
+        if len(fields) != 4:
+            log.cl_error("unexpected field number outputed by command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.bea_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        version = fields[1]
+        lversion = lustre_version.match_lustre_version_from_deb(log, version)
+        if lversion is None:
+            log.cl_error("failed to detect Lustre version on host [%s]",
+                         self.bea_host.sh_hostname)
+            return -1
+
+        log.cl_info("Lustre version [%s] detected on host [%s]",
+                    lversion.lv_name,
+                    self.bea_host.sh_hostname)
+        self.bea_lustre_version = lversion
+        return 0
+
+    def _bea_check_lustre_version(self, log, lustre_fallback_version):
+        """
+        Check the Lustre version according to the installed RPMs or debs
+        """
+        host = self.bea_host
+        distro = host.sh_distro(log)
+
+        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+            return self._bea_check_lustre_version_rpm(log, lustre_fallback_version)
+        if distro in (ssh_host.DISTRO_UBUNTU2204):
+            return self._bea_check_lustre_version_deb(log, lustre_fallback_version)
+
+        log.cl_error("distro [%s] of host [%s] is not supported",
+                     distro, host.sh_hostname)
+        return -1
 
     def _bea_generate_collectd_config(self, log, barreleye_instance,
                                       collectd_test=False):
@@ -227,14 +304,6 @@ class BarreleAgent():
                          "usage")
             return -1
         self.bea_collectd_config_for_production = collectd_config
-
-        # Check that needed collectd RPMs are installed
-        for rpm_type in self.bea_needed_collectd_rpm_types:
-            if rpm_type not in barreleye_instance.bei_collectd_rpm_type_dict:
-                log.cl_error("needed Collectd RPM [%s] of agent [%s] does not "
-                             "exist",
-                             rpm_type, self.bea_host.sh_hostname)
-                return -1
         return 0
 
     def _bea_influxdb_measurement_check(self, log, measurement_name, tags):
@@ -354,6 +423,19 @@ class BarreleAgent():
         Dump and send the collectd.conf to the agent host
         """
         host = self.bea_host
+        local_host = barreleye_instance.bei_local_host
+        command = "mkdir -p %s" % barreleye_instance.bei_workspace
+        retval = local_host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         local_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
         fpath = barreleye_instance.bei_workspace + "/"
         if test_config:
             fpath += barrele_collectd.COLLECTD_CONFIG_TEST_FNAME
@@ -365,7 +447,11 @@ class BarreleAgent():
 
         collectd_config.cdc_dump(fpath)
 
-        etc_path = "/etc/collectd.conf"
+        distro = self.bea_host.sh_distro(log)
+        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+            etc_path = "/etc/collectd.conf"
+        elif distro in (ssh_host.DISTRO_UBUNTU2204):
+            etc_path = "/etc/collectd/collectd.conf"
         ret = host.sh_send_file(log, fpath, etc_path)
         if ret:
             log.cl_error("failed to send file [%s] on local host [%s] to "

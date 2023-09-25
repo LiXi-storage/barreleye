@@ -30,6 +30,8 @@ BARRELE_SERVER_DOWNLOAD_DEPENDENT_RPMS = ["patch",  # Needed when patching influ
 # RPMs needed to download for Barreleye server and agent
 BARRELE_DOWNLOAD_DEPENDENT_RPMS = (BARRELE_SERVER_DOWNLOAD_DEPENDENT_RPMS +
                                    BARRELE_AGENT_DEPENDENT_RPMS)
+# Debs needed to download for Barreleye server and agent (Ubuntu)
+BARRELE_DOWNLOAD_DEPENDENT_DEBS = ["librrd8"]
 # RPMS needed by Barreleye servers.
 BARRELE_SERVER_DEPENDENT_RPMS = ["influxdb", "grafana"]
 BARRELE_SERVER_DEPENDENT_RPMS += BARRELE_DOWNLOAD_DEPENDENT_RPMS

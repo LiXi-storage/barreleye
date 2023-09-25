@@ -1,8 +1,11 @@
 dnl Process this file with autoconf to produce a configure script.
-AC_INIT([coral], [m4_esyscmd(./coral version show)], [Coralfs], [coral])
+AC_INIT([coral],[m4_esyscmd(./coral version show)],[Coralfs],[coral])
 AC_CONFIG_SRCDIR(./pycoral/ssh_host.py)
-AC_CANONICAL_SYSTEM
+AC_CANONICAL_TARGET
 AC_CONFIG_HEADERS(config.h)
+
+dnl To avoid warning about $(wildcard ...)
+AC_SUBST([DOLLAR],[$])
 
 AM_INIT_AUTOMAKE([tar-pax dist-bzip2 foreign subdir-objects])
 AM_EXTRA_RECURSIVE_TARGETS([check_clean])
@@ -19,10 +22,7 @@ AC_PROG_MAKE_SET
 AM_PROG_CC_C_O
 AM_CONDITIONAL(COMPILER_IS_GCC, test "x$GCC" = "xyes")
 
-AC_DISABLE_STATIC
-AC_PROG_LIBTOOL
-AC_PROG_LEX
-AC_PROG_YACC
+LT_INIT([disable-static])
 PKG_PROG_PKG_CONFIG
 
 #
@@ -84,20 +84,29 @@ AC_DEFUN([MB_ARG_CANON_PATH], [
 	__MB_ARG_CANON_PATH([$1], m4_translit([$1], [-.], [__]), [$2])
 ])
 
-dnl We may be able to use older versions, but I have not verified that
-PKG_CHECK_MODULES([ext2fs], [ext2fs >= 1.42.7 com_err >= 1.42.7])
 PKG_CHECK_MODULES([json_c], [json-c >= 0.11])
 
 # -------- check for distro version --------
 AC_MSG_CHECKING([for distro version])
 DISTRO=$(sh detect-distro.sh)
 DISTRO_NAME=$(echo $DISTRO | awk -F '-' '{print $1}')
-if [[[ "$DISTRO_NAME" != "rhel" ]]]; then
+if  [[[ "$DISTRO_NAME" = "rhel" ]]]; then
+        DISTRO_RELEASE=$(echo $DISTRO | awk -F 'rhel-' '{print $2}' | awk -F '.' '{print $1}')
+        DISTRO_SHORT=el$DISTRO_RELEASE
+        make_rpms="yes"
+elif [[[ "$DISTRO_NAME" = "ubuntu" ]]]; then
+        DISTRO_RELEASE=$(echo $DISTRO | awk -F 'ubuntu-' '{print $2}' | awk -F '.' '{print $1}')
+        if [[[ "$DISTRO_RELEASE" != "22" ]]]; then
+                AC_MSG_ERROR([$DISTRO_RELEASE of Ubuntu is not a supported distro.])
+        fi
+        DISTRO_SHORT=ubuntu2204
+        make_debs="yes"
+else
         AC_MSG_ERROR([$DISTRO_NAME is not a supported distro.])
 fi
-DISTRO_RELEASE=$(echo $DISTRO | awk -F 'rhel-' '{print $2}' | awk -F '.' '{print $1}')
-DISTRO_SHORT=el$DISTRO_RELEASE
 AC_MSG_RESULT([$DISTRO_SHORT])
+AM_CONDITIONAL(MAKE_DEBS, test "$make_debs" = "yes")
+AM_CONDITIONAL(MAKE_RPMS, test "$make_rpms" = "yes")
 AC_SUBST(DISTRO_SHORT)
 
 # ------- check for target_cpu --------
@@ -112,7 +121,7 @@ fi
 # -------- check whether enable zfs support --------
 AC_MSG_CHECKING([whether enable zfs support])
 AC_ARG_ENABLE([zfs],
-	AC_HELP_STRING([--enable-zfs],
+	AS_HELP_STRING([--enable-zfs],
                        [enable zfs support]),
         [], [enable_zfs="no"])
 AC_MSG_RESULT([$enable_zfs])
@@ -179,7 +188,7 @@ AS_IF([test "x$enable_zfs" = xyes ], [
 # -------- whether enable Barreleye plugin --------
 AC_MSG_CHECKING([whether enable Barreleye plugin])
 AC_ARG_ENABLE([barrele],
-    AC_HELP_STRING([--disable-barrele],
+    AS_HELP_STRING([--disable-barrele],
                    [disable Barreleye plugin]),
               [], [enable_barrele="yes"])
 AC_MSG_RESULT([$enable_barrele])
@@ -190,10 +199,8 @@ AM_CONDITIONAL(ENABLE_BARRELE, test "$enable_barrele" = "yes")
 # -------- check for ISO cache dir --------
 AC_MSG_CHECKING([for ISO cache dir])
 ISO_CACHE_PATH="/var/log/coral/build_cache/release/iso_cache"
-AS_IF([test "$enable_devel" != "no"],
-	[ISO_CACHE_PATH="/var/log/coral/build_cache/devel/iso_cache"])
 AC_ARG_WITH([iso-cache],
-	AC_HELP_STRING([--with-iso-cache=path],
+	AS_HELP_STRING([--with-iso-cache=path],
 		       [set path of ISO cache dir]),
 	[MB_ARG_CANON_PATH([iso-cache], [ISO_CACHE_PATH])],
 	[])

@@ -115,7 +115,7 @@ def init_env_noconfig(logdir, log_to_file, logdir_is_default,
 
     if not isinstance(log_to_file, bool):
         print("ERROR: invalid debug option [%s], should be a bool type" %
-              (log_to_file), file=sys.stderr)
+              str(log_to_file), file=sys.stderr)
         sys.exit(1)
 
     if log_to_file:

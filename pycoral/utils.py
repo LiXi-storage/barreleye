@@ -363,6 +363,7 @@ def thread_start(target, args):
     """
     Wrap the target function and start a thread to run it
     """
+    # pylint: disable=deprecated-method
     run_thread = threading.Thread(target=target,
                                   args=args)
     run_thread.setDaemon(True)
@@ -541,6 +542,7 @@ class LimitResource():
         """
         Release resource
         """
+        # pylint: disable=deprecated-method
         self.lr_condition.acquire()
         self.lr_number += number
         self.lr_condition.notifyAll()

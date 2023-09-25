@@ -9,11 +9,12 @@ AM_CFLAGS = -Wall -Werror -g $(json_c_CFLAGS) $(json_c_LIBS) \
 PIP3_PACKAGE_PATH = /usr/local/lib/python3.6/site-packages:/usr/local/lib64/python3.6/site-packages
 CORAL_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) ../coral
 
+../pycoral/version.py: build_version.py
+	$(CORAL_CMD) version save ../pycoral/version.py
+
 SOURCES = ../pycoral/version.py
 CHECKS =
 
-../pycoral/version.py: build_version.py
-	$(CORAL_CMD) version save ../pycoral/version.py
 
 clean-local:
 	rm -fr $(SOURCES) $(CHECKS)

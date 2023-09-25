@@ -39,6 +39,7 @@ stamp-h1
 *.checked
 *.pyc
 *.c_checked
+*.h_checked
 *.o
 
 #

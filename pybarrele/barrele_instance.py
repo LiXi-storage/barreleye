@@ -70,67 +70,39 @@ class BarreleInstance():
         self.bei_iso_dir = constant.CORAL_ISO_DIR
         # The server of barreleye
         self.bei_barreleye_server = barreleye_server
-        # The Collectd RPM types. The RPM type is the minimum string
-        # that yum could understand and find the RPM.
-        # For example:
-        # libcollectdclient-5.11.0...rpm has a type of libcollectdclient;
-        # collectd-5.11.0...rpm has a type of collectd;
-        # collectd-disk-5.11.0...rpm has a type of collectd-disk.
-        #
-        # Key is RPM type. Value is RPM fname.
-        self.bei_collectd_rpm_type_dict = None
         # ISO file path
         self.bei_iso_fpath = iso_fpath
 
-    def _bei_get_collectd_rpm_types(self, log):
+    def _bei_get_collectd_package_type_dict(self, log):
         """
-        Get Collectd RPMs from ISO dir on local host
+        Return a dict. Key is the RPM/deb type, value is the file name.
         """
         packages_dir = self.bei_iso_dir + "/" + constant.BUILD_PACKAGES
-        fnames = self.bei_local_host.sh_get_dir_fnames(log, packages_dir)
-        if fnames is None:
-            log.cl_error("failed to get fnames under dir [%s] on local "
-                         "host [%s]", self.bei_iso_dir,
-                         self.bei_local_host.sh_hostname)
-            return -1
-        self.bei_collectd_rpm_type_dict = {}
-        for fname in fnames:
-            if ((not fname.startswith("collectd")) and
-                    (not fname.startswith("libcollectdclient"))):
-                continue
-            rpm_type = \
-                barrele_collectd.collectd_rpm_type_from_name(log, fname)
-            if rpm_type is None:
-                log.cl_error("failed to get the RPM type from name [%s]",
-                             fname)
-                return -1
-            if rpm_type in self.bei_collectd_rpm_type_dict:
-                log.cl_error("both Collectd RPMs [%s] and [%s] matches "
-                             "type [%s]", fname,
-                             self.bei_collectd_rpm_type_dict[rpm_type],
-                             rpm_type)
-                return -1
-
-            self.bei_collectd_rpm_type_dict[rpm_type] = fname
-            log.cl_debug("Collectd RPM [%s] is found under dir [%s] on local "
-                         "host [%s]", rpm_type, self.bei_iso_dir,
-                         self.bei_local_host.sh_hostname)
-        return 0
+        return barrele_collectd.get_collectd_package_type_dict(log,
+                                                               self.bei_local_host,
+                                                               packages_dir)
 
     def _bei_cluster_install_rpms(self, log):
         """
         Install RPMs on the cluster
         """
 
-        ret = self._bei_get_collectd_rpm_types(log)
-        if ret:
+        rpm_type_dict = self._bei_get_collectd_package_type_dict(log)
+        if rpm_type_dict is None:
             log.cl_error("failed to get Collectd RPM types")
             return -1
+
+        for rpm_type in (barrele_collectd.LIBCOLLECTDCLIENT_TYPE_NAME,
+                         barrele_collectd.COLLECTD_TYPE_NAME):
+            if rpm_type not in rpm_type_dict:
+                log.cl_error("failed to find Collectd RPM [%s]",
+                             rpm_type)
+                return -1
 
         for agent in self.bei_agent_dict.values():
             ret = agent.bea_generate_configs(log, self)
             if ret:
-                log.cl_error("failed to detect the Lustre version on host [%s]",
+                log.cl_error("failed to generate Barreleye agent configs on host [%s]",
                              agent.bea_host.sh_hostname)
                 return -1
 
@@ -267,6 +239,90 @@ class BarreleInstance():
                 log.cl_error("failed to start Barreleye agent on host [%s]",
                              hostname)
                 return -1
+        return 0
+
+    def bei_install_agent_locally(self, log):
+        """
+        Install Barreleye agent on local host.
+        """
+        distro = self.bei_local_host.sh_distro(log)
+        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+            log.cl_error("please install agent on host [%s] by using [barrele cluster install] "
+                         "command",
+                         self.bei_local_host.sh_hostname)
+            return -1
+        if distro not in (ssh_host.DISTRO_UBUNTU2204):
+            log.cl_error("distro [%s] of host [%s] is not supported",
+                         distro, self.bei_local_host.sh_hostname)
+            return -1
+
+        iso = self.bei_iso_fpath
+        if iso is not None:
+            ret = install_common.sync_iso_dir(log, self.bei_workspace,
+                                              self.bei_local_host, iso,
+                                              self.bei_iso_dir)
+            if ret:
+                log.cl_error("failed to sync ISO files from [%s] to dir [%s] "
+                             "on local host [%s]",
+                             iso, self.bei_iso_dir,
+                             self.bei_local_host.sh_hostname)
+                return -1
+
+        # Install Barreleye deb file.
+        package_dir = self.bei_iso_dir + "/" + constant.BUILD_PACKAGES
+        command = ("dpkg -i %s/coral-*.deb" % (package_dir))
+        retval = self.bei_local_host.sh_run(log, command, timeout=None)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.bei_local_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        package_type_dict = self._bei_get_collectd_package_type_dict(log)
+        if package_type_dict is None:
+            log.cl_error("failed to get Collectd package types")
+            return -1
+
+        for deb_type in ("collectd-core", "collectd-utils",
+                         "collectd", "libcollectdclient1"):
+            if deb_type not in package_type_dict:
+                log.cl_error("failed to find Collectd deb [%s]",
+                             deb_type)
+                return -1
+
+        packages_dir = self.bei_iso_dir + "/" + constant.BUILD_PACKAGES
+        ret = barrele_collectd.collectd_debs_install(log, self.bei_local_host,
+                                                     packages_dir)
+        if ret:
+            log.cl_error("failed to install Collectd debs on local host [%s]",
+                         self.bei_local_host.sh_hostname)
+            return -1
+
+        agent = barrele_agent.BarreleAgent(self.bei_local_host,
+                                           self.bei_barreleye_server,
+                                           enable_disk=False,
+                                           enable_lustre_oss=False,
+                                           enable_lustre_mds=False,
+                                           enable_lustre_client=True,
+                                           enable_infiniband=False)
+        ret = agent.bea_generate_configs(log, self)
+        if ret:
+            log.cl_error("failed to generate configs for Barreleye agent [%s]",
+                         agent.bea_host.sh_hostname)
+            return -1
+
+        ret = agent.bea_config_agent(log, self)
+        if ret:
+            log.cl_error("failed to configure Barreleye agent [%s]",
+                         agent.bea_host.sh_hostname)
+            return -1
+
+        log.cl_info("Barreleye agent has been installed successfully on host [%s]",
+                    agent.bea_host.sh_hostname)
         return 0
 
 

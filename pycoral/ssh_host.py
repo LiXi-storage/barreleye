@@ -30,6 +30,8 @@ DISTRO_RHEL6 = "rhel6"
 DISTRO_RHEL7 = "rhel7"
 # OS distribution RHEL8/CentOS8
 DISTRO_RHEL8 = "rhel8"
+# OS distribution ubuntu2204
+DISTRO_UBUNTU2204 = "ubuntu2204"
 # The shortest time that a reboot could finish. It is used to check whether
 # a host has actually rebooted or not.
 SHORTEST_TIME_REBOOT = 10
@@ -386,6 +388,8 @@ class SSHHost():
             log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                          version, "fc", self.sh_hostname)
             return None
+        if name == "Ubuntu":
+            return DISTRO_UBUNTU2204
         log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                      version, name, self.sh_hostname)
         return None

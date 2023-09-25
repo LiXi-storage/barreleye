@@ -30,6 +30,9 @@ if which lsb_release >/dev/null 2>&1; then
 		"Fedora")
 			name="fc"
 			;;
+        "Ubuntu")
+            name="ubuntu"
+            ;;
 		*)
 			fatal 1 "I don't know what distro name $name and version $version is.\nEither update autodetect_distro() or use the --distro argument."
 			;;

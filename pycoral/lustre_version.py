@@ -302,3 +302,33 @@ def match_lustre_version_from_rpms(log, rpm_fnames, skip_kernel=False,
                      definition_message, version_string)
         return None, None
     return matched_versions[0], matched_rpm_type_dicts[0]
+
+# See the commend of ES6_0_PATTERNS for the difference between es6.0
+# and es6.1.
+DEB_ES6_0_PATTERN = r"^(2\.14\.[0]-ddn([0-9]|[1-7][0-9]|8[0-6])\D.+)$"
+DEB_ES6_1_PATTERN = r"^(2\.14\.[0]-ddn.+)$"
+DEB_2_15_PATTERN = r"^(2\.15\..+)$"
+
+def match_lustre_version_from_deb(log, deb_version):
+    """
+    The version of deb package usually comes from command
+    apt list --installed | grep lustre-client-modules
+    or
+    apt show lustre-client-modules-5.15.0-69-generic | grep Version
+    Example:
+    2.15.2-70-gb74560d-1
+    """
+    match = re.search(DEB_ES6_0_PATTERN, deb_version)
+    if match is not None:
+        return LUSTRE_VERSION_ES6_0
+
+    match = re.search(DEB_ES6_1_PATTERN, deb_version)
+    if match is not None:
+        return LUSTRE_VERSION_ES6_1
+
+    match = re.search(DEB_2_15_PATTERN, deb_version)
+    if match is not None:
+        return LUSTRE_VERSION_2_15
+
+    log.cl_error("unsupported Lustre version [%s]", deb_version)
+    return None

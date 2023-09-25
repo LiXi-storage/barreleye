@@ -1298,24 +1298,106 @@ PostCacheChain "PostCache"
             barreleye_agent.bea_needed_collectd_rpm_types.append(rpm_name)
 
 
-def collectd_rpm_type_from_name(log, name):
+def collectd_package_type_from_name(log, name):
     """
-    Return Collectd type from full RPM name or RPM fname
-    The Collectd RPM types. The RPM type is the minimum string
+    Return Collectd type from full RPM/deb name or RPM/deb fname
+    The Collectd RPM/deb types. The RPM type is the minimum string
     that yum could understand and find the RPM.
     For example:
     libcollectdclient-5.11.0...rpm has a type of libcollectdclient;
     collectd-5.11.0...rpm has a type of collectd;
     collectd-disk-5.11.0...rpm has a type of collectd-disk.
+
+    Example debs:
+    collectd_5.12.0.brl3_amd64.deb
+    collectd-core_5.12.0.brl3_amd64.deb
+    collectd-dev_5.12.0.brl3_all.deb
+    collectd-utils_5.12.0.brl3_amd64.deb
+    libcollectdclient1_5.12.0.brl3_amd64.deb
+    libcollectdclient-dev_5.12.0.brl3_amd64.deb
     """
     if ((not name.startswith("collectd")) and
             (not name.startswith("libcollectdclient"))):
         return None
-    collectd_pattern = (r"^(?P<type>\S+)-(\d+)\.(\d+).+")
+    collectd_pattern = (r"^(?P<type>\S+)[-_](\d+)\.(\d+).+")
     collectd_regular = re.compile(collectd_pattern)
     match = collectd_regular.match(name)
     if match is None:
         log.cl_error("name [%s] starts with [collectd] but does not match "
-                     "the RPM pattern", name)
+                     "the package pattern", name)
         return None
     return match.group("type")
+
+
+def get_collectd_package_type_dict(log, host, packages_dir):
+    """
+    Return a dict. Key is the RPM/deb type, value is the file name.
+
+    The RPM type is the minimum string that yum could understand and
+    find the RPM.
+
+    For example:
+    libcollectdclient-5.11.0...rpm has a type of libcollectdclient;
+    collectd-5.11.0...rpm has a type of collectd;
+    collectd-disk-5.11.0...rpm has a type of collectd-disk.
+    """
+    fnames = host.sh_get_dir_fnames(log, packages_dir)
+    if fnames is None:
+        log.cl_error("failed to get fnames under dir [%s] on "
+                     "host [%s]", packages_dir, host.sh_hostname)
+        return None
+    collectd_package_type_dict = {}
+    for fname in fnames:
+        if ((not fname.startswith("collectd")) and
+            (not fname.startswith("libcollectdclient"))):
+            continue
+        package_type = collectd_package_type_from_name(log, fname)
+        if package_type is None:
+            log.cl_error("failed to get the package type from name [%s]",
+                         fname)
+            return None
+        if package_type in collectd_package_type_dict:
+            log.cl_error("both Collectd packages [%s] and [%s] matches "
+                         "type [%s]", fname,
+                         collectd_package_type_dict[package_type],
+                         package_type)
+            return None
+
+        collectd_package_type_dict[package_type] = fname
+        log.cl_debug("Collectd package [%s] is found under dir [%s] on local "
+                     "host [%s]", package_type, packages_dir,
+                     host.sh_hostname)
+    return collectd_package_type_dict
+
+
+def collectd_debs_install(log, host, packages_dir):
+    """
+    Install all the Collectd debs under the package dir
+    """
+    # Remove the existing collectd configuration to avoid failure of starting
+    # collectd service when installing Collectd deb file.
+    command = ("rm -f /etc/collectd/collectd.conf")
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    command = ("dpkg -i %s/collectd*.deb %s/libcollectdclient*.deb" %
+               (packages_dir, packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0

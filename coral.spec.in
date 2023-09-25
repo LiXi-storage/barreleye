@@ -64,8 +64,8 @@ mkdir -p $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 
 %if %{with barrele}
 cp dist/barrele $RPM_BUILD_ROOT%{_bindir}
-cp example_configs/barreleye.toml \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral/barreleye.conf.example
+cp example_configs/barreleye.conf.example \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral
 install -g 0 -o 0 -m 0644 bash_completion/barrele \
 	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 mkdir -p $RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele/xmls

@@ -1,8 +1,23 @@
 PYTHON_COMMANDS = \
-	../barrele \
 	../coral
 
-PYTHON_LIB_FILES = $(wildcard ../pybuild/*.py ../pybarrele/*.py ../pycoral/*.py)
+PYTHON_LIB_FILES = $(wildcard ../pycoral/*.py) \
+	../pybuild/build_common.py \
+	../pybuild/build_constant.py \
+	../pybuild/build_doc.py \
+	../pybuild/build_release_info.py \
+	../pybuild/build_version.py \
+	../pybuild/coral_build.py \
+	../pybuild/coral_command.py \
+	../pybuild/coral.py \
+	../pybuild/__init__.py
+
+if ENABLE_BARRELE
+PYTHON_COMMANDS += ../barrele
+PYTHON_LIB_FILES += $(wildcard ../pybarrele/*.py) \
+	../pybuild/build_barrele.py
+endif
+
 PYTHON_FILES = $(PYTHON_LIB_FILES) $(PYTHON_COMMANDS)
 PYTHON_CHECKS = $(PYTHON_FILES:%=%.python_checked)
 

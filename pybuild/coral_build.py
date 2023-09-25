@@ -25,6 +25,8 @@ PYINSTALLER_TARBALL_URL = "https://github.com/pyinstaller/pyinstaller/archive/re
 PYINSTALLER_TARBALL_SHA1SUM = "60c595f5cbe66223d33c6edf1bb731ab9f02c3de"
 # "v4.10.tar.gz" is not a good name, specify the fname to save.
 PYINSTALLER_TABALL_FNAME = "pyinstaller-4.10.tar.gz"
+REPLACE_DEB_DICT = {}
+REPLACE_DEB_DICT["debconf-2.0"] = "debconf"
 
 
 def merge_list(list_x, list_y):
@@ -212,7 +214,7 @@ def check_package_rpms(log, host, packages_dir, dependent_rpms,
 
 def download_dependent_rpms(log, host, distro, target_cpu,
                             packages_dir, extra_package_fnames,
-                            extra_rpm_names):
+                            extra_package_names):
     """
     Download dependent RPMs
     """
@@ -233,7 +235,7 @@ def download_dependent_rpms(log, host, distro, target_cpu,
             return -1
 
     dependent_rpms = merge_list(constant.CORAL_DEPENDENT_RPMS,
-                                extra_rpm_names)
+                                extra_package_names)
 
     if distro == ssh_host.DISTRO_RHEL7:
         ret = download_dependent_rpms_rhel7(log, host, target_cpu,
@@ -243,6 +245,9 @@ def download_dependent_rpms(log, host, distro, target_cpu,
         ret = download_dependent_rpms_rhel8(log, host, packages_dir,
                                             dependent_rpms,
                                             extra_package_fnames)
+    else:
+        log.cl_error("unsupported distro [%s]", distro)
+        return -1
     if ret:
         log.cl_error("failed to download dependent RPMs on host [%s]",
                      host.sh_hostname)
@@ -255,6 +260,100 @@ def download_dependent_rpms(log, host, distro, target_cpu,
                      packages_dir)
         return -1
     return 0
+
+
+def download_dependent_debs(log, host, packages_dir, extra_package_fnames,
+                            extra_package_names):
+    """
+    Download dependent debs
+    """
+    # pylint: disable=consider-using-get
+    if len(extra_package_names) == 0:
+        return 0
+    log.cl_info("downloading dependency debs")
+    command = 'apt-rdepends'
+    for extra_package_name in extra_package_names:
+        command += " " + extra_package_name
+    command = command + ' | grep -v "^ "'
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    packages = retval.cr_stdout.splitlines()
+
+    downloading_dir = packages_dir + "/downloading." + cmd_general.get_identity()
+    command = "mkdir %s" % downloading_dir
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    for package in packages:
+        if package in REPLACE_DEB_DICT:
+            package = REPLACE_DEB_DICT[package]
+        command = ("cd %s && apt download %s" %
+                   (downloading_dir, package))
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+    downloaded_fnames = host.sh_get_dir_fnames(log, downloading_dir)
+    if downloaded_fnames is None:
+        log.cl_error("failed to get the fnames under [%s]",
+                     downloading_dir)
+        return -1
+    extra_package_fnames += downloaded_fnames
+
+    command = ("mv %s/* %s && rmdir %s" %
+               (downloading_dir, packages_dir, downloading_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def download_dependent_packages(log, host, distro, target_cpu,
+                                packages_dir, extra_package_fnames,
+                                extra_package_names):
+    """
+    Download packages for Barreleye.
+    """
+    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        return download_dependent_rpms(log, host, distro, target_cpu,
+                                       packages_dir, extra_package_fnames,
+                                       extra_package_names)
+    if distro in (ssh_host.DISTRO_UBUNTU2204):
+        return download_dependent_debs(log, host,
+                                       packages_dir, extra_package_fnames,
+                                       extra_package_names)
+    log.cl_error("unsupported distro [%s]", distro)
+    return -1
 
 
 def install_pyinstaller(log, host, type_cache, tsinghua_mirror=False):
@@ -299,9 +398,29 @@ def prepare_install_modulemd_tools(log, host):
     return ["modulemd-tools"]
 
 
-def install_build_dependency(log, workspace, host, distro, target_cpu,
-                             type_cache, plugins, package_dict, pip_dir,
-                             tsinghua_mirror=False):
+def get_build_dependent_packages(log, distro, plugins, package_dict):
+    """
+    Return a list of dependent packages (RPMs/debs) and pips
+    """
+    dependent_packages = []
+    dependent_pips = []
+    for plugin in plugins:
+        packages = plugin.cpt_build_dependent_packages(distro)
+        if packages is None:
+            log.cl_error("failed to get the dependet packages for building [%s]",
+                         plugin.cpt_plugin_name)
+            return None, None
+        dependent_packages += packages
+        dependent_pips += plugin.cpt_build_dependent_pips
+
+    for package in package_dict.values():
+        dependent_packages += package.cpb_build_dependent_packages(distro)
+    return dependent_packages, dependent_pips
+
+
+def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
+                                  type_cache, plugins, package_dict, pip_dir,
+                                  tsinghua_mirror=False):
     """
     Install the dependency of building Coral
     """
@@ -366,20 +485,11 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                      retval.cr_stderr)
         return -1
 
-    # We need all dependency for all plugins since no matter they
-    # are needed or not, the Python codes will be checked, and the Python
-    # codes might depend on the RPMs.
-    for plugin in build_common.CORAL_PLUGIN_DICT.values():
-        rpms = plugin.cpt_build_dependent_rpms(distro)
-        if rpms is None:
-            log.cl_error("failed to get the dependet RPMs for building [%s]",
-                         plugin.cpt_plugin_name)
-            return -1
-        dependent_rpms += rpms
-        dependent_pips += plugin.cpt_build_dependent_pips
-
-    for package in package_dict.values():
-        dependent_rpms += package.cpb_build_dependent_rpms(distro)
+    rpms, pips = get_build_dependent_packages(log, distro, plugins, package_dict)
+    if rpms is None or pips is None:
+        return -1
+    dependent_rpms += rpms
+    dependent_pips += pips
 
     ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
                                                  dependent_pips,
@@ -405,6 +515,74 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
                      host.sh_hostname)
         return -1
     return 0
+
+
+def install_build_dependency_ubuntu(log, workspace, host, distro,
+                                    target_cpu, type_cache, plugins,
+                                    package_dict, pip_dir,
+                                    tsinghua_mirror=False):
+    """
+    Install the dependency of building Coral for Ubuntu
+    """
+    # pylint: disable=unused-argument,too-many-locals
+    if tsinghua_mirror:
+        ret = install_common.ubuntu2204_apt_mirror_replace_to_tsinghua(log, host)
+        if ret:
+            log.cl_error("failed to replace deb mirrors to Tsinghua University")
+            return -1
+
+    command = 'apt update'
+    log.cl_info("running command [%s] on host [%s]",
+                command, host.sh_hostname)
+    retval = host.sh_watched_run(log, command, None, None,
+                                 return_stdout=False,
+                                 return_stderr=False)
+    if retval.cr_exit_status != 0:
+        log.cl_error("failed to run command [%s] on host [%s]",
+                     command, host.sh_hostname)
+        return -1
+
+    dependent_debs = ["libjson-c-dev", "apt-rdepends"]
+    dependent_pips = ["PyInstaller", "tinyaes", "pycryptodome"]
+
+    debs, pips = get_build_dependent_packages(log, distro, plugins,
+                                              package_dict)
+    if debs is None or pips is None:
+        return -1
+    dependent_pips += pips
+    dependent_debs += debs
+
+    ret = install_common.bootstrap_from_internet(log, host,
+                                                 dependent_debs,
+                                                 dependent_pips,
+                                                 pip_dir,
+                                                 tsinghua_mirror=tsinghua_mirror)
+    if ret:
+        log.cl_error("failed to install missing packages on host [%s] "
+                     "from Internet", host.sh_hostname)
+        return -1
+    return 0
+
+
+def install_build_dependency(log, workspace, host, distro, target_cpu,
+                             type_cache, plugins, package_dict, pip_dir,
+                             tsinghua_mirror=False):
+    """
+    Install the dependency of building Coral
+    """
+    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        return install_build_dependency_rhel(log, workspace, host, distro,
+                                             target_cpu, type_cache, plugins,
+                                             package_dict, pip_dir,
+                                             tsinghua_mirror=tsinghua_mirror)
+
+    if distro in (ssh_host.DISTRO_UBUNTU2204):
+        return install_build_dependency_ubuntu(log, workspace, host, distro,
+                                               target_cpu, type_cache, plugins,
+                                               package_dict, pip_dir,
+                                               tsinghua_mirror=tsinghua_mirror)
+    log.cl_error("unsupported distro [%s]", distro)
+    return -1
 
 
 def sync_shared_build_cache(log, host, private_cache, shared_parent):
@@ -628,7 +806,7 @@ def get_needed_packages(log, plugins):
 
 def build_packages(log, workspace, local_host, source_dir, target_cpu,
                    type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                   extra_package_fnames, extra_rpm_names, option_dict,
+                   extra_package_fnames, extra_package_names, option_dict,
                    package_dict):
     """
     Build the packages in cpt_packages.
@@ -650,7 +828,7 @@ def build_packages(log, workspace, local_host, source_dir, target_cpu,
         ret = package.cpb_build(log, workspace, local_host, source_dir,
                                 target_cpu, type_cache, iso_cache,
                                 packages_dir, extra_iso_fnames,
-                                extra_package_fnames, extra_rpm_names,
+                                extra_package_fnames, extra_package_names,
                                 option_dict)
         if ret:
             log.cl_error("failed to build package [%s]",
@@ -754,7 +932,8 @@ def build(log, source_dir, workspace,
 
     local_host = ssh_host.get_local_host(ssh=False)
     distro = local_host.sh_distro(log)
-    if distro not in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro not in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8,
+                      ssh_host.DISTRO_UBUNTU2204):
         log.cl_error("build on distro [%s] is not supported yet", distro)
         return -1
 
@@ -762,7 +941,7 @@ def build(log, source_dir, workspace,
     # Shared cache for this build type
     shared_type_cache = shared_cache + "/" + type_fname
     # Extra RPMs to download
-    extra_rpm_names = []
+    extra_package_names = []
     # Extra RPM file names under package directory
     extra_package_fnames = []
     # Extra file names under ISO directory
@@ -851,7 +1030,7 @@ def build(log, source_dir, workspace,
 
     ret = build_packages(log, workspace, local_host, source_dir, target_cpu,
                          type_cache, iso_cache, packages_dir, extra_iso_fnames,
-                         extra_package_fnames, extra_rpm_names, option_dict,
+                         extra_package_fnames, extra_package_names, option_dict,
                          package_dict)
     if ret:
         log.cl_error("failed to build packages")
@@ -861,18 +1040,19 @@ def build(log, source_dir, workspace,
         ret = plugin.cpt_build(log, workspace, local_host, source_dir,
                                target_cpu, type_cache, iso_cache,
                                packages_dir, extra_iso_fnames,
-                               extra_package_fnames, extra_rpm_names,
+                               extra_package_fnames, extra_package_names,
                                option_dict)
         if ret:
             log.cl_error("failed to build plugin [%s]",
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = download_dependent_rpms(log, local_host, distro,
-                                  target_cpu, packages_dir,
-                                  extra_package_fnames, extra_rpm_names)
+    ret = download_dependent_packages(log, local_host, distro,
+                                      target_cpu, packages_dir,
+                                      extra_package_fnames,
+                                      extra_package_names)
     if ret:
-        log.cl_error("failed to download dependent rpms")
+        log.cl_error("failed to download dependent packages")
         return -1
 
     contents = ([constant.BUILD_PACKAGES] +

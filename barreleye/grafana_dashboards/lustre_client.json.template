@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1692325875474,
+  "iteration": 1693407689985,
   "links": [],
   "panels": [
     {
@@ -41,7 +41,7 @@
         "y": 0
       },
       "hiddenSeries": false,
-      "id": 205,
+      "id": 207,
       "legend": {
         "avg": false,
         "current": false,
@@ -118,7 +118,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -127,7 +127,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -234,7 +234,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -243,7 +243,241 @@
           "logBase": 1,
           "max": null,
           "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$BARRELEYE_DATASOURCE_NAME",
+      "description": "The write operation rate on this client.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "hiddenSeries": false,
+      "id": 205,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "alias": "Write Operation Rate",
+          "groupBy": [],
+          "measurement": "client_stats_write_bytes_samples",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "field"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "client_uuid",
+              "operator": "=~",
+              "value": "/^$client_uuid$/"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Write Operation Rate",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "ops",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
           "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$BARRELEYE_DATASOURCE_NAME",
+      "description": "The read operation rate on this client.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "hiddenSeries": false,
+      "id": 208,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "alias": "Read Operation Rate",
+          "groupBy": [],
+          "measurement": "client_stats_read_bytes_samples",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "SELECT \"value\" FROM \"client_stats_read_bytes_samples\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
+          "rawQuery": false,
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "field"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "client_uuid",
+              "operator": "=~",
+              "value": "/^$client_uuid$/"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Read Operation Rate",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "ops",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
         }
       ],
       "yaxis": {
@@ -280,7 +514,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 16
       },
       "id": 90,
       "interval": null,
@@ -552,6 +786,7 @@
         },
         {
           "aggregation": "Last",
+          "alias": "Page Mkwrite",
           "decimals": 2,
           "displayAliasType": "Warning / Critical",
           "displayType": "Regular",
@@ -617,7 +852,7 @@
           ],
           "orderByTime": "ASC",
           "policy": "default",
-          "query": "SELECT \"value\" * 1000 FROM \"client_stats_seek_mean\" WHERE (\"client_uuid\" =~ /^$client_uuid$/) AND $timeFilter",
+          "query": "SELECT \"value\" * 1000 FROM \"client_stats_seek_mean\" WHERE (\"client_uuid\" =~ /^$client_uuid $/) AND $timeFilter",
           "rawQuery": true,
           "refId": "H",
           "resultFormat": "time_series",
@@ -1605,7 +1840,7 @@
           "value": "lustre0"
         },
         "datasource": "$BARRELEYE_DATASOURCE_NAME",
-        "definition": "SHOW TAG VALUES FROM \"client_stats_open_max\" WITH KEY = fs_name",
+        "definition": "SHOW TAG VALUES FROM \"client_stats_statfs_max\" WITH KEY = fs_name",
         "error": null,
         "hide": 0,
         "includeAll": false,
@@ -1613,7 +1848,7 @@
         "multi": false,
         "name": "fs_name",
         "options": [],
-        "query": "SHOW TAG VALUES FROM \"client_stats_open_max\" WITH KEY = fs_name",
+        "query": "SHOW TAG VALUES FROM \"client_stats_statfs_max\" WITH KEY = fs_name",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1628,11 +1863,38 @@
         "allValue": null,
         "current": {
           "selected": false,
+          "text": "autotest-el7-vm313",
+          "value": "autotest-el7-vm313"
+        },
+        "datasource": "$BARRELEYE_DATASOURCE_NAME",
+        "definition": "",
+        "error": null,
+        "hide": 0,
+        "includeAll": false,
+        "label": "Client",
+        "multi": false,
+        "name": "client_host",
+        "options": [],
+        "query": "SHOW TAG VALUES FROM \"client_stats_statfs_max\" WITH KEY = fqdn WHERE \"fs_name\" = '$fs_name'",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "current": {
+          "selected": true,
           "text": "ffff9cca7941f000",
           "value": "ffff9cca7941f000"
         },
         "datasource": "$BARRELEYE_DATASOURCE_NAME",
-        "definition": "SHOW TAG VALUES FROM \"client_stats_open_max\" WITH KEY = client_uuid WHERE \"fs_name\" = '$fs_name'",
+        "definition": "",
         "error": null,
         "hide": 0,
         "includeAll": false,
@@ -1640,7 +1902,7 @@
         "multi": false,
         "name": "client_uuid",
         "options": [],
-        "query": "SHOW TAG VALUES FROM \"client_stats_open_max\" WITH KEY = client_uuid WHERE \"fs_name\" = '$fs_name'",
+        "query": "SHOW TAG VALUES FROM \"client_stats_statfs_max\" WITH KEY = client_uuid WHERE \"fs_name\" = '$fs_name' AND \"fqdn\" = '$client_host'",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1675,6 +1937,6 @@
   },
   "timezone": "browser",
   "title": "Lustre Client",
-  "uid": "Bj-VYMRSz",
-  "version": 14
+  "uid": "0ToQbnkSk",
+  "version": 31
 }

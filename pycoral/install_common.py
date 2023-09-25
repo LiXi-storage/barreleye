@@ -952,7 +952,7 @@ class CoralInstallationCluster():
 
 def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
     """
-    Check whether a RPM installed or not. If not, use yum to install
+    Install RPMs by downloading it from Internet.
     """
     # pylint: disable=too-many-branches
     if tsinghua_mirror:
@@ -1101,15 +1101,113 @@ def yum_replace_to_tsinghua(log, host):
     return 0
 
 
-def bootstrap_from_internet(log, host, rpms, pip_packages, pip_dir,
+def ubuntu2204_apt_mirror_replace_to_tsinghua(log, host):
+    """
+    Replace apt mirror.
+    """
+    # See https://mirror.tuna.tsinghua.edu.cn/help/ubuntu/ for more information.
+    source_list = "/etc/apt/sources.list"
+    command = "grep tsinghua %s" % source_list
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status == 0:
+        return 0
+
+    if retval.cr_exit_status != 1 or retval.cr_stdout != "":
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    command = "echo '# Configured by Coral' > %s" % source_list
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse",
+             "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse",
+             "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse",
+             "deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse"]
+    for line in lines:
+        command = "sed -i '$a\%s' %s" % (line, source_list)
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+    return 0
+
+
+def ubuntu2204_install_deb_from_internet(log, host, debs, tsinghua_mirror=False):
+    """
+    Install debs by downloading it from Internet.
+    """
+    # pylint: disable=too-many-branches
+    if tsinghua_mirror:
+        ret = ubuntu2204_apt_mirror_replace_to_tsinghua(log, host)
+        if ret:
+            log.cl_error("failed to replace apt mirror to Tsinghua "
+                         "University on host [%s]", host.sh_hostname)
+            return -1
+
+    if len(debs) == 0:
+        return 0
+
+    command = "apt install -y"
+    for deb in debs:
+        command += " " + deb
+
+    retval = host.sh_run(log, command, timeout=None)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def bootstrap_from_internet(log, host, packages, pip_packages, pip_dir,
                             tsinghua_mirror=False):
     """
     Install the dependent RPMs and pip packages from Internet
     """
-    ret = yum_install_rpm_from_internet(log, host, rpms,
-                                        tsinghua_mirror=tsinghua_mirror)
+    distro = host.sh_distro(log)
+    if distro is None:
+        log.cl_error("failed to get distro of host [%s]",
+                     host.sh_hostname)
+        return -1
+
+    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        ret = yum_install_rpm_from_internet(log, host, packages,
+                                            tsinghua_mirror=tsinghua_mirror)
+    elif distro == ssh_host.DISTRO_UBUNTU2204:
+        ret = ubuntu2204_install_deb_from_internet(log, host, packages,
+                                                   tsinghua_mirror=tsinghua_mirror)
+    else:
+        log.cl_error("unsupported distro [%s] of host [%s]",
+                     distro, host.sh_hostname)
+        return -1
     if ret:
-        log.cl_error("failed to install missing RPMs on host [%s]",
+        log.cl_error("failed to install missing packages on host [%s]",
                      host.sh_hostname)
         return -1
 
@@ -1247,15 +1345,74 @@ def command_missing_packages_rhel7():
     return missing_rpms, missing_pips
 
 
+def command_missing_packages_ubuntu2204():
+    """
+    Add the missing debs and pip packages for RHEL7
+    """
+    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
+    # pylint: disable=unused-variable
+    missing_debs = []
+    try:
+        import fire
+    except ImportError:
+        missing_debs.append("python3-fire")
+
+    try:
+        import prettytable
+    except ImportError:
+        missing_debs.append("python3-prettytable")
+
+    try:
+        import toml
+    except ImportError:
+        missing_debs.append("python3-toml")
+
+    try:
+        import dateutil
+    except ImportError:
+        missing_debs.append("python3-dateutil")
+
+    try:
+        import filelock
+    except ImportError:
+        missing_debs.append("python3-filelock")
+
+    try:
+        import psutil
+    except ImportError:
+        missing_debs.append("python3-psutil")
+
+    missing_pips = []
+    return missing_debs, missing_pips
+
+
 def command_missing_packages(distro):
     """
-    Add the missing RPMs and pip packages
+    Add the missing RPMs/debs and pip packages
     """
     if distro == ssh_host.DISTRO_RHEL7:
         return command_missing_packages_rhel7()
     if distro == ssh_host.DISTRO_RHEL8:
         return command_missing_packages_rhel8()
+    if distro == ssh_host.DISTRO_UBUNTU2204:
+        return command_missing_packages_ubuntu2204()
     return None, None
+
+
+def install_packages_from_internet(log, host, packages, tsinghua_mirror=False):
+    """
+    Install packages from Internet.
+    """
+    distro = host.sh_distro(log)
+    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        return yum_install_rpm_from_internet(log, host, packages,
+                                             tsinghua_mirror=tsinghua_mirror)
+    if distro == ssh_host.DISTRO_UBUNTU2204:
+        return ubuntu2204_install_deb_from_internet(log, host, packages,
+                                                    tsinghua_mirror=tsinghua_mirror)
+    log.cl_error("unsupported distro [%s] of host [%s]",
+                 distro, host.sh_hostname)
+    return -1
 
 
 def download_pip3_packages(log, host, pip_dir, pip_packages,
@@ -1271,10 +1428,11 @@ def download_pip3_packages(log, host, pip_dir, pip_packages,
         message = ""
     log.cl_info("downloading pip3 packages %s to dir [%s] on host [%s]%s",
                 pip_packages, pip_dir, host.sh_hostname, message)
-    ret = yum_install_rpm_from_internet(log, host, ["python3-pip"],
-                                        tsinghua_mirror=tsinghua_mirror)
+
+    ret = install_packages_from_internet(log, host, ["python3-pip"],
+                                         tsinghua_mirror=tsinghua_mirror)
     if ret:
-        log.cl_error("failed to install [python3-pip] RPM")
+        log.cl_error("failed to install [python3-pip] package")
         return -1
 
     command = ("mkdir -p %s && cd %s && pip3 download" % (pip_dir, pip_dir))
