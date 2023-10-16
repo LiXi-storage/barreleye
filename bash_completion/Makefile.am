@@ -9,6 +9,14 @@ barrele:
 	mv barrele.tmp barrele
 endif
 
+if ENABLE_CLOWNF
+COMPLETIONS += clownf
+clownf:
+	PYTHONPATH=$(PIP3_PACKAGE_PATH) ../clownf -- --completion > clownf.tmp || exit 1; \
+	mv clownf.tmp clownf
+endif
+
+
 clean-local:
 	rm -f $(COMPLETIONS)
 

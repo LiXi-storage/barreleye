@@ -1,0 +1,8 @@
+#!/usr/bin/python3 -u
+"""
+Clownfish utilities
+"""
+from pyclownf import clownf
+
+if __name__ == "__main__":
+    clownf.main()

@@ -1,0 +1,17 @@
+[Unit]
+Description=Consul service discovery agent
+Requires=network-online.target
+After=network-online.target
+[Service]
+User=root
+Type=notify
+Environment=GOMAXPROCS=2
+ExecStart=/usr/bin/consul agent -config-file /etc/consul/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+Restart=always
+RestartSec=20
+StartLimitInterval=0
+TimeoutStopSec=5
+[Install]
+WantedBy=multi-user.target

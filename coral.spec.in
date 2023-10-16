@@ -8,6 +8,7 @@
 
 %global debug_package %{nil}
 %bcond_with barrele
+%bcond_with clownf
 
 Name: @PACKAGE@
 Version: @VERSION@
@@ -38,6 +39,23 @@ coral-barreleye is a performance monitoring system for Lustre file systems
 which collects and shows the statistics of the file system components
 including the file system services, clients, storages, networks and machines.
 %endif  # with barrele
+
+%if %{with clownf}
+%package clownfish
+Summary: Management Utilities for Lustre file systems
+Provides: coral-clownfish = %{version}-%{release}
+
+%description clownfish
+coral-clownfish provides user-friendly solutions for high availability
+features, installation, formatting, mounting and management of Lustre
+file system.
+
+%preun clownfish
+%systemd_preun clownf_agent.service
+
+%postun clownfish
+%systemd_postun_with_restart clownf_agent.service
+%endif  # with clownf
 
 
 %prep
@@ -77,6 +95,24 @@ cp -a barreleye/grafana_dashboards \
 	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele
 %endif  # with barrele
 
+%if %{with clownf}
+cp \
+	dist/clownf \
+	gocoral/clownf_agent/clownf_agent \
+	cclownf/clownf_storage \
+	$RPM_BUILD_ROOT%{_bindir}
+cp example_configs/clownfish.conf.example \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/
+mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
+install -m 0644 -D systemd/consul.service \
+	$RPM_BUILD_ROOT%{_unitdir}
+install -m 0644 -D systemd/clownf_agent.service \
+	$RPM_BUILD_ROOT%{_unitdir}
+install -g 0 -o 0 -m 0644 man/clownf.1 $RPM_BUILD_ROOT%{_mandir}/man1/
+install -g 0 -o 0 -m 0644 bash_completion/clownf \
+	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
+%endif  # with clownf
+
 
 %clean
 rm -rf $RPM_BUILD_ROOT
@@ -90,6 +126,18 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/coral/barreleye.conf.example
 %{_datadir}/bash-completion/completions/barrele
 %endif  # with barrele
+
+%if %{with clownf}
+%files clownfish
+%{_bindir}/clownf
+%{_bindir}/clownf_agent
+%{_bindir}/clownf_storage
+%{_sysconfdir}/coral/clownfish.conf.example
+%{_unitdir}/consul.service
+%{_unitdir}/clownf_agent.service
+%{_mandir}/man1/clownf.1*
+%{_datadir}/bash-completion/completions/clownf
+%endif  # with clownf
 
 
 %changelog

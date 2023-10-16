@@ -18,6 +18,13 @@ PYTHON_LIB_FILES += $(wildcard ../pybarrele/*.py) \
 	../pybuild/build_barrele.py
 endif
 
+if ENABLE_CLOWNF
+PYTHON_COMMANDS += ../clownf
+PYTHON_LIB_FILES += $(wildcard ../pyclownf/*.py) \
+	../pybuild/build_clownf.py
+
+endif #ENABLE_CLOWNF
+
 PYTHON_FILES = $(PYTHON_LIB_FILES) $(PYTHON_COMMANDS)
 PYTHON_CHECKS = $(PYTHON_FILES:%=%.python_checked)
 

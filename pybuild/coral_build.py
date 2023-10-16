@@ -8,9 +8,11 @@ import filelock
 from pycoral import ssh_host
 from pycoral import constant
 from pycoral import lustre_version
+from pycoral import lustre as lustre_lib
 from pycoral import cmd_general
 from pycoral import install_common
 from pybuild import build_barrele
+from pybuild import build_clownf
 from pybuild import build_common
 from pybuild import build_constant
 from pybuild import build_doc
@@ -446,9 +448,10 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
     dependent_rpms = ["e2fsprogs-devel",  # Needed for ./configure
                       "genisoimage",  # Generate the ISO image
                       "git",  # Needed by building anything from Git repository.
-                      "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
-                      "libyaml-devel",  # yaml C functions.
                       "json-c-devel",  # Needed by json C functions
+                      "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
+                      "json-c-devel",  # Needed by json C functions
+                      "python3-devel",  # Needed by building Python libraries
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
                       "wget",  # Needed by downloading from web
                       "yum-utils"]  # Commnad like "yumdb sync"
@@ -710,6 +713,64 @@ def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
     lustre_distribution = None
     if (len(plugins_need_lustre_rpms) != 0 or
             len(plugins_need_install_lustre) != 0):
+        lustre_distribution = lustre_lib.get_lustre_dist(log, local_host,
+                                                         lustre_rpms_dir,
+                                                         e2fsprogs_rpms_dir)
+        if lustre_distribution is None:
+            log.cl_error("invalid Lustre RPMs [%s] or e2fsprogs RPMs [%s]",
+                         lustre_rpms_dir, e2fsprogs_rpms_dir)
+            log.cl_error("Lustre RPMs are needed by plugins [%s]",
+                         get_plugin_str(plugins_need_lustre_rpms +
+                                        plugins_need_install_lustre))
+            return -1
+
+        if len(plugins_need_lustre_rpms) != 0:
+            iso_lustre_dir = iso_cache + "/" + constant.CORAL_LUSTRE_RELEASE_BASENAME
+            iso_e2fsprogs_dir = iso_cache + "/" + constant.E2FSPROGS_RPM_DIR_BASENAME
+
+            if lustre_rpms_dir != default_lustre_rpms_dir:
+                for basename in constant.LUSTRE_DIR_BASENAMES:
+                    dir_fpath = lustre_rpms_dir + "/" + basename
+                    log.cl_info("syncing [%s] to [%s] on host [%s]",
+                                dir_fpath, iso_lustre_dir,
+                                local_host.sh_hostname)
+                    ret = local_host.sh_sync_two_dirs(log, dir_fpath,
+                                                      iso_lustre_dir)
+                    if ret:
+                        log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
+                                     "on host [%s]", dir_fpath, iso_lustre_dir,
+                                     local_host.sh_hostname)
+                        return -1
+
+            if e2fsprogs_rpms_dir != default_e2fsprogs_rpms_dir:
+                for basename in constant.E2FSPROGS_DIR_BASENAMES:
+                    dir_fpath = e2fsprogs_rpms_dir + "/" + basename
+                    log.cl_info("syncing [%s] to [%s] on host [%s]",
+                                dir_fpath, iso_e2fsprogs_dir,
+                                local_host.sh_hostname)
+                    ret = local_host.sh_sync_two_dirs(log, dir_fpath,
+                                                      iso_e2fsprogs_dir)
+                    if ret:
+                        log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
+                                     "on host [%s]", dir_fpath,
+                                     iso_e2fsprogs_dir,
+                                     local_host.sh_hostname)
+                        return -1
+
+            extra_iso_fnames.append(constant.CORAL_LUSTRE_RELEASE_BASENAME)
+            extra_iso_fnames.append(constant.E2FSPROGS_RPM_DIR_BASENAME)
+
+        if len(plugins_need_install_lustre) != 0:
+            ret = install_lustre_util_rpm(log, local_host, lustre_distribution)
+            if ret:
+                log.cl_error("failed to install Lustre util RPM")
+                return -1
+
+            ret = install_e2fsprogs_rpm(log, local_host, lustre_distribution)
+            if ret:
+                log.cl_error("failed to install E2fsprogs RPMs")
+                return -1
+
         if lustre_distribution is None:
             log.cl_error("Lustre distribution is needed unexpectedly")
             return -1

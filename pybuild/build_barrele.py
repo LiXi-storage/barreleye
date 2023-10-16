@@ -255,7 +255,7 @@ def get_and_clean_collectd_rpms(log, host, packages_dir,
                         rpm_fname, suffix)
             fpath = packages_dir + "/" + rpm_fname
             command = ("rm -f %s" % (fpath))
-            retval = host.sh_run(command)
+            retval = host.sh_run(log, command)
             if retval.cr_exit_status:
                 log.cl_error("failed to run command [%s] on host [%s], "
                              "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -590,7 +590,7 @@ def get_and_clean_collectd_debs(log, host, packages_dir,
                         deb_fname, suffix)
             fpath = packages_dir + "/" + deb_fname
             command = ("rm -f %s" % (fpath))
-            retval = host.sh_run(command)
+            retval = host.sh_run(log, command)
             if retval.cr_exit_status:
                 log.cl_error("failed to run command [%s] on host [%s], "
                              "ret = [%d], stdout = [%s], stderr = [%s]",

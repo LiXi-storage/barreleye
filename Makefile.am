@@ -1,12 +1,17 @@
-SUBDIRS = pybuild
-DIST_SUBDIRS = pybuild
+SUBDIRS = pybuild \
+	@CCLOWNF_SUBDIR@ \
+	@GOCORAL_SUBDIR@
+DIST_SUBDIRS = pybuild \
+	cclownf \
+	ccoral \
+	gocoral
 
 if ENABLE_BARRELE
 SUBDIRS += barreleye
 endif #ENABLE_BARRELE
+
 SUBDIRS += pycheck bash_completion .
 DIST_SUBDIRS += barreleye pycheck bash_completion .
-
 
 build_dir = `pwd`/build
 rpmbuild_opt =
@@ -22,6 +27,7 @@ ACLOCAL_AMFLAGS = ${ALOCAL_FLAGS}
 
 PYTHON_COMMANDS = \
 	barrele \
+	clownf \
 	coral
 
 EXTRA_DIST = \
@@ -31,9 +37,14 @@ EXTRA_DIST = \
 	detect-distro.sh \
 	doc \
 	example_configs/barreleye.conf.example \
+	example_configs/clownfish.conf.example \
+	gocoral/* \
+	man/* \
 	pybarrele/*.py \
 	pybuild/*.py \
+	pyclownf/*.py \
 	pycoral/*.py \
+	systemd/* \
 	version
 
 doc.checked: pybuild/build_doc.py
@@ -74,6 +85,13 @@ else
 rpmbuild_opt += --without barrele
 endif
 
+if ENABLE_CLOWNF
+rpmbuild_opt += --with clownf
+CORAL_PACKAGES += clownfish
+else
+rpmbuild_opt += --without clownf
+endif
+
 
 EXES =
 PYINSTALLER_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) pyinstaller -F --clean
@@ -84,6 +102,13 @@ EXES += barrele
 dist/barrele:
 	mkdir -p dist
 	$(PYINSTALLER_CMD) barrele
+endif
+
+if ENABLE_CLOWNF
+EXES += clownf
+dist/clownf:
+	mkdir -p dist
+	$(PYINSTALLER_CMD) clownf
 endif
 
 

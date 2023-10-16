@@ -1472,7 +1472,7 @@ def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
                                   tsinghua_mirror=tsinghua_mirror)
     ret = install_cluster.cic_install(log)
     if ret:
-        log.cl_error("failed to install dependent RPMs on host [%s]",
+        log.cl_error("failed to install dependent RPMs of Coral on host [%s]",
                      host.sh_hostname)
         return -1
 

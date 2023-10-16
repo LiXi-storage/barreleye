@@ -10,10 +10,11 @@
 # command after changing this file, to see if there are
 # any tracked files which get ignored after the change.
 
-Makefile.in
 aclocal.m4
 autom4te.cache
 barrele.spec
+clownf.spec
+clownfish_simplified.tmp.toml
 compile
 config.guess
 config.h
@@ -32,6 +33,7 @@ libltdl
 libtool
 ltmain.sh
 missing
+Makefile.in
 nohup.out
 stamp-h1
 .deps

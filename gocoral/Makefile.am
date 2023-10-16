@@ -1,0 +1,2 @@
+SUBDIRS = clownf_agent
+

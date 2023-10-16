@@ -15,6 +15,20 @@ CORAL_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) ../coral
 SOURCES = ../pycoral/version.py
 CHECKS =
 
+if ENABLE_CLOWNF
+CLOWNF_CONSTANT_FILES = ../pycoral/constant.py ../pyclownf/clownf_constant.py \
+	../pybuild/build_clownf.py
+
+
+../cclownf/clf_constant.h: $(CLOWNF_CONSTANT_FILES)
+	$(CORAL_CMD) clownf generate_constant ../cclownf/clf_constant.h
+
+../gocoral/clownf_agent/clownf_constant.go: $(CLOWNF_CONSTANT_FILES)
+	$(CORAL_CMD) clownf generate_constant ../gocoral/clownf_agent/clownf_constant.go
+
+SOURCES +=../cclownf/clf_constant.h ../gocoral/clownf_agent/clownf_constant.go
+endif #ENABLE_CLOWNF
+
 
 clean-local:
 	rm -fr $(SOURCES) $(CHECKS)

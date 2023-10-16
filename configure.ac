@@ -195,6 +195,27 @@ AC_MSG_RESULT([$enable_barrele])
 AC_SUBST(ENABLE_BARRELE, $enable_barrele)
 AM_CONDITIONAL(ENABLE_BARRELE, test "$enable_barrele" = "yes")
 
+# -------- whether enable Clownfish plugin --------
+AC_MSG_CHECKING([whether enable Clownfish plugin])
+AC_ARG_ENABLE([clownf],
+    AS_HELP_STRING([--disable-clownf],
+                   [disable Clownfish plugin]),
+              [], [enable_clownf="yes"])
+AC_MSG_RESULT([$enable_clownf])
+AC_SUBST(ENABLE_CLOWNF, $enable_clownf)
+AS_IF([test "$enable_clownf" = "yes"],
+      [CCLOWNF_SUBDIR="cclownf"
+       enable_go="yes"])
+AC_SUBST(CCLOWNF_SUBDIR)
+AM_CONDITIONAL(ENABLE_CLOWNF, test "$enable_clownf" = "yes")
+
+
+# -------- whether need to build Go codes under gocoral --------
+AS_IF([test "$enable_go" = "yes"],
+      [GOCORAL_SUBDIR="gocoral"])
+AC_SUBST(GOCORAL_SUBDIR)
+AC_SUBST(ENABLE_GO, $enable_go)
+AM_CONDITIONAL(ENABLE_GO, test "$enable_go" = "yes")
 
 # -------- check for ISO cache dir --------
 AC_MSG_CHECKING([for ISO cache dir])
@@ -224,9 +245,13 @@ AC_SUBST(CORAL_RELEASE)
 # for exporting to spec file
 AC_SUBST(ac_configure_args)
 AC_CONFIG_FILES([Makefile
-                 coral.spec
+                 bash_completion/Makefile
                  barreleye/Makefile
+                 cclownf/Makefile
+                 ccoral/Makefile
+                 coral.spec
                  pybuild/Makefile
                  pycheck/Makefile
-                 bash_completion/Makefile])
+                 gocoral/Makefile
+                 gocoral/clownf_agent/Makefile])
 AC_OUTPUT

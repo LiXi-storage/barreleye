@@ -1,0 +1,10 @@
+[Unit]
+Description=Clownfish Agent
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/clownf_agent
+User=root
+
+[Install]
+WantedBy=multi-user.target

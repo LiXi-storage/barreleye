@@ -23,38 +23,6 @@ RPM_INSTALL_LOCK = constant.CORAL_LOG_DIR + "/rpm_install"
 CORAL_PACKAGE_DICT = {}
 
 
-class CoralFileDownload():
-    """
-    Download of packages
-    """
-    # pylint: disable=too-few-public-methods
-    def __init__(self, url, sha1sum, fname=None, no_check_certificate=False):
-        # URL of the file
-        self.cfd_url = url
-        # Sha1sum of the file
-        self.cfd_sha1sum = sha1sum
-        # filename
-        if fname is None:
-            self.cfd_fname = os.path.basename(url)
-        else:
-            self.cfd_fname = fname
-        # Whether need to ignore certificate when downloading
-        self.cfd_no_check_certificate = no_check_certificate
-
-    def cfd_download(self, log, host, dirpath):
-        """
-        Download file to dir
-        """
-        fpath = dirpath + "/" + self.cfd_fname
-        ret = host.sh_download_file(log, self.cfd_url, fpath,
-                                    self.cfd_sha1sum,
-                                    no_check_certificate=self.cfd_no_check_certificate)
-        if ret:
-            log.cl_error("failed to download Nettle tarball")
-            return -1
-        return 0
-
-
 class CoralCommand():
     """
     The command line utility for building Coral.
