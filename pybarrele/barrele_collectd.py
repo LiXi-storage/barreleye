@@ -1349,7 +1349,7 @@ def get_collectd_package_type_dict(log, host, packages_dir):
     collectd_package_type_dict = {}
     for fname in fnames:
         if ((not fname.startswith("collectd")) and
-            (not fname.startswith("libcollectdclient"))):
+                (not fname.startswith("libcollectdclient"))):
             continue
         package_type = collectd_package_type_from_name(log, fname)
         if package_type is None:

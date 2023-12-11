@@ -494,11 +494,13 @@ def table_add_field_names(table, field_names):
     table.field_names = colorful_field_names
 
 
-def table_set_sortby(table, field_name):
+def table_set_sortby(table, field_name, reversesort=False):
     """
     Set the field to sortby
     """
-    table.sortby = clog.colorful_message(clog.COLOR_TABLE_FIELDNAME, field_name)
+    table.sortby = clog.colorful_message(clog.COLOR_TABLE_FIELDNAME,
+                                         field_name)
+    table.reversesort = reversesort
 
 
 def print_field(log, field_name, value):
@@ -690,9 +692,9 @@ def print_all_fields(log, all_fields):
 
 def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
                field_result_funct, print_status=False, print_table=True,
-               field_string=None, sortby=None):
+               field_string=None, sortby=None, reversesort=False):
     """
-    Print table of virtual machines
+    Print table of a list
     """
     # pylint: disable=too-many-locals,too-many-branches
     # pylint: disable=too-many-statements
@@ -745,9 +747,8 @@ def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
     if print_table:
         table.align = "l"
         if sortby is None:
-            table_set_sortby(table, field_names[0])
-        if sortby:
-            table_set_sortby(table, sortby)
+            sortby = field_names[0]
+        table_set_sortby(table, sortby, reversesort=reversesort)
         log.cl_stdout(table)
     return rc
 

@@ -8,6 +8,7 @@ from pycoral import constant
 from pycoral import install_common
 from pycoral import ssh_host
 from pycoral import cmd_general
+from pycoral import os_distro
 from pybarrele import barrele_constant
 from pybarrele import barrele_collectd
 from pybarrele import barrele_server
@@ -246,12 +247,13 @@ class BarreleInstance():
         Install Barreleye agent on local host.
         """
         distro = self.bei_local_host.sh_distro(log)
-        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
             log.cl_error("please install agent on host [%s] by using [barrele cluster install] "
                          "command",
                          self.bei_local_host.sh_hostname)
             return -1
-        if distro not in (ssh_host.DISTRO_UBUNTU2204):
+        if distro not in (os_distro.DISTRO_UBUNTU2004,
+                          os_distro.DISTRO_UBUNTU2204):
             log.cl_error("distro [%s] of host [%s] is not supported",
                          distro, self.bei_local_host.sh_hostname)
             return -1
@@ -362,8 +364,8 @@ def parse_server_config(log, config, config_fpath, host_dict):
     return barrele_server.BarreleServer(host, data_path)
 
 
-def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
-                          logdir_is_default, iso_fpath):
+def barrele_init_instance(log, local_host, workspace, config, config_fpath,
+                          log_to_file, logdir_is_default, iso_fpath):
     """
     Parse the config and init the instance
     """
@@ -535,7 +537,6 @@ def barrele_init_instance(log, workspace, config, config_fpath, log_to_file,
                                                enable_infiniband=enable_infiniband)
             agent_dict[hostname] = agent
 
-    local_host = ssh_host.get_local_host()
     instance = BarreleInstance(workspace, config, config_fpath, log_to_file,
                                logdir_is_default, iso_fpath, local_host, collect_interval,
                                continuous_query_periods, jobstat_pattern,

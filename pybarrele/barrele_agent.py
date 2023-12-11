@@ -6,7 +6,7 @@ import json
 from http import HTTPStatus
 from pycoral import utils
 from pycoral import lustre_version
-from pycoral import ssh_host
+from pycoral import os_distro
 from pybarrele import barrele_collectd
 
 
@@ -75,9 +75,10 @@ class BarreleAgent():
             return -1
 
         distro = self.bea_host.sh_distro(log)
-        if distro not in (ssh_host.DISTRO_RHEL7,
-                          ssh_host.DISTRO_RHEL8,
-                          ssh_host.DISTRO_UBUNTU2204):
+        if distro not in (os_distro.DISTRO_RHEL7,
+                          os_distro.DISTRO_RHEL8,
+                          os_distro.DISTRO_UBUNTU2004,
+                          os_distro.DISTRO_UBUNTU2204):
             log.cl_error("host [%s] has unsupported distro [%s]",
                          self.bea_host.sh_hostname, distro)
             return -1
@@ -233,9 +234,9 @@ class BarreleAgent():
         host = self.bea_host
         distro = host.sh_distro(log)
 
-        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
             return self._bea_check_lustre_version_rpm(log, lustre_fallback_version)
-        if distro in (ssh_host.DISTRO_UBUNTU2204):
+        if distro in (os_distro.DISTRO_UBUNTU2004, os_distro.DISTRO_UBUNTU2204):
             return self._bea_check_lustre_version_deb(log, lustre_fallback_version)
 
         log.cl_error("distro [%s] of host [%s] is not supported",
@@ -448,10 +449,15 @@ class BarreleAgent():
         collectd_config.cdc_dump(fpath)
 
         distro = self.bea_host.sh_distro(log)
-        if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+        if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
             etc_path = "/etc/collectd.conf"
-        elif distro in (ssh_host.DISTRO_UBUNTU2204):
+        elif distro in (os_distro.DISTRO_UBUNTU2004,
+                        os_distro.DISTRO_UBUNTU2204):
             etc_path = "/etc/collectd/collectd.conf"
+        else:
+            log.cl_error("unsupported OS distro [%s]",
+                         distro)
+            return -1
         ret = host.sh_send_file(log, fpath, etc_path)
         if ret:
             log.cl_error("failed to send file [%s] on local host [%s] to "

@@ -22,16 +22,8 @@ import datetime
 from pycoral import utils
 from pycoral import clog
 from pycoral import watched_io
+from pycoral import os_distro
 
-
-# OS distribution RHEL6/CentOS6
-DISTRO_RHEL6 = "rhel6"
-# OS distribution RHEL7/CentOS7
-DISTRO_RHEL7 = "rhel7"
-# OS distribution RHEL8/CentOS8
-DISTRO_RHEL8 = "rhel8"
-# OS distribution ubuntu2204
-DISTRO_UBUNTU2204 = "ubuntu2204"
 # The shortest time that a reboot could finish. It is used to check whether
 # a host has actually rebooted or not.
 SHORTEST_TIME_REBOOT = 10
@@ -316,16 +308,17 @@ class SSHHost():
                 return None
             if (retval.cr_stdout.startswith("CentOS Linux release 7.") or
                     retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 7.")):
-                self.sh_cached_distro = DISTRO_RHEL7
-                return DISTRO_RHEL7
+                self.sh_cached_distro = os_distro.DISTRO_RHEL7
+                return os_distro.DISTRO_RHEL7
             if (retval.cr_stdout.startswith("CentOS Linux release 8.") or
-                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 8.")):
-                self.sh_cached_distro = DISTRO_RHEL8
-                return DISTRO_RHEL8
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 8.") or
+                    retval.cr_stdout.startswith("Red Hat Enterprise Linux release 8.")):
+                self.sh_cached_distro = os_distro.DISTRO_RHEL8
+                return os_distro.DISTRO_RHEL8
             if (retval.cr_stdout.startswith("CentOS Linux release 6.") or
                     retval.cr_stdout.startswith("Red Hat Enterprise Linux Server release 6.")):
-                self.sh_cached_distro = DISTRO_RHEL6
-                return DISTRO_RHEL6
+                self.sh_cached_distro = os_distro.DISTRO_RHEL6
+                return os_distro.DISTRO_RHEL6
             log.cl_error("unexpected output of command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
@@ -363,14 +356,14 @@ class SSHHost():
 
         if (name in ("RedHatEnterpriseServer", "ScientificSL", "CentOS")):
             if version.startswith("7"):
-                self.sh_cached_distro = DISTRO_RHEL7
-                return DISTRO_RHEL7
+                self.sh_cached_distro = os_distro.DISTRO_RHEL7
+                return os_distro.DISTRO_RHEL7
             if version.startswith("6"):
-                self.sh_cached_distro = DISTRO_RHEL6
-                return DISTRO_RHEL6
+                self.sh_cached_distro = os_distro.DISTRO_RHEL6
+                return os_distro.DISTRO_RHEL6
             if version.startswith("8"):
-                self.sh_cached_distro = DISTRO_RHEL8
-                return DISTRO_RHEL8
+                self.sh_cached_distro = os_distro.DISTRO_RHEL8
+                return os_distro.DISTRO_RHEL8
             log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                          version, "rhel", self.sh_hostname)
             return None
@@ -389,7 +382,10 @@ class SSHHost():
                          version, "fc", self.sh_hostname)
             return None
         if name == "Ubuntu":
-            return DISTRO_UBUNTU2204
+            if version == "20.04":
+                return os_distro.DISTRO_UBUNTU2004
+            if version == "22.04":
+                return os_distro.DISTRO_UBUNTU2204
         log.cl_error("unsupported version [%s] of [%s] on host [%s]",
                      version, name, self.sh_hostname)
         return None
@@ -2076,7 +2072,7 @@ class SSHHost():
         Example of kernel string:
         /boot/vmlinuz-2.6.32-573.22.1.el6_lustre.2.7.15.3.x86_64
         """
-        if self.sh_distro(log) == DISTRO_RHEL7:
+        if self.sh_distro(log) == os_distro.DISTRO_RHEL7:
             # This is not necessary for normal cases, but just in case of
             # broken grubenv file caused by repair
             command = ("grub2-editenv create")
@@ -3298,7 +3294,7 @@ class SSHHost():
             return -1
         return 0
 
-    def sh_show_pip3_packages(self, log, pip_package):
+    def sh_show_pip3_package(self, log, pip_package, quiet=False):
         """
         Get information of pip3 package on a host.
         Return a dict
@@ -3306,13 +3302,14 @@ class SSHHost():
         command = ("pip3 show %s" % pip_package)
         retval = self.sh_run(log, command)
         if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+            if not quiet:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             self.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
             return None
 
         info_dict = {}
@@ -3321,13 +3318,14 @@ class SSHHost():
         for line in lines:
             seperator_index = line.find(seperator)
             if seperator_index <= 0:
-                log.cl_error("unexpected output of command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+                if not quiet:
+                    log.cl_error("unexpected output of command [%s] on host [%s], "
+                                 "ret = [%d], stdout = [%s], stderr = [%s]",
+                                 command,
+                                 self.sh_hostname,
+                                 retval.cr_exit_status,
+                                 retval.cr_stdout,
+                                 retval.cr_stderr)
                 return None
             key = line[:seperator_index]
             value = line[seperator_index + 2:]
@@ -3338,9 +3336,9 @@ class SSHHost():
         """
         Return the location of a pip3 package.
         """
-        package_info_dict = self.sh_show_pip3_packages(log, pip_package)
+        package_info_dict = self.sh_show_pip3_package(log, pip_package)
         if package_info_dict is None:
-            log.cl_error("failed to get info about pip3 packages [%s] on "
+            log.cl_error("failed to get info about pip3 package [%s] on "
                          "host [%s]",
                          pip_package, self.sh_hostname)
             return None
@@ -3499,17 +3497,22 @@ class SSHHost():
         fnames = retval.cr_stdout.splitlines()
         return fnames
 
-    def sh_check_dir_content(self, log, directory, contents,
-                             ignoral_extra_contents=False, cleanup=False):
+    def sh_check_dir_content(self, log, directory, contents, optional_contents=None,
+                             ignore_extra_contents=False, cleanup=False,
+                             all_fnames=False):
         """
         Check that the directory has expected content
         """
-        existing_fnames = self.sh_get_dir_fnames(log, directory)
+        existing_fnames = self.sh_get_dir_fnames(log, directory,
+                                                 all_fnames=all_fnames)
         if existing_fnames is None:
             log.cl_error("failed to get the file names under [%s] of "
                          "host [%s]",
                          directory, self.sh_hostname)
             return -1
+        if all_fnames:
+            existing_fnames.remove(".")
+            existing_fnames.remove("..")
 
         for fname in contents:
             if fname not in existing_fnames:
@@ -3519,7 +3522,13 @@ class SSHHost():
                 return -1
             existing_fnames.remove(fname)
 
-        if ignoral_extra_contents:
+        if optional_contents is not None:
+            for fname in optional_contents:
+                if fname not in existing_fnames:
+                    continue
+                existing_fnames.remove(fname)
+
+        if ignore_extra_contents:
             return 0
 
         for fname in existing_fnames:
@@ -4585,6 +4594,51 @@ class SSHHost():
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
                          self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def sh_tar_and_remove_dir(self, log, parent_dir, fname,
+                              timeout=None):
+        """
+        Tar and remove the directory
+        """
+        origin_dir = parent_dir + "/" + fname
+        fpath_tmp = (parent_dir + "/." + fname + "." +
+                     utils.random_word(8) +".tar.gz")
+        fpath = origin_dir + ".tar.gz"
+
+        command = ("tar -czf %s -C %s %s" %
+                   (fpath_tmp, parent_dir, fname))
+        retval = self.sh_run(log, command, timeout=timeout)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command, self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        command = ("mv %s %s" % (fpath_tmp, fpath))
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                        "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command, self.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        command = ("rm -fr %s" % origin_dir)
+        retval = self.sh_run(log, command, timeout=timeout)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                        "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command, self.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)

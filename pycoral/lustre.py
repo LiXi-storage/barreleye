@@ -8,6 +8,7 @@ import socket
 
 # Local libs
 from pycoral import utils
+from pycoral import os_distro
 from pycoral import ssh_host
 from pycoral import constant
 from pycoral import lustre_version
@@ -2694,13 +2695,16 @@ class LustreHost(ssh_host.SSHHost):
 
         log.cl_info("installing OFED RPM on host [%s]", self.sh_hostname)
 
+        # New version of mlnx-tools might block the installation of old
+        # version mlnx-ofa_kernel, but please do not add it to this list.
+        # The reason is, new mlnx-ofa_kernel like 5.8 depends on mlnx-tools.
+        # Keeping existing mlnx-tools at least gives an chance for manual
+        # fixing of missing mlnx-tools.
         mlnx_key_rpms = ["mlnx-ofa_kernel",
                          "mlnx-ofa_kernel-devel",
                          "mlnx-ofa_kernel-debuginfo",
-                         "kmod-mlnx-ofa_kernel",
-                         # New version mlnx-tools might block the installation
-                         # of old version mlnx-ofa_kernel
-                         "mlnx-tools"]
+                         "kmod-mlnx-ofa_kernel"]
+
         rpm_string = ""
         for rpm_name in mlnx_key_rpms:
             if self.sh_has_rpm(log, rpm_name):
@@ -2822,7 +2826,7 @@ class LustreHost(ssh_host.SSHHost):
             log.cl_error("failed to get distro of host [%s]",
                          self.sh_hostname)
             return -1
-        if distro == ssh_host.DISTRO_RHEL7:
+        if distro == os_distro.DISTRO_RHEL7:
             # Somehow crashkernel=auto doen't work for RHEL7 sometimes
             log.cl_info("changing boot argument of crashkernel on host [%s]",
                         self.sh_hostname)
@@ -3737,7 +3741,7 @@ def get_lustre_dist(log, local_host, lustre_dir, e2fsprogs_dir,
     """
     ret = local_host.sh_check_dir_content(log, lustre_dir,
                                           constant.LUSTRE_DIR_BASENAMES,
-                                          ignoral_extra_contents=True,
+                                          ignore_extra_contents=True,
                                           cleanup=False)
     if ret:
         log.cl_error("directory [%s] does not have expected content",

@@ -29,55 +29,50 @@ class ReleaseInfo():
         Read the info file.
         """
         # pylint: disable=too-many-branches,too-many-statements
+        # pylint: disable=too-many-locals
         info = coral_yaml.read_yaml_file(log, fpath)
         if info is None:
             log.cl_error("failed to read release info file [%s]",
                          fpath)
             return -1
-        if RELEASE_INFO_VERSION not in info:
-            log.cl_warning("no field [%s] in release info file [%s]",
-                           RELEASE_INFO_VERSION, fpath)
-        else:
-            value = info[RELEASE_INFO_VERSION]
-            if value is not None:
-                if self.rli_version is None:
-                    self.rli_version = value
-                elif self.rli_version != value:
-                    log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
-                                 RELEASE_INFO_VERSION,
-                                 self.rli_version,
-                                 value)
-                    return -1
+        version = None
+        if RELEASE_INFO_VERSION in info:
+            version = info[RELEASE_INFO_VERSION]
+        if version is not None:
+            if self.rli_version is None:
+                self.rli_version = version
+            elif self.rli_version != version:
+                log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
+                             RELEASE_INFO_VERSION,
+                             self.rli_version,
+                             version)
+                return -1
 
-        if RELEASE_INFO_DISTRO_SHORT not in info:
-            log.cl_warning("no field [%s] in release info file [%s]",
-                           RELEASE_INFO_DISTRO_SHORT, fpath)
-        else:
-            value = info[RELEASE_INFO_DISTRO_SHORT]
-            if value is not None:
-                if self.rli_distro_short is None:
-                    self.rli_distro_short = value
-                elif self.rli_distro_short != value:
-                    log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
-                                 RELEASE_INFO_DISTRO_SHORT,
-                                 self.rli_distro_short,
-                                 value)
-                    return -1
+        distro_short = None
+        if RELEASE_INFO_DISTRO_SHORT in info:
+            distro_short = info[RELEASE_INFO_DISTRO_SHORT]
+        if distro_short is not None:
+            if self.rli_distro_short is None:
+                self.rli_distro_short = distro_short
+            elif self.rli_distro_short != distro_short:
+                log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
+                             RELEASE_INFO_DISTRO_SHORT,
+                             self.rli_distro_short,
+                             distro_short)
+                return -1
 
-        if RELEASE_INFO_TARGET_CPU not in info:
-            log.cl_warning("no field [%s] in release info file [%s]",
-                           RELEASE_INFO_TARGET_CPU, fpath)
-        else:
-            value = info[RELEASE_INFO_TARGET_CPU]
-            if value is not None:
-                if self.rli_target_cpu is None:
-                    self.rli_target_cpu = value
-                elif self.rli_target_cpu != value:
-                    log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
-                                 RELEASE_INFO_TARGET_CPU,
-                                 self.rli_distro_short,
-                                 value)
-                    return -1
+        target_cpu = None
+        if RELEASE_INFO_TARGET_CPU in info:
+            target_cpu = info[RELEASE_INFO_TARGET_CPU]
+        if target_cpu is not None:
+            if self.rli_target_cpu is None:
+                self.rli_target_cpu = target_cpu
+            elif self.rli_target_cpu != target_cpu:
+                log.cl_error("inconsistent old and new values of field [%s], [%s] vs. [%s]",
+                             RELEASE_INFO_TARGET_CPU,
+                             self.rli_distro_short,
+                             target_cpu)
+                return -1
         return 0
 
 

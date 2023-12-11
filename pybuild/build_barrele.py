@@ -8,6 +8,7 @@ from pycoral import constant
 from pycoral import ssh_host
 from pycoral import clog
 from pycoral import cmd_general
+from pycoral import os_distro
 from pybuild import build_common
 from pybarrele import barrele_constant
 
@@ -174,14 +175,14 @@ COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS = ["bison",
                                             "python3-dev",
                                             "riemann-c-client",
                                             "uthash-dev"]
-BARRELE_BUILD_DEPENDENT_UBUNTU2204_DEBS = (COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS +
-                                           ["bzip2",
-                                            "libattr1-dev",
-                                            "libext2fs-dev",
-                                            "pylint",
-                                            "python3-slugify",
-                                            "python3-pip",
-                                            "genisoimage"])
+BARRELE_BUILD_DEPENDENT_UBUNTU_DEBS = (COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS +
+                                       ["bzip2",
+                                        "libattr1-dev",
+                                        "libext2fs-dev",
+                                        "pylint",
+                                        "python3-slugify",
+                                        "python3-pip",
+                                        "genisoimage"])
 
 BARRELEYE_BUILD_DEPENDENT_PIPS = ["requests", "python-slugify"]
 
@@ -437,9 +438,9 @@ def collectd_build_and_check_rhel(log, host, target_cpu, packages_dir,
         return -1
 
     distro = host.sh_distro(log)
-    if distro == ssh_host.DISTRO_RHEL7:
+    if distro == os_distro.DISTRO_RHEL7:
         distro_number = "7"
-    elif distro == ssh_host.DISTRO_RHEL8:
+    elif distro == os_distro.DISTRO_RHEL8:
         distro_number = "8"
     else:
         log.cl_error("build Barreleye on distro [%s] is not supported yet", distro)
@@ -659,7 +660,7 @@ def build_collectd_debs(log, host, source_dir, type_cache,
 
     patch_dir = source_dir + "/barreleye/collectd/ubuntu_build_patches"
     rc = build_common.apply_patches(log, host, collectd_src_dir,
-                                     patch_dir)
+                                    patch_dir)
     if rc:
         log.cl_error("failed to apply ubuntu build patches to [%s]",
                      collectd_src_dir)
@@ -824,7 +825,7 @@ def collectd_build_and_check(log, host, source_dir, type_cache,
     If existing Collectd packages are not complete, build them.
     """
     distro = host.sh_distro(log)
-    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
         return collectd_build_and_check_rhel(log, host, target_cpu,
                                              packages_dir,
                                              collectd_src_dir,
@@ -832,7 +833,7 @@ def collectd_build_and_check(log, host, source_dir, type_cache,
                                              collectd_version_release,
                                              tarball_fpath,
                                              extra_package_fnames)
-    if distro in (ssh_host.DISTRO_UBUNTU2204):
+    if distro in (os_distro.DISTRO_UBUNTU2004, os_distro.DISTRO_UBUNTU2204):
         return collectd_build_and_check_ubuntu(log, host,
                                                source_dir,
                                                type_cache,
@@ -843,7 +844,8 @@ def collectd_build_and_check(log, host, source_dir, type_cache,
                                                collectd_version,
                                                tarball_fpath,
                                                extra_package_fnames)
-    return 0
+    log.cl_error("OS distro [%s] is not supported", distro)
+    return -1
 
 
 def build_collectd_tarball(log, workspace, host, source_dir, type_cache,
@@ -1286,12 +1288,14 @@ def build_barreleye(log, workspace, host, source_dir,
         return -1
 
     distro = host.sh_distro(log)
-    if distro == ssh_host.DISTRO_UBUNTU2204:
+    if distro in (os_distro.DISTRO_UBUNTU2004,
+                  os_distro.DISTRO_UBUNTU2204):
         log.cl_info("skip building server packages for Barreleye "
                     "since distro [%s] has no server support",
                     distro)
         extra_package_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_DEBS
-    else:
+    elif distro in (os_distro.DISTRO_RHEL7,
+                    os_distro.DISTRO_RHEL8):
         rc = build_grafana_plugins(log, host, type_cache, iso_cache,
                                    extra_iso_fnames)
         if rc:
@@ -1310,6 +1314,9 @@ def build_barreleye(log, workspace, host, source_dir,
             return -1
 
         extra_package_names += barrele_constant.BARRELE_DOWNLOAD_DEPENDENT_RPMS
+    else:
+        log.cl_error("unsupported OS distro [%s]", distro)
+        return -1
     return 0
 
 
@@ -1329,12 +1336,13 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
         Return the RPMs needed to install before building
         """
         # pylint: disable=no-self-use
-        if distro == ssh_host.DISTRO_RHEL7:
+        if distro == os_distro.DISTRO_RHEL7:
             return COLLECTD_BUILD_DEPENDENT_RHEL7_RPMS
-        if distro == ssh_host.DISTRO_RHEL8:
+        if distro == os_distro.DISTRO_RHEL8:
             return COLLECTD_BUILD_DEPENDENT_RHEL8_RPMS
-        if distro == ssh_host.DISTRO_UBUNTU2204:
-            return BARRELE_BUILD_DEPENDENT_UBUNTU2204_DEBS
+        if distro in (os_distro.DISTRO_UBUNTU2004,
+                      os_distro.DISTRO_UBUNTU2204):
+            return BARRELE_BUILD_DEPENDENT_UBUNTU_DEBS
         return None
 
     def cpt_build(self, log, workspace, local_host, source_dir, target_cpu,

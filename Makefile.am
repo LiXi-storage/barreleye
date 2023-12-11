@@ -161,17 +161,19 @@ coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA)
 	./coral release_info save $(DISTRO_SHORT) $(target_cpu) coral_release_info.yaml
 	cp coral_release_info.yaml $(ISO_PATH)
 	mkdir -p $(PACKAGE_PATH)
-	if [ "$(DISTRO_SHORT)" = "ubuntu2204" ]; then \
+	if [ "$(DISTRO_SHORT)" = "ubuntu2004" -o "$(DISTRO_SHORT)" = "ubuntu2204"  ]; then \
 		DEB_PACKAGE_VERSION=$$(echo $(PACKAGE_VERSION) | tr '_' '-'); \
 		for CORAL_PACKAGE in $(CORAL_PACKAGES); do \
 			cp debs/coral-$${CORAL_PACKAGE}_$${DEB_PACKAGE_VERSION}_*.deb $(PACKAGE_PATH); \
 		done; \
-	fi
-	if [ "$(DISTRO_SHORT)" = "el7" -o "$(DISTRO_SHORT)" = "el8" ]; then \
+	elif [ "$(DISTRO_SHORT)" = "el7" -o "$(DISTRO_SHORT)" = "el8" ]; then \
 		for CORAL_PACKAGE in $(CORAL_PACKAGES); do \
 			cp build/RPMS/$(target_cpu)/coral-$${CORAL_PACKAGE}-$(PACKAGE_VERSION)-$(CORAL_RELEASE).$(DISTRO_SHORT)*.$(target_cpu).rpm $(PACKAGE_PATH); \
 		done; \
 		createrepo $(PACKAGE_PATH); \
+	else \
+		echo "Unsupported distro $(DISTRO_SHORT)"; \
+		exit 1; \
 	fi
 	@if [ "$(DISTRO_SHORT)" = "el8" ]; then \
 		repo2module -s stable $(PACKAGE_PATH) $(PACKAGE_PATH)/modules.yaml; \

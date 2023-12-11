@@ -96,10 +96,13 @@ if  [[[ "$DISTRO_NAME" = "rhel" ]]]; then
         make_rpms="yes"
 elif [[[ "$DISTRO_NAME" = "ubuntu" ]]]; then
         DISTRO_RELEASE=$(echo $DISTRO | awk -F 'ubuntu-' '{print $2}' | awk -F '.' '{print $1}')
-        if [[[ "$DISTRO_RELEASE" != "22" ]]]; then
-                AC_MSG_ERROR([$DISTRO_RELEASE of Ubuntu is not a supported distro.])
+        if [[[ "$DISTRO_RELEASE" = "20" ]]]; then
+                DISTRO_SHORT=ubuntu2004
+        elif [[[ "$DISTRO_RELEASE" = "22" ]]]; then
+                DISTRO_SHORT=ubuntu2204
+        else
+                AC_MSG_ERROR([Ubuntu-$DISTRO_RELEASE is not a supported distro.])
         fi
-        DISTRO_SHORT=ubuntu2204
         make_debs="yes"
 else
         AC_MSG_ERROR([$DISTRO_NAME is not a supported distro.])

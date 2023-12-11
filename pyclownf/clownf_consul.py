@@ -134,7 +134,7 @@ def host_set_config(log, workspace, local_host, consul_cluster, hostname,
 # autostart: [true|false]
 # Setting this to true will enable the autostart of the host.
 # Whenever the host is down for any reason, autostart mechanism will start
-# the service automatically.
+# the host automatically.
 #
 """
     config_string += yaml.dump(config, Dumper=coral_yaml.YamlDumper,

@@ -26,7 +26,8 @@ def init_env(config_fpath, logdir, log_to_file, iso):
     local_host = ssh_host.get_local_host(ssh=False)
     if iso is not None:
         iso = cmd_general.check_argument_fpath(log, local_host, iso)
-    barreleye_instance = barrele_instance.barrele_init_instance(log, workspace,
+    barreleye_instance = barrele_instance.barrele_init_instance(log, local_host,
+                                                                workspace,
                                                                 barrele_config,
                                                                 config_fpath,
                                                                 log_to_file,

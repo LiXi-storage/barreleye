@@ -5,6 +5,7 @@ import re
 import filelock
 # pylint: disable=unused-import,too-many-lines
 # Local libs
+from pycoral import os_distro
 from pycoral import ssh_host
 from pycoral import constant
 from pycoral import lustre_version
@@ -29,6 +30,15 @@ PYINSTALLER_TARBALL_SHA1SUM = "60c595f5cbe66223d33c6edf1bb731ab9f02c3de"
 PYINSTALLER_TABALL_FNAME = "pyinstaller-4.10.tar.gz"
 REPLACE_DEB_DICT = {}
 REPLACE_DEB_DICT["debconf-2.0"] = "debconf"
+# Only have fonts-freefont-otf and fonts-freefont-ttf
+# Looks unncessary to install
+REPLACE_DEB_DICT["fonts-freefont"] = None
+
+# Common dependency needed by building Coral on Ubuntu
+BUILD_DEPENDENT_DEBS_UBUNTU = ["libjson-c-dev", "apt-rdepends",
+                               "debhelper"]
+# Common pips needed by building Coral on Ubuntu
+BUILD_DEPENDENT_PIPS_UBUNTU = ["PyInstaller==5.13.2", "tinyaes", "pycryptodome"]
 
 
 def merge_list(list_x, list_y):
@@ -223,7 +233,7 @@ def download_dependent_rpms(log, host, distro, target_cpu,
     # The yumdb might be broken, so sync
     log.cl_info("downloading dependency RPMs")
     # yumdb has been removed for RHEL8
-    if distro == ssh_host.DISTRO_RHEL7:
+    if distro == os_distro.DISTRO_RHEL7:
         command = "yumdb sync"
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
@@ -239,11 +249,11 @@ def download_dependent_rpms(log, host, distro, target_cpu,
     dependent_rpms = merge_list(constant.CORAL_DEPENDENT_RPMS,
                                 extra_package_names)
 
-    if distro == ssh_host.DISTRO_RHEL7:
+    if distro == os_distro.DISTRO_RHEL7:
         ret = download_dependent_rpms_rhel7(log, host, target_cpu,
                                             packages_dir, dependent_rpms,
                                             extra_package_fnames)
-    elif distro == ssh_host.DISTRO_RHEL8:
+    elif distro == os_distro.DISTRO_RHEL8:
         ret = download_dependent_rpms_rhel8(log, host, packages_dir,
                                             dependent_rpms,
                                             extra_package_fnames)
@@ -305,6 +315,8 @@ def download_dependent_debs(log, host, packages_dir, extra_package_fnames,
     for package in packages:
         if package in REPLACE_DEB_DICT:
             package = REPLACE_DEB_DICT[package]
+        if package is None:
+            continue
         command = ("cd %s && apt download %s" %
                    (downloading_dir, package))
         retval = host.sh_run(log, command)
@@ -346,11 +358,12 @@ def download_dependent_packages(log, host, distro, target_cpu,
     """
     Download packages for Barreleye.
     """
-    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
         return download_dependent_rpms(log, host, distro, target_cpu,
                                        packages_dir, extra_package_fnames,
                                        extra_package_names)
-    if distro in (ssh_host.DISTRO_UBUNTU2204):
+    if distro in (os_distro.DISTRO_UBUNTU2004,
+                  os_distro.DISTRO_UBUNTU2204):
         return download_dependent_debs(log, host,
                                        packages_dir, extra_package_fnames,
                                        extra_package_names)
@@ -416,7 +429,9 @@ def get_build_dependent_packages(log, distro, plugins, package_dict):
         dependent_pips += plugin.cpt_build_dependent_pips
 
     for package in package_dict.values():
-        dependent_packages += package.cpb_build_dependent_packages(distro)
+        packages, pips = package.cpb_build_dependent_packages(distro)
+        dependent_packages += packages
+        dependent_pips += pips
     return dependent_packages, dependent_pips
 
 
@@ -456,12 +471,12 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
                       "wget",  # Needed by downloading from web
                       "yum-utils"]  # Commnad like "yumdb sync"
 
-    if distro == ssh_host.DISTRO_RHEL7:
+    if distro == os_distro.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
         dependent_rpms += ["createrepo",  # To create the repo in ISO
                            "python36-psutil"]  # Used by Python codes
     else:
-        assert distro == ssh_host.DISTRO_RHEL8
+        assert distro == os_distro.DISTRO_RHEL8
         dependent_rpms += ["createrepo_c",  # To create the repo in ISO
                            "python3-pylint",  # Needed for Python codes check
                            "python3-psutil"]  # Used by Python codes
@@ -529,9 +544,9 @@ def install_build_dependency_ubuntu(log, workspace, host, distro,
     """
     # pylint: disable=unused-argument,too-many-locals
     if tsinghua_mirror:
-        ret = install_common.ubuntu2204_apt_mirror_replace_to_tsinghua(log, host)
+        ret = install_common.ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro)
         if ret:
-            log.cl_error("failed to replace deb mirrors to Tsinghua University")
+            log.cl_error("failed to replace apt mirrors to Tsinghua University")
             return -1
 
     command = 'apt update'
@@ -545,8 +560,8 @@ def install_build_dependency_ubuntu(log, workspace, host, distro,
                      command, host.sh_hostname)
         return -1
 
-    dependent_debs = ["libjson-c-dev", "apt-rdepends"]
-    dependent_pips = ["PyInstaller", "tinyaes", "pycryptodome"]
+    dependent_debs = BUILD_DEPENDENT_DEBS_UBUNTU
+    dependent_pips = BUILD_DEPENDENT_PIPS_UBUNTU
 
     debs, pips = get_build_dependent_packages(log, distro, plugins,
                                               package_dict)
@@ -573,13 +588,14 @@ def install_build_dependency(log, workspace, host, distro, target_cpu,
     """
     Install the dependency of building Coral
     """
-    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
         return install_build_dependency_rhel(log, workspace, host, distro,
                                              target_cpu, type_cache, plugins,
                                              package_dict, pip_dir,
                                              tsinghua_mirror=tsinghua_mirror)
 
-    if distro in (ssh_host.DISTRO_UBUNTU2204):
+    if distro in (os_distro.DISTRO_UBUNTU2004,
+                  os_distro.DISTRO_UBUNTU2204):
         return install_build_dependency_ubuntu(log, workspace, host, distro,
                                                target_cpu, type_cache, plugins,
                                                package_dict, pip_dir,
@@ -828,7 +844,7 @@ def resolve_package_build_order(log, package_dict):
 
 def get_needed_packages(log, plugins):
     """
-    Return a dict of packages needed to build.
+    Return a dict of packages (type CoralPackageBuild) needed to build.
     """
     # pylint: disable=too-many-locals
     package_dict = {}
@@ -993,8 +1009,9 @@ def build(log, source_dir, workspace,
 
     local_host = ssh_host.get_local_host(ssh=False)
     distro = local_host.sh_distro(log)
-    if distro not in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8,
-                      ssh_host.DISTRO_UBUNTU2204):
+    if distro not in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8,
+                      os_distro.DISTRO_UBUNTU2004,
+                      os_distro.DISTRO_UBUNTU2204):
         log.cl_error("build on distro [%s] is not supported yet", distro)
         return -1
 

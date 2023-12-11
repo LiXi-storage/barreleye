@@ -11,6 +11,7 @@ import os
 import sys
 from pycoral import utils
 from pycoral import ssh_host
+from pycoral import os_distro
 from pycoral import constant
 from pycoral import parallel
 
@@ -203,6 +204,8 @@ def install_pip3_packages_from_cache(log, local_host, pip_packages,
                                      pip_dir, quiet=False):
     """
     Install pip3 packages on local host and make sure it can be imported later.
+
+    pip package can have the format like "PyInstaller==5.13.2".
     """
     ret = local_host.sh_install_pip3_packages(log, pip_packages,
                                               pip_dir, quiet=quiet)
@@ -213,12 +216,25 @@ def install_pip3_packages_from_cache(log, local_host, pip_packages,
                          pip_packages, pip_dir, local_host.sh_hostname)
         return -1
 
+    pakage_names = []
     for pip_package in pip_packages:
-        location = local_host.sh_pip3_package_location(log, pip_package)
+        if "==" in pip_package:
+            fields = pip_package.split("==")
+            if len(fields) != 2:
+                log.cl_error("unexpected name of pip package [%s]",
+                             pip_package)
+                return -1
+            pakage_name = fields[0]
+        else:
+            pakage_name = pip_package
+        pakage_names.append(pakage_name)
+
+    for pakage_name in pakage_names:
+        location = local_host.sh_pip3_package_location(log, pakage_name)
         if location is None:
             log.cl_error("failed to get the location of pip3 packages [%s] on "
                          "host [%s]",
-                         pip_package, local_host.sh_hostname)
+                         pakage_name, local_host.sh_hostname)
             return -1
 
         if location not in sys.path:
@@ -692,7 +708,7 @@ class CoralInstallationHost():
             log.cl_error("failed to get distro of host [%s]",
                          hostname)
             return -1
-        if distro not in [ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8]:
+        if distro not in [os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8]:
             log.cl_error("unsupported distro [%s] of host [%s]",
                          distro, hostname)
             return -1
@@ -1101,7 +1117,7 @@ def yum_replace_to_tsinghua(log, host):
     return 0
 
 
-def ubuntu2204_apt_mirror_replace_to_tsinghua(log, host):
+def ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro):
     """
     Replace apt mirror.
     """
@@ -1134,10 +1150,19 @@ def ubuntu2204_apt_mirror_replace_to_tsinghua(log, host):
                      retval.cr_stderr)
         return -1
 
-    lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse",
-             "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse",
-             "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse",
-             "deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse"]
+    if distro == os_distro.DISTRO_UBUNTU2004:
+        lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal main restricted universe multiverse",
+                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-updates main restricted universe multiverse",
+                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-backports main restricted universe multiverse",
+                 "deb http://security.ubuntu.com/ubuntu/ focal-security main restricted universe multiverse"]
+    elif distro == os_distro.DISTRO_UBUNTU2204:
+        lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse",
+                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse",
+                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse",
+                 "deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse"]
+    else:
+        log.cl_error("unsupported OS distro [%s]", distro)
+        return -1
     for line in lines:
         command = "sed -i '$a\%s' %s" % (line, source_list)
         retval = host.sh_run(log, command)
@@ -1153,13 +1178,14 @@ def ubuntu2204_apt_mirror_replace_to_tsinghua(log, host):
     return 0
 
 
-def ubuntu2204_install_deb_from_internet(log, host, debs, tsinghua_mirror=False):
+def ubuntu_install_deb_from_internet(log, host, distro, debs,
+                                     tsinghua_mirror=False):
     """
     Install debs by downloading it from Internet.
     """
     # pylint: disable=too-many-branches
     if tsinghua_mirror:
-        ret = ubuntu2204_apt_mirror_replace_to_tsinghua(log, host)
+        ret = ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro)
         if ret:
             log.cl_error("failed to replace apt mirror to Tsinghua "
                          "University on host [%s]", host.sh_hostname)
@@ -1196,12 +1222,13 @@ def bootstrap_from_internet(log, host, packages, pip_packages, pip_dir,
                      host.sh_hostname)
         return -1
 
-    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
         ret = yum_install_rpm_from_internet(log, host, packages,
                                             tsinghua_mirror=tsinghua_mirror)
-    elif distro == ssh_host.DISTRO_UBUNTU2204:
-        ret = ubuntu2204_install_deb_from_internet(log, host, packages,
-                                                   tsinghua_mirror=tsinghua_mirror)
+    elif distro in (os_distro.DISTRO_UBUNTU2204,
+                    os_distro.DISTRO_UBUNTU2004):
+        ret = ubuntu_install_deb_from_internet(log, host, distro, packages,
+                                               tsinghua_mirror=tsinghua_mirror)
     else:
         log.cl_error("unsupported distro [%s] of host [%s]",
                      distro, host.sh_hostname)
@@ -1345,9 +1372,9 @@ def command_missing_packages_rhel7():
     return missing_rpms, missing_pips
 
 
-def command_missing_packages_ubuntu2204():
+def command_missing_packages_ubuntu():
     """
-    Add the missing debs and pip packages for RHEL7
+    Add the missing debs and pip packages for Ubuntu (20.04/22.04)
     """
     # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
     # pylint: disable=unused-variable
@@ -1390,12 +1417,13 @@ def command_missing_packages(distro):
     """
     Add the missing RPMs/debs and pip packages
     """
-    if distro == ssh_host.DISTRO_RHEL7:
+    if distro == os_distro.DISTRO_RHEL7:
         return command_missing_packages_rhel7()
-    if distro == ssh_host.DISTRO_RHEL8:
+    if distro == os_distro.DISTRO_RHEL8:
         return command_missing_packages_rhel8()
-    if distro == ssh_host.DISTRO_UBUNTU2204:
-        return command_missing_packages_ubuntu2204()
+    if distro in (os_distro.DISTRO_UBUNTU2004,
+                  os_distro.DISTRO_UBUNTU2204):
+        return command_missing_packages_ubuntu()
     return None, None
 
 
@@ -1404,12 +1432,12 @@ def install_packages_from_internet(log, host, packages, tsinghua_mirror=False):
     Install packages from Internet.
     """
     distro = host.sh_distro(log)
-    if distro in (ssh_host.DISTRO_RHEL7, ssh_host.DISTRO_RHEL8):
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
         return yum_install_rpm_from_internet(log, host, packages,
                                              tsinghua_mirror=tsinghua_mirror)
-    if distro == ssh_host.DISTRO_UBUNTU2204:
-        return ubuntu2204_install_deb_from_internet(log, host, packages,
-                                                    tsinghua_mirror=tsinghua_mirror)
+    if distro in (os_distro.DISTRO_UBUNTU2004, os_distro.DISTRO_UBUNTU2204):
+        return ubuntu_install_deb_from_internet(log, host, distro, packages,
+                                                tsinghua_mirror=tsinghua_mirror)
     log.cl_error("unsupported distro [%s] of host [%s]",
                  distro, host.sh_hostname)
     return -1

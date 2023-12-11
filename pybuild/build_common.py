@@ -146,10 +146,10 @@ class CoralPackageBuild():
 
     def cpb_build_dependent_packages(self, distro):
         """
-        Return the RPMs needed to install before building
+        Return the (RPMs/debs, pips) needed to install before building
         """
         # pylint: disable=unused-argument,no-self-use
-        return []
+        return [], []
 
     def cpb_build(self, log, workspace, local_host, source_dir, target_cpu,
                   type_cache, iso_cache, packages_dir, extra_iso_fnames,
