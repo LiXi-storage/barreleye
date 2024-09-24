@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"os/exec"
 	"syscall"
+	"io/ioutil"
 	"fmt"
 	"sync"
 	"bytes"
@@ -124,11 +125,30 @@ func loadConfig(logger log.Logger) (*ClownfishConfig, error) {
 	if err != nil {
 		stdoutString := stdout.String()
 		stderrString := stderr.String()
-		stdoutString = strings.Replace(stdoutString, "\n", "\\n", -1)
-		stderrString = strings.Replace(stderrString, "\n", "\\n", -1)
 		logger.Error("failed to convert Clownfish config to simple version",
-			     "error", err, "stdout", stdoutString,
-			     "stderr", stderrString)
+			     "error", err);
+		now := time.Now().UnixMilli()
+		stderrFpath := fmt.Sprintf("/tmp/clownf_simple_config.%d.stderr.txt", now)
+		stdoutFpath := fmt.Sprintf("/tmp/clownf_simple_config.%d.stdout.txt", now)
+
+		err1 := ioutil.WriteFile(stdoutFpath,
+					 []byte(stdoutString), 0664)
+		if err1 != nil {
+			logger.Error("failed to write stdout of failed command",
+				     "fpath", stdoutFpath,
+				     "error", err1)
+		}
+
+		err2 := ioutil.WriteFile(stderrFpath,
+					 []byte(stderrString), 0664)
+		if err1 != nil {
+			logger.Error("failed to write stderr of failed command",
+				     "fpath", stderrFpath,
+				     "error", err2)
+		}
+		logger.Error("stdout and stderr of failed command dumped",
+			     "error", err, "stdout", stdoutFpath,
+			     "stderr", stderrFpath)
 		return nil, err
 	}
 
@@ -598,21 +618,21 @@ func CreateLustreHostAgents(logger log.Logger,
 		if foundMyself {
 			monitorList = append(monitorList, sshHost)
 			number++
-			if number >= CLF_MAX_WATCH_HOST {
+			if number >= CLOWNF_MAX_WATCH_HOST {
 				break
 			}
 		}
 	}
 
 	// This is a loop, add the first few hosts to monitor list
-	if number < CLF_MAX_WATCH_HOST {
+	if number < CLOWNF_MAX_WATCH_HOST {
 		for _, sshHost := range hostList {
 			if sshHost.SSHHostName == hostname {
 				break
 			}
 			monitorList = append(monitorList, sshHost)
 			number++
-			if number >= CLF_MAX_WATCH_HOST {
+			if number >= CLOWNF_MAX_WATCH_HOST {
 				break
 			}
 		}
@@ -642,7 +662,7 @@ func CreateLustreHostAgents(logger log.Logger,
 		sessionTTL := fmt.Sprintf("%ds", SessionTTLSeconds)
 		waitTime := SessionTTLSeconds * time.Second
 
-		lockKey := CLF_CONSUL_HOST_PATH + "/" + hostname + "/" + CLF_CONSUL_LOCK_KEY
+		lockKey := CLOWNF_CONSUL_HOST_PATH + "/" + hostname + "/" + CLOWNF_CONSUL_LOCK_KEY
 		opts := &api.LockOptions{
 			Key:            lockKey,
 			Value:          []byte(uuid),
@@ -659,7 +679,7 @@ func CreateLustreHostAgents(logger log.Logger,
 			return nil, err
 		}
 
-		configKey := CLF_CONSUL_HOST_PATH + "/" + hostname + "/" + CLF_CONSUL_CONFIG_KEY
+		configKey := CLOWNF_CONSUL_HOST_PATH + "/" + hostname + "/" + CLOWNF_CONSUL_CONFIG_KEY
 		runtimeConf := RuntimeConfig {
 			RCAutostartEnabled: false,
 		}
@@ -820,7 +840,7 @@ func (agent *HostAgent) HAMaintainHost(logger log.Logger,
 				status = newStatus
 				agent.HAHostStatus = newStatus
 			} else if (newStatus == HSStarted &&
-				   stdout.String() != CLF_MSG_ALREADY_STARTED) {
+				   stdout.String() != CLOWNF_MSG_ALREADY_STARTED) {
 				logger.Info("started host with stale status of up",
 					    "hostname", hostname,
 					    "stdout", stdoutString,
@@ -998,7 +1018,7 @@ func CreateServiceAgents(logger log.Logger,
 		sessionTTL := fmt.Sprintf("%ds", SessionTTLSeconds)
 		waitTime := SessionTTLSeconds * time.Second
 
-		lockKey := CLF_CONSUL_SERVICE_PATH + "/" + serviceName + "/" + CLF_CONSUL_LOCK_KEY
+		lockKey := CLOWNF_CONSUL_SERVICE_PATH + "/" + serviceName + "/" + CLOWNF_CONSUL_LOCK_KEY
 		opts := &api.LockOptions{
 			Key:            lockKey,
 			Value:          []byte(uuid),
@@ -1015,7 +1035,7 @@ func CreateServiceAgents(logger log.Logger,
 			return nil, err
 		}
 
-		configKey := CLF_CONSUL_SERVICE_PATH + "/" + serviceName + "/" + CLF_CONSUL_CONFIG_KEY
+		configKey := CLOWNF_CONSUL_SERVICE_PATH + "/" + serviceName + "/" + CLOWNF_CONSUL_CONFIG_KEY
 		runtimeConf := RuntimeConfig {
 			RCAutostartEnabled: false,
 		}

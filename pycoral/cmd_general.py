@@ -522,25 +522,30 @@ def cmd_exit(log, exit_status):
     sys.exit(exit_status)
 
 
-def get_table_field(log, host, field_number, command, ignore_status=False):
+def get_table_field(log, host, field_number, command, ignore_status=False,
+                    quiet=False):
     """
     Return a dict for a given field of a table.
     Key is service/host/lustrefs/... name, should be the first column
     Value is the field value.
     """
+    if quiet:
+        log_func = log.cl_debug
+    else:
+        log_func = log.cl_error
     retval = host.sh_run(log, command)
     if retval.cr_exit_status and not ignore_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = %d, stdout = [%s], stderr = [%s]",
-                     command, host.sh_hostname,
-                     retval.cr_exit_status, retval.cr_stdout,
-                     retval.cr_stderr)
+        log_func("failed to run command [%s] on host [%s], "
+                 "ret = %d, stdout = [%s], stderr = [%s]",
+                 command, host.sh_hostname,
+                 retval.cr_exit_status, retval.cr_stdout,
+                 retval.cr_stderr)
         return None
 
     lines = retval.cr_stdout.splitlines()
     if len(lines) < 1:
-        log.cl_error("no output [%s] of command [%s] on host [%s]",
-                     retval.cr_stdout, command, host.sh_hostname)
+        log_func("no output [%s] of command [%s] on host [%s]",
+                 retval.cr_stdout, command, host.sh_hostname)
         return None
 
     lines = lines[1:]
@@ -548,10 +553,10 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
     for line in lines:
         fields = line.split()
         if len(fields) < field_number + 1:
-            log.cl_error("no field with index [%d] in stdout [%s] of "
-                         "command [%s] on host [%s]",
-                         field_number, retval.cr_stdout, command,
-                         host.sh_hostname)
+            log_func("no field with index [%d] in stdout [%s] of "
+                     "command [%s] on host [%s]",
+                     field_number, retval.cr_stdout, command,
+                     host.sh_hostname)
             return None
         name = fields[0]
         field_dict[name] = fields[field_number]
@@ -560,12 +565,12 @@ def get_table_field(log, host, field_number, command, ignore_status=False):
 
 def get_status_dict(log, host, command, ignore_exit_status=True,
                     expect_failure=False, strip_value=False,
-                    quiet=False):
+                    quiet=False, timeout=None):
     """
     Return status dict from stdout of command with format of "$KEY: $VALUE"
     """
     # pylint: disable=too-many-branches
-    retval = host.sh_run(log, command)
+    retval = host.sh_run(log, command, timeout=timeout)
     if retval.cr_exit_status:
         # Some commands still print fields when return failure
         if ignore_exit_status or expect_failure:
@@ -681,13 +686,7 @@ def print_all_fields(log, all_fields):
     """
     Print all field names
     """
-    output = ""
-    for field_name in all_fields:
-        if output == "":
-            output += field_name
-        else:
-            output += "," + field_name
-    log.cl_stdout(output)
+    log.cl_stdout(utils.list2string(all_fields))
 
 
 def print_list(log, item_list, quick_fields, slow_fields, none_table_fields,
@@ -785,13 +784,14 @@ def check_argument_str(log, name, value):
     """
     check_argument_types(log, name, value, allow_none=False,
                          allow_tuple=False, allow_str=True,
-                         allow_int=True, allow_bool=False)
-    if isinstance(value, int):
+                         allow_float=True, allow_int=True,
+                         allow_bool=False)
+    if isinstance(value, (float, int)):
         value = str(value)
     return value
 
 
-def name_is_valid(value):
+def check_name_is_valid(value):
     """
     Check a name is valid
     """
@@ -804,11 +804,11 @@ def name_is_valid(value):
     return 0
 
 
-def lustre_release_name_is_valid(value):
+def check_lustre_release_name_is_valid(value):
     """
     Check whether Lustre release string is valid.
     """
-    return name_is_valid(value)
+    return check_name_is_valid(value)
 
 
 def check_lustre_release_name(log, name, value):
@@ -816,7 +816,7 @@ def check_lustre_release_name(log, name, value):
     Check the argument is valid Lustre release name. If not, exit.
     """
     value = check_argument_str(log, name, value)
-    if lustre_release_name_is_valid(value):
+    if check_lustre_release_name_is_valid(value):
         log.cl_error("invalid value [%s] for argument "
                      "[--%s]", value, name)
         cmd_exit(log, -1)
@@ -827,7 +827,7 @@ def coral_release_name_is_valid(value):
     """
     Check whether Coral release string is valid.
     """
-    return name_is_valid(value)
+    return check_name_is_valid(value)
 
 
 def check_coral_release_name(log, name, value):
@@ -852,19 +852,15 @@ def check_argument_list_str(log, name, value):
     if isinstance(value, int):
         value = str(value)
     elif isinstance(value, tuple):
-        ret_value = ""
-        for item in value:
-            if ret_value == "":
-                ret_value = str(item)
-            else:
-                ret_value += "," + str(item)
+        ret_value = utils.list2string(value)
         value = ret_value
     return value
 
 
 def check_argument_types(log, name, value, allow_none=False,
                          allow_tuple=False, allow_str=False,
-                         allow_int=False, allow_bool=False):
+                         allow_int=False, allow_float=False,
+                         allow_bool=False):
     """
     Check the argument is str. If not, exit.
     """
@@ -881,6 +877,9 @@ def check_argument_types(log, name, value, allow_none=False,
         return
 
     if allow_int and isinstance(value, int):
+        return
+
+    if allow_float and isinstance(value, float):
         return
 
     if allow_tuple and isinstance(value, tuple):

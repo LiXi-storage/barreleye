@@ -1,5 +1,5 @@
 PYTHON_COMMANDS = \
-	../coral
+	../cbuild
 
 PYTHON_LIB_FILES = $(wildcard ../pycoral/*.py) \
 	../pybuild/build_common.py \
@@ -7,9 +7,15 @@ PYTHON_LIB_FILES = $(wildcard ../pycoral/*.py) \
 	../pybuild/build_doc.py \
 	../pybuild/build_release_info.py \
 	../pybuild/build_version.py \
+	../pybuild/cache_command.py \
 	../pybuild/coral_build.py \
 	../pybuild/coral_command.py \
 	../pybuild/coral.py \
+	../pybuild/e2fsprogs_command.py \
+	../pybuild/lustre_command.py \
+ 	../pybuild/apt_command.py \
+	../pybuild/pip_command.py \
+	../pybuild/yum_command.py \
 	../pybuild/__init__.py
 
 if ENABLE_BARRELE
@@ -24,6 +30,11 @@ PYTHON_LIB_FILES += $(wildcard ../pyclownf/*.py) \
 	../pybuild/build_clownf.py
 
 endif #ENABLE_CLOWNF
+
+if ENABLE_REAF
+PYTHON_COMMANDS += ../reaf
+PYTHON_LIB_FILES += $(wildcard ../pyreaf/*.py)
+endif #ENABLE_REAF
 
 PYTHON_FILES = $(PYTHON_LIB_FILES) $(PYTHON_COMMANDS)
 PYTHON_CHECKS = $(PYTHON_FILES:%=%.python_checked)

@@ -1,5 +1,5 @@
 include(`lustre.m4')dnl
-HEAD(Lustre-master-2.13)
+HEAD(Lustre-2.13)
 <definition>
 	<version>2.13</version>
 	MATH_ENTRY(1, mdt_filesinfo_total, -, mdt_filesinfo_free, mdt_filesinfo_used, filesused, 1)

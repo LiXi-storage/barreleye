@@ -612,7 +612,7 @@ dnl $3: unit of ITEM
 define(`CLIENT_STATS_ITEM_FOUR_BYTES',
 	`ELEMENT($1, item,
 	`NAME($1 + 1, client_stats_$2, 1)
-PATTERN($1 + 1, `$2 +([[:digit:]]+) samples \[$3\] ([[:digit:]]+) ([[:digit:]]+) ([[:digit:]]+)', 0)
+PATTERN($1 + 1, `^$2 +([[:digit:]]+) samples \[$3\] ([[:digit:]]+) ([[:digit:]]+) ([[:digit:]]+)', 0)
 CLIENT_STATS_FIELD($1 + 1, 1, $2_samples, number, derive)
 CLIENT_STATS_FIELD($1 + 1, 2, $2_min, number, gauge)
 CLIENT_STATS_FIELD($1 + 1, 3, $2_max, number, gauge)
@@ -626,7 +626,7 @@ dnl $3: unit of ITEM
 define(`CLIENT_STATS_ITEM_FOUR',
 	`ELEMENT($1, item,
 	`NAME($1 + 1, client_stats_$2, 1)
-PATTERN($1 + 1, `$2 +([[:digit:]]+) samples \[$3\] ([[:digit:]]+) ([[:digit:]]+) ([[:digit:]]+)', 0)
+PATTERN($1 + 1, `^$2 +([[:digit:]]+) samples \[$3\] ([[:digit:]]+) ([[:digit:]]+) ([[:digit:]]+)', 0)
 CLIENT_STATS_FIELD($1 + 1, 1, $2_samples, number, gauge)
 CLIENT_STATS_FIELD($1 + 1, 2, $2_min, number, gauge)
 CLIENT_STATS_FIELD($1 + 1, 3, $2_max, number, gauge)

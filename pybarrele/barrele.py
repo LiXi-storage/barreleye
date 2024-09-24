@@ -1,6 +1,9 @@
 """
 Barreleye is a performance monitoring system for Lustre
 """
+# pylint: disable=too-many-lines
+import json
+import prettytable
 from fire import Fire
 from pycoral import parallel
 from pycoral import cmd_general
@@ -11,7 +14,6 @@ from pycoral import lustre_version
 from pycoral import ssh_host
 from pybarrele import barrele_instance
 from pybarrele import barrele_constant
-from pybarrele import barrele_collectd
 
 
 def init_env(config_fpath, logdir, log_to_file, iso):
@@ -23,7 +25,7 @@ def init_env(config_fpath, logdir, log_to_file, iso):
                                                           logdir,
                                                           log_to_file,
                                                           log_dir_is_default)
-    local_host = ssh_host.get_local_host(ssh=False)
+    local_host = ssh_host.get_local_host(ssh=True)
     if iso is not None:
         iso = cmd_general.check_argument_fpath(log, local_host, iso)
     barreleye_instance = barrele_instance.barrele_init_instance(log, local_host,
@@ -75,6 +77,7 @@ class BarreleClusterCommand():
         cmd_general.cmd_exit(log, rc)
 
 
+
 def barrele_version(barrele_command):
     """
     Print Barreleye version on local host and exit.
@@ -99,7 +102,7 @@ def lustre_version_field(log, lversion, field_name):
     # pylint: disable=unused-argument
     ret = 0
     if field_name == barrele_constant.BARRELE_FIELD_LUSTRE_VERSION:
-        result = lversion.lv_name
+        result = lversion.lv_version_name
     else:
         log.cl_error("unknown field [%s] of Lustre version", field_name)
         result = clog.ERROR_MSG
@@ -161,13 +164,15 @@ def barrele_lustre_versions(barrele_command):
     logdir_is_default = (logdir == barrele_constant.BARRELE_LOG_DIR)
     log, _ = cmd_general.init_env_noconfig(logdir, log_to_file,
                                            logdir_is_default)
-    lustre_versions = []
-    for lversion in lustre_version.LUSTRE_VERSION_DICT.values():
-        fname = barrele_collectd.lustre_version_xml_fname(log, lversion, quiet=True)
-        if fname is None:
-            continue
-        lustre_versions.append(lversion)
-    ret = print_lustre_versions(log, lustre_versions)
+    definition_dir = constant.LUSTRE_VERSION_DEFINITION_DIR
+    local_host = ssh_host.get_local_host(ssh=False)
+    version_db = lustre_version.load_lustre_version_database(log, local_host,
+                                                             definition_dir)
+    if version_db is None:
+        log.cl_error("failed to load version database [%s]",
+                     definition_dir)
+        cmd_general.cmd_exit(log, -1)
+    ret = print_lustre_versions(log, list(version_db.lvd_version_dict.values()))
     cmd_general.cmd_exit(log, ret)
 
 
@@ -735,6 +740,9 @@ class BarreleAgentCommand():
     def ls(self, status=False):
         """
         List all Barreleye agents.
+
+        Please note there might be some agents that are not configured in Barreleye
+        configuration. So this command might not list all of the agents.
         :param status: print the status of agents, default: False.
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
@@ -746,78 +754,187 @@ class BarreleAgentCommand():
         ret = print_agents(log, barreleye_instance, agents, status=status)
         cmd_general.cmd_exit(log, ret)
 
-    def status(self, host):
+    def status(self, host=None, ssh_key=None):
         """
-        Print the status of a agent host.
-        :param host: the name of the agent host.
+        Print the status of an agent host.
+        :param host: The name of the agent host. If not specified,
+            print the status of the agent on local host.
+        :param ssh_key: The path of the private key to use to SSH into the
+            host. Default: None.
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
                                            self._bac_log_to_file,
                                            self._bac_iso)
-        host = cmd_general.check_argument_str(log, "host", host)
-        if host not in barreleye_instance.bei_agent_dict:
-            log.cl_error("host [%s] is not configured as Barreleye agent",
-                         host)
-            cmd_general.cmd_exit(log, -1)
-        agent = barreleye_instance.bei_agent_dict[host]
-        agents = [agent]
-        ret = print_agents(log, barreleye_instance, agents, status=True,
+        local_host = barreleye_instance.bei_local_host
+        if host is not None:
+            host = cmd_general.check_argument_str(log, "host", host)
+        else:
+            host = local_host.sh_hostname
+        if ssh_key is not None:
+            ssh_key = cmd_general.check_argument_fpath(log, local_host, ssh_key)
+        agent = barreleye_instance.bei_get_agent(log, host,
+                                                 ssh_identity_file=ssh_key)
+        ret = print_agents(log, barreleye_instance, [agent], status=True,
                            print_table=False)
         cmd_general.cmd_exit(log, ret)
 
-    def start(self, host):
+    def start(self, host=None, ssh_key=None):
         """
         Start Collectd service on the agent host.
-        :param host: the name of the agent host. Could be a list.
+        :param host: The name of the agent host. Could be a list.
+            If not specified, print the status of the agent on local host.
+        :param ssh_key: The path of the private key to use to SSH into the
+            host. Default: None.
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
                                            self._bac_log_to_file,
                                            self._bac_iso)
-        host = cmd_general.check_argument_str(log, "host", host)
-
-        hostnames = cmd_general.parse_list_string(log, host)
-        if hostnames is None:
-            log.cl_error("host list [%s] is invalid",
-                         host)
-            cmd_general.cmd_exit(log, -1)
-        ret = barreleye_instance.bei_start_agents(log, hostnames)
+        local_host = barreleye_instance.bei_local_host
+        if host is not None:
+            host = cmd_general.check_argument_str(log, "host", host)
+            hostnames = cmd_general.parse_list_string(log, host)
+            if hostnames is None:
+                log.cl_error("host list [%s] is invalid",
+                             host)
+                cmd_general.cmd_exit(log, -1)
+            hostnames = list(dict.fromkeys(hostnames))
+        else:
+            hostnames = [local_host.sh_hostname]
+        if ssh_key is not None:
+            ssh_key = cmd_general.check_argument_fpath(log, local_host, ssh_key)
+        ret = barreleye_instance.bei_agents_start(log, hostnames, ssh_identity_file=ssh_key)
         cmd_general.cmd_exit(log, ret)
 
-    def stop(self, host):
+    def stop(self, host=None, ssh_key=None):
         """
         Stop Collectd service on the agent host.
-        :param host: the name of the agent host. Could be a list.
+        :param host: The name of the agent host. Could be a list.
+            If not specified, print the status of the agent on local host.
+        :param ssh_key: The path of the private key to use to SSH into the
+            host. Default: None.
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
                                            self._bac_log_to_file,
                                            self._bac_iso)
-        host = cmd_general.check_argument_str(log, "host", host)
-
-        hostnames = cmd_general.parse_list_string(log, host)
-        if hostnames is None:
-            log.cl_error("host list [%s] is invalid",
-                         host)
-            cmd_general.cmd_exit(log, -1)
-        ret = barreleye_instance.bei_stop_agents(log, hostnames)
+        local_host = barreleye_instance.bei_local_host
+        if host is not None:
+            host = cmd_general.check_argument_str(log, "host", host)
+            hostnames = cmd_general.parse_list_string(log, host)
+            if hostnames is None:
+                log.cl_error("host list [%s] is invalid",
+                             host)
+                cmd_general.cmd_exit(log, -1)
+            hostnames = list(dict.fromkeys(hostnames))
+        else:
+            hostnames = [local_host.sh_hostname]
+        if ssh_key is not None:
+            ssh_key = cmd_general.check_argument_fpath(log, local_host, ssh_key)
+        ret = barreleye_instance.bei_agents_stop(log, hostnames)
         cmd_general.cmd_exit(log, ret)
 
-    def install(self):
+    def install(self, host=None, ssh_key=None):
         """
         Install the Barreleye agent on the local host.
 
         This command can be run on a host that has not been configured
         as agent in barreleye.conf. It is useful when installing standalone
-        agents on hosts with distro of Ubuntu.
+        agents, e.g. Ubuntu clients.
+        :param host: The name of the agent host. Could be a list. If not specified,
+            it will install the agent on the local host.
+        :param ssh_key: The path of the private key to use to SSH into the
+            host. Default: None.
         """
         log, barreleye_instance = init_env(self._bac_config_fpath,
                                            self._bac_logdir,
                                            self._bac_log_to_file,
                                            self._bac_iso)
-        ret = barreleye_instance.bei_install_agent_locally(log)
+        local_host = barreleye_instance.bei_local_host
+        if host is not None:
+            host = cmd_general.check_argument_str(log, "host", host)
+            hostnames = cmd_general.parse_list_string(log, host)
+            if hostnames is None:
+                log.cl_error("host list [%s] is invalid",
+                             host)
+                cmd_general.cmd_exit(log, -1)
+            hostnames = list(dict.fromkeys(hostnames))
+        else:
+            hostnames = [local_host.sh_hostname]
+        if ssh_key is not None:
+            ssh_key = cmd_general.check_argument_fpath(log, local_host, ssh_key)
+        ret = barreleye_instance.bei_agents_install(log, hostnames,
+                                                    ssh_identity_file=ssh_key)
         cmd_general.cmd_exit(log, ret)
+
+
+def print_query_result(log, barreleye_instance, query):
+    """
+    Print result of Influxdb query.
+    """
+    server = barreleye_instance.bei_barreleye_server
+    influxdb_client = server.bes_influxdb_client
+    serie = influxdb_client.bic_query_serie(log, query)
+    if serie is None:
+        return -1
+
+    json_string = json.dumps(serie, indent=4, separators=(',', ': '))
+    if barrele_constant.INFLUX_COLUMNS not in serie:
+        log.cl_error("missing [%s] in serie result of influxdb: %s",
+                     barrele_constant.INFLUX_COLUMNS, json_string)
+        return -1
+    field_names = serie[barrele_constant.INFLUX_COLUMNS]
+
+    if barrele_constant.INFLUX_VALUES not in serie:
+        log.cl_error("missing [%s] in serie result of influxdb: %s",
+                     barrele_constant.INFLUX_VALUES, json_string)
+        return -1
+    rows = serie[barrele_constant.INFLUX_VALUES]
+
+    table = prettytable.PrettyTable()
+    table.set_style(prettytable.PLAIN_COLUMNS)
+    cmd_general.table_add_field_names(table, field_names)
+    for row in rows:
+        table.add_row(row)
+    cmd_general.table_set_sortby(table, field_names[0])
+    log.cl_stdout(table)
+    #
+    #log.cl_stdout(json_string)
+    return 0
+
+class BarreleInfluxCommand():
+    """
+    Commands to manage the Influxdb of Barreleye.
+    """
+    # pylint: disable=too-few-public-methods
+    def _init(self, config, logdir, log_to_file, iso):
+        # pylint: disable=attribute-defined-outside-init
+        self._bic_config_fpath = config
+        self._bic_logdir = logdir
+        self._bic_log_to_file = log_to_file
+        self._bic_iso = iso
+
+    def query(self, query):
+        """
+        Execute query on Influxdb of Barreleye.
+        :param query: The query to execute.
+
+        Query examples:
+
+        SELECT * FROM \\"memory.buffered.memory\\" ORDER BY time DESC LIMIT 1
+
+        SHOW MEASUREMENTS
+
+        SHOW SERIES
+        """
+        log, barreleye_instance = init_env(self._bic_config_fpath,
+                                           self._bic_logdir,
+                                           self._bic_log_to_file,
+                                           self._bic_iso)
+        query = cmd_general.check_argument_str(log, "query", query)
+        rc = print_query_result(log, barreleye_instance, query)
+        cmd_general.cmd_exit(log, rc)
 
 
 class BarreleCommand():
@@ -835,6 +952,7 @@ class BarreleCommand():
     agent = BarreleAgentCommand()
     server = BarreleServerCommand()
     lustre_versions = barrele_lustre_versions
+    influx = BarreleInfluxCommand()
 
     def __init__(self, config=barrele_constant.BARRELE_CONFIG,
                  log=barrele_constant.BARRELE_LOG_DIR,
@@ -848,6 +966,7 @@ class BarreleCommand():
         self.cluster._init(config, log, debug, iso)
         self.agent._init(config, log, debug, iso)
         self.server._init(config, log, debug, iso)
+        self.influx._init(config, log, debug, iso)
 
 
 def main():

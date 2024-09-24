@@ -5,6 +5,7 @@ import os
 import traceback
 from pybuild import build_common
 from pybuild import build_consul
+from pybuild import build_reaf
 from pycoral import constant
 from pycoral import clog
 from pycoral import cmd_general
@@ -20,15 +21,16 @@ class CoralClownfPlugin(build_common.CoralPluginType):
     """
     # pylint: disable=too-few-public-methods
     def __init__(self):
+        plugins = [build_reaf.REAF_PLUGIN_NAME]
         packages = [build_consul.CONSUL_PACKAGE_NAME]
-        super().__init__("clownf", is_devel=False, need_lustre_rpms=True,
-                         packages=packages)
+        super().__init__("clownf", is_devel=False, need_pack_lustre=True,
+                         packages=packages,
+                         plugins=plugins)
 
-    def cpt_build_dependent_packages(self, distro):
+    def cpt_build_dependent_packages(self, log, distro):
         """
         Return the RPMs needed to install before building
         """
-        # pylint: disable=unused-argument,no-self-use
         return CLOWNF_BUILD_DEPENDENT_RPMS
 
     def cpt_install_build_dependency(self, log, workspace, host,
@@ -77,23 +79,23 @@ package main
                               constant.CSM_UNSUPPORTED)
             file_object.write("\tCSM_AGAIN = %d\n" % constant.CSM_AGAIN)
             file_object.write("\n")
-            file_object.write("\tCLF_CONSUL_SERVICE_PATH = \"%s\"\n" %
-                              clownf_constant.CLF_CONSUL_SERVICE_PATH)
-            file_object.write("\tCLF_CONSUL_CONFIG_KEY = \"%s\"\n" %
-                              clownf_constant.CLF_CONSUL_CONFIG_KEY)
-            file_object.write("\tCLF_CONSUL_LOCK_KEY = \"%s\"\n" %
-                              clownf_constant.CLF_CONSUL_LOCK_KEY)
-            file_object.write("\tCLF_CONSUL_HOST_PATH = \"%s\"\n" %
-                              clownf_constant.CLF_CONSUL_HOST_PATH)
-            file_object.write("\tCLF_MAX_WATCH_HOST = %d\n" %
-                              clownf_constant.CLF_MAX_WATCH_HOST)
+            file_object.write("\tCLOWNF_CONSUL_SERVICE_PATH = \"%s\"\n" %
+                              clownf_constant.CLOWNF_CONSUL_SERVICE_PATH)
+            file_object.write("\tCLOWNF_CONSUL_CONFIG_KEY = \"%s\"\n" %
+                              clownf_constant.CLOWNF_CONSUL_CONFIG_KEY)
+            file_object.write("\tCLOWNF_CONSUL_LOCK_KEY = \"%s\"\n" %
+                              clownf_constant.CLOWNF_CONSUL_LOCK_KEY)
+            file_object.write("\tCLOWNF_CONSUL_HOST_PATH = \"%s\"\n" %
+                              clownf_constant.CLOWNF_CONSUL_HOST_PATH)
+            file_object.write("\tCLOWNF_MAX_WATCH_HOST = %d\n" %
+                              clownf_constant.CLOWNF_MAX_WATCH_HOST)
             file_object.write("\n")
             file_object.write("\tCLOWNF_CONFIG = \"%s\"\n" %
                               clownf_constant.CLOWNF_CONFIG)
             file_object.write("\tMSG_ALREADY_MOUNTED = \"%s\\n\"\n" %
                               constant.MSG_ALREADY_MOUNTED[:-1])
-            file_object.write("\tCLF_MSG_ALREADY_STARTED = \"%s\\n\"\n" %
-                              clownf_constant.CLF_MSG_ALREADY_STARTED[:-1])
+            file_object.write("\tCLOWNF_MSG_ALREADY_STARTED = \"%s\\n\"\n" %
+                              clownf_constant.CLOWNF_MSG_ALREADY_STARTED[:-1])
             file_object.write(")\n")
     except:
         log.cl_error("exception: %s", traceback.format_exc())
@@ -115,8 +117,8 @@ def update_header(log, path):
     try:
         with open(path, 'w', encoding='utf-8') as file_object:
             file_object.write(head)
-            file_object.write("#ifndef _CLF_CONSTANT_H_\n")
-            file_object.write("#define _CLF_CONSTANT_H_\n")
+            file_object.write("#ifndef _CLOWNF_CONSTANT_H_\n")
+            file_object.write("#define _CLOWNF_CONSTANT_H_\n")
             file_object.write("#define CSM_MOUNTABLE %d\n" %
                               constant.CSM_MOUNTABLE)
             file_object.write("#define CSM_FORCE_REQUIRED %d\n" %
@@ -131,7 +133,7 @@ def update_header(log, path):
                               constant.CSM_AGAIN)
             file_object.write("#define CSM_OCCUPIED %d\n" %
                               constant.CSM_OCCUPIED)
-            file_object.write("#endif /* _CLF_CONSTANT_H_ */\n")
+            file_object.write("#endif /* _CLOWNF_CONSTANT_H_ */\n")
     except:
         log.cl_error("exception: %s", traceback.format_exc())
         return -1

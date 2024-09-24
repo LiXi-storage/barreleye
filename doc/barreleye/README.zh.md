@@ -49,7 +49,7 @@ Barreleye在发行版Lustre-2.12上经过充分测试，共支持以下版本：
 
 在源码目录中运行命令：
 
-`# ./coral build`
+`# ./cbuild build`
 
 注意：
 
@@ -73,7 +73,7 @@ drwxr-xr-x 6 root root    4096 Mar 24 10:21 iso_cache
 drwxr-xr-x 2 root root    4096 Mar 21 20:56 pip
 ```
 
-依赖包的下载地址可以通过`./coral barrele urls`命令获得。
+依赖包的下载地址可以通过`./cbuild barrele urls`命令获得。
 
 # 安装
 
@@ -93,7 +93,7 @@ Updating / installing...
 * 修改Barreleye配置文件：
 
 ```
-# cp /etc/coral/barreleye.conf.example /etc/coral/barreleye.conf
+# cp /etc/coral/example_configs/barreleye.conf /etc/coral/barreleye.conf
 # vi /etc/coral/barreleye.conf
 ```
 

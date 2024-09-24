@@ -1,7 +1,7 @@
 include(`lustre.m4')dnl
-HEAD(Lustre-es6_0)
+HEAD(Lustre-es6_1)
 <definition>
-	<version>es6_0</version>
+	<version>es6_1</version>
 	CLIENT_STATS_MEAN(1, read, usecs)
 	CLIENT_STATS_MEAN(1, write, usecs)
 	CLIENT_STATS_MEAN(1, open, usecs)
@@ -466,7 +466,7 @@ HEAD(Lustre-es6_0)
 						<name>mdt_jobstats</name>
 						<pattern>- +job_id: +(.+)
  +snapshot_time: +.+
-  open: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
+.*\n?.*\n?  open: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   close: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   mknod: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   link: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
@@ -583,7 +583,7 @@ HEAD(Lustre-es6_0)
 						<name>ost_jobstats</name>
 						<pattern>- +job_id: +(.+)
  +snapshot_time: +.+
-  read_bytes: +\{ samples: +([[:digit:]]+), unit: bytes, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+).+ }
+.*\n?.*\n?  read_bytes: +\{ samples: +([[:digit:]]+), unit: bytes, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+).+ }
   write_bytes: +\{ samples: +([[:digit:]]+), unit: bytes, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+).+ }
   read: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
   write: +\{ samples: +([[:digit:]]+), unit: usecs, min: *([[:digit:]]+), max: *([[:digit:]]+), sum: *([[:digit:]]+), sumsq: *([[:digit:]]+) }
@@ -1109,8 +1109,7 @@ HEAD(Lustre-es6_0)
 							<mode>file</mode>
 							<item>
 								<name>ost_ldlm_stats</name>
-								<pattern>snapshot_time             +([[:digit:]]+).+
-granted                   +[[:digit:]]+ samples \[locks\] +([[:digit:]]+).+
+								<pattern>granted                   +[[:digit:]]+ samples \[locks\] +([[:digit:]]+).+
 grant                     +[[:digit:]]+ samples \[locks\] +([[:digit:]]+).+
 cancel                    +[[:digit:]]+ samples \[locks\] +([[:digit:]]+).+
 grant_rate                +[[:digit:]]+ samples \[locks\/s\] +([[:digit:]]+).+
@@ -1119,16 +1118,15 @@ grant_plan                +[[:digit:]]+ samples \[locks\/s\] +([[:digit:]]+).+
 slv                       +[[:digit:]]+ samples \[slv\] +([[:digit:]]+).+
 recalc_freed              +[[:digit:]]+ samples \[locks\] +([[:digit:]]+).+
 recalc_timing             +[[:digit:]]+ samples \[sec\] +([[:digit:]]+).+</pattern>
-								LDLM_STATS_FIELD(8, 1, snapshot_time, number, gauge)
-								LDLM_STATS_FIELD(8, 2, granted, number, gauge)
-								LDLM_STATS_FIELD(8, 3, grant, number, gauge)
-								LDLM_STATS_FIELD(8, 4, cancel, number, gauge)
-								LDLM_STATS_FIELD(8, 5, grant_rate, number, gauge)
-								LDLM_STATS_FIELD(8, 6, cancel_rate, number, gauge)
-								LDLM_STATS_FIELD(8, 7, grant_plan, number, gauge)
-								LDLM_STATS_FIELD(8, 8, slv, number, gauge)
-								LDLM_STATS_FIELD(8, 9, recalc_freed, number, gauge)
-								LDLM_STATS_FIELD(8, 10, recalc_timing, number, gauge)
+								LDLM_STATS_FIELD(8, 1, granted, number, gauge)
+								LDLM_STATS_FIELD(8, 2, grant, number, gauge)
+								LDLM_STATS_FIELD(8, 3, cancel, number, gauge)
+								LDLM_STATS_FIELD(8, 4, grant_rate, number, gauge)
+								LDLM_STATS_FIELD(8, 5, cancel_rate, number, gauge)
+								LDLM_STATS_FIELD(8, 6, grant_plan, number, gauge)
+								LDLM_STATS_FIELD(8, 7, slv, number, gauge)
+								LDLM_STATS_FIELD(8, 8, recalc_freed, number, gauge)
+								LDLM_STATS_FIELD(8, 9, recalc_timing, number, gauge)
 							</item>
 						</entry>
 					</entry>

@@ -71,6 +71,7 @@ def host_lustre_prepare(log, workspace, host, lazy_prepare=False):
     wrapper of lsh_lustre_prepare for parrallism
     """
     return host.lsh_lustre_prepare(log, workspace,
+                                   host.cfh_local_lustre_distr,
                                    lazy_prepare=lazy_prepare)
 
 
@@ -80,12 +81,20 @@ class ClownfHost(lustre.LustreHost
     Host used by clownfish commands
     """
     # pylint: disable=too-few-public-methods
-    def __init__(self, hostname, lustre_dist=None, identity_file=None,
-                 local=False, is_server=False, is_client=False,
-                 ssh_for_local=True, login_name="root"):
-        super().__init__(hostname, lustre_dist=lustre_dist,
+    def __init__(self, hostname, local_lustre_distr=None, identity_file=None,
+                 ssh_port=22, local=False, is_server=False, is_client=False,
+                 ssh_for_local=True, login_name="root",
+                 is_standalone=False, only_consul=False):
+        # Whether the host is standalone
+        self.cfh_is_standalone = is_standalone
+        # Whether the host only runs Consul server/client.
+        self.cfh_only_consul = only_consul
+        # LustreDistribution to install on the host.
+        self.cfh_local_lustre_distr = local_lustre_distr
+        super().__init__(hostname,
                          identity_file=identity_file,
                          local=local,
+                         ssh_port=ssh_port,
                          is_server=is_server,
                          is_client=is_client,
                          ssh_for_local=ssh_for_local,
@@ -97,7 +106,7 @@ class ClownfishInstance():
     This instance saves the global Clownfish information
     """
     # pylint: disable=too-many-instance-attributes
-    # pylint: disable=too-many-public-methods,unused-argument
+    # pylint: disable=too-many-public-methods
     def __init__(self, workspace, config, simple_config, config_fpath, host_dict,
                  stonith_dict, mgs_dict, lustre_dict, consul_cluster, local_host,
                  lustre_distribution_dict, logdir_is_default,
@@ -120,13 +129,13 @@ class ClownfishInstance():
         # All services including MGS/OST/MDT, type: LustreService
         self.ci_service_dict = mgs_dict.copy()
         # Keys are the fsnames, values are instances of LustreFilesystem
-        self.ci_lustre_dict = lustre_dict
+        self.ci_fs_dict = lustre_dict
         # Key is $HOSTNAME:$MNT, value is LustreClient
         self.ci_client_dict = {}
         for lustrefs in lustre_dict.values():
             for service in lustrefs.lf_service_dict.values():
                 service_name = service.ls_service_name
-                if service_name in self.ci_lustre_dict:
+                if service_name in self.ci_fs_dict:
                     continue
                 self.ci_service_dict[service_name] = service
             for client in lustrefs.lf_client_dict.values():
@@ -185,7 +194,7 @@ class ClownfishInstance():
         Return a list of MGS services (including MDT0).
         """
         mgs_serivces = list(self.ci_mgs_dict.values())
-        for lustrefs in self.ci_lustre_dict.values():
+        for lustrefs in self.ci_fs_dict.values():
             if lustrefs.lf_mgs is not None:
                 continue
             mgs_serivces.append(lustrefs.lf_mgs_mdt)
@@ -358,9 +367,9 @@ class ClownfishInstance():
 
         lustre_dir = (self.ci_iso_dir + "/" +
                       constant.CORAL_LUSTRE_RELEASE_BASENAME)
-        e2fsprogs_dir = (self.ci_iso_dir + "/" +
-                         constant.E2FSPROGS_RPM_DIR_BASENAME)
+        e2fsprogs_dir = self.ci_iso_dir + "/" + constant.CORAL_E2FSPROGS_RELEASE_BASENAME
         lustre_dict = lustre.get_lustre_dist(log, self.ci_local_host,
+                                             self.ci_workspace,
                                              lustre_dir, e2fsprogs_dir)
         if lustre_dict is None:
             log.cl_error("some directories are missing under directory [%s] "
@@ -370,10 +379,10 @@ class ClownfishInstance():
             return -1
 
         for host in self.ci_host_dict.values():
-            if host.lsh_lustre_dist is None:
+            if host.cfh_local_lustre_distr is None:
                 log.cl_debug("use default Lustre for host [%s]",
                              host.sh_hostname)
-                host.lsh_lustre_dist = lustre_dict
+                host.cfh_local_lustre_distr = lustre_dict
             else:
                 log.cl_debug("use specific Lustre for host [%s]",
                              host.sh_hostname)
@@ -494,7 +503,7 @@ class ClownfishInstance():
         if ret:
             return -1
 
-        for lustrefs in self.ci_lustre_dict.values():
+        for lustrefs in self.ci_fs_dict.values():
             ret = lustrefs.lf_umount(log)
             if ret:
                 log.cl_error("failed to umount file system [%s]",
@@ -521,8 +530,8 @@ class ClownfishInstance():
                              mgs.ls_service_name)
                 return -1
 
-        for lustrefs in self.ci_lustre_dict.values():
-            ret = self.ci_lustre_mount(log, lustrefs)
+        for lustrefs in self.ci_fs_dict.values():
+            ret = self.ci_fs_mount(log, lustrefs)
             if ret:
                 log.cl_error("failed to mount file system [%s]",
                              lustrefs.lf_fsname)
@@ -530,24 +539,27 @@ class ClownfishInstance():
 
         return 0
 
-    def ci_cluster_format(self, log):
+    def ci_cluster_format(self, log, dryrun=False):
         """
         Format all file system and MGS
         """
-        ret = self.ci_cluster_umount(log)
-        if ret:
-            log.cl_error("failed to umount all Lustre services in the cluster")
-            return ret
+        if dryrun:
+            log.cl_info("[Dry Run] umounting the cluster")
+        else:
+            ret = self.ci_cluster_umount(log)
+            if ret:
+                log.cl_error("failed to umount all Lustre services in the cluster")
+                return ret
 
         for mgs in self.ci_mgs_dict.values():
-            ret = mgs.ls_format(log)
+            ret = mgs.ls_format(log, dryrun=dryrun)
             if ret:
                 log.cl_error("failed to format MGS [%s]",
                              mgs.ls_service_name)
                 return -1
 
-        for lustrefs in self.ci_lustre_dict.values():
-            ret = lustrefs.lf_format(log)
+        for lustrefs in self.ci_fs_dict.values():
+            ret = lustrefs.lf_format(log, dryrun=dryrun)
             if ret:
                 log.cl_error("failed to format file system [%s]",
                              lustrefs.lf_fsname)
@@ -687,13 +699,15 @@ class ClownfishInstance():
                 exit_status = -1
         return exit_status
 
-    def ci_host_prepare(self, log, workspace, hostname, lazy=True):
+    def _ci_host_prepare(self, log, workspace, host, lazy=True):
         """
         Migrate the services on the host out and prepare the host for Lustre
         service
         """
-        host = self.ci_host_dict[hostname]
+        hostname = host.sh_hostname
         if (not host.lsh_is_server) and (not host.lsh_is_client):
+            log.cl_info("host [%s] is neigher a Lustre server or client, do nothing",
+                        hostname)
             return 0
 
         ret = self._ci_init_install_or_prepare(log)
@@ -708,17 +722,46 @@ class ClownfishInstance():
             return ret
 
         ret = host.lsh_lustre_prepare(log, workspace,
+                                      host.cfh_local_lustre_distr,
                                       lazy_prepare=lazy)
         if ret:
             log.cl_error("failed to prepare host [%s] to run Lustre service",
                          hostname)
             return -1
 
-        # Cleanup logs
-        hosts = [host]
-        if self.ci_local_host not in hosts:
-            hosts.append(self.ci_local_host)
-        return self._ci_cleanup_logs(log, hosts)
+        return 0
+
+    def ci_host_prepare(self, log, workspace, hostnames, lazy=True):
+        """
+        Migrate the services on the host out and prepare the host for Lustre
+        service
+        """
+        host_dict = {}
+        for hostname in hostnames:
+            if hostname not in self.ci_host_dict:
+                log.cl_error("host [%s] is not configured",
+                             hostname)
+                return -1
+            host = self.ci_host_dict[hostname]
+            if host in host_dict:
+                continue
+            host_dict[hostname] = host
+
+        log.cl_info("preparing hosts [%s] to run Lustre servers/clients",
+                    utils.list2string(list(host_dict.keys())))
+
+        hosts = list(host_dict.values())
+        for host in hosts:
+            ret = self._ci_host_prepare(log, workspace, host, lazy=lazy)
+            if ret:
+                log.cl_error("failed to prepare host [%s]",
+                             host.sh_hostname)
+                ret = -1
+
+        rc = self._ci_cleanup_logs(log, hosts)
+        if rc:
+            return -1
+        return ret
 
     def ci_host_enable_disable_service(self, log, hostname, service_name,
                                        enable=True):
@@ -741,6 +784,30 @@ class ClownfishInstance():
                          operate, service_name, hostname)
             return -1
         log.cl_info("%sd service [%s] on host [%s]",
+                    operate, service_name, hostname)
+        return 0
+
+    def ci_service_prefer_disprefer_host(self, log, service_name, hostname,
+                                         prefer=True):
+        """
+        Prefer or disprefer to mount a Lustre service on a host
+        """
+        if prefer:
+            operate = "prefer"
+        else:
+            operate = "disprefer"
+        ret = clownf_consul.service_host_prefere_disprefer(log,
+                                                           self.ci_workspace,
+                                                           self.ci_local_host,
+                                                           self.ci_consul_cluster,
+                                                           service_name,
+                                                           hostname,
+                                                           prefer=prefer)
+        if ret:
+            log.cl_error("failed to %s service [%s] on host [%s]",
+                         operate, service_name, hostname)
+            return -1
+        log.cl_info("%sed service [%s] on host [%s]",
                     operate, service_name, hostname)
         return 0
 
@@ -806,6 +873,11 @@ class ClownfishInstance():
                                                           enable=enable)
         if ret:
             return -1
+        if enable:
+            operation = "enabled"
+        else:
+            operation = "disabled"
+        log.cl_info("%s autostart of host [%s]", operation, hostname)
         return 0
 
     def ci_host_autostart_enable(self, log, hostname):
@@ -887,6 +959,9 @@ class ClownfishInstance():
                 log.cl_error("host [%s] is not configured", hostname)
                 return -1
 
+        log.cl_info("starting hosts [%s]",
+                    utils.list2string(hostnames))
+
         rc = 0
         already_started = True
         for hostname in hostnames:
@@ -906,7 +981,7 @@ class ClownfishInstance():
                 rc = -1
         if rc == 0:
             if already_started:
-                log.cl_stdout(clownf_constant.CLF_MSG_ALREADY_STARTED[:-1])
+                log.cl_stdout(clownf_constant.CLOWNF_MSG_ALREADY_STARTED[:-1])
             else:
                 log.cl_stdout("Started")
         return rc
@@ -921,7 +996,7 @@ class ClownfishInstance():
                                               hostname,
                                               consul_hostname=consul_hostname)
 
-    def _ci_host_watching_or_watcher_candidates_hosts(self, log, hostname,
+    def _ci_host_watching_or_watcher_candidates_hosts(self, hostname,
                                                       is_watcher=False):
         """
         Get the host name list that could be watched by the given host,
@@ -941,24 +1016,24 @@ class ClownfishInstance():
                 continue
             if found_myself:
                 candidates.append(name)
-                if len(candidates) >= clownf_constant.CLF_MAX_WATCH_HOST:
+                if len(candidates) >= clownf_constant.CLOWNF_MAX_WATCH_HOST:
                     break
 
         # This is a loop, add the first few hosts to watch list
-        if len(candidates) < clownf_constant.CLF_MAX_WATCH_HOST:
+        if len(candidates) < clownf_constant.CLOWNF_MAX_WATCH_HOST:
             for name in sorted_hostnames:
                 if name == hostname:
                     break
                 candidates.append(name)
-                if len(candidates) >= clownf_constant.CLF_MAX_WATCH_HOST:
+                if len(candidates) >= clownf_constant.CLOWNF_MAX_WATCH_HOST:
                     break
         return candidates
 
-    def ci_host_watcher_candidates(self, log, hostname):
+    def ci_host_watcher_candidates(self, hostname):
         """
         Get the host name list that could watch the given host
         """
-        return self._ci_host_watching_or_watcher_candidates_hosts(log, hostname,
+        return self._ci_host_watching_or_watcher_candidates_hosts(hostname,
                                                                   is_watcher=True)
 
     def ci_host_watcher_dict(self, log, hosts):
@@ -1025,11 +1100,11 @@ class ClownfishInstance():
                 watching_hostnames.append(watching_hostname)
         return 0, watching_hostnames
 
-    def ci_host_watching_candidate_hosts(self, log, hostname):
+    def ci_host_watching_candidate_hosts(self, hostname):
         """
         Get the host name list that could be watched by the given host
         """
-        return self._ci_host_watching_or_watcher_candidates_hosts(log, hostname,
+        return self._ci_host_watching_or_watcher_candidates_hosts(hostname,
                                                                   is_watcher=False)
 
     def ci_host_watching_services(self, log, hostname, consul_hostname=None):
@@ -1053,7 +1128,7 @@ class ClownfishInstance():
                 watching_service_names.append(watching_servicename)
         return 0, watching_service_names
 
-    def ci_host_consul_role(self, log, hostname):
+    def ci_host_consul_role(self, hostname):
         """
         Get the Consul role of the host
         """
@@ -1078,14 +1153,15 @@ class ClownfishInstance():
             for hostname in exclude_hostnames:
                 exclude_dict[hostname] = exclude_reason
 
-        ret, exclude_hostnames = \
-            clownf_consul.service_disabled_hostnames(log,
-                                                     self.ci_consul_cluster,
-                                                     service_name)
-        if ret:
-            log.cl_error("failed to get the disabled hosts of service [%s]",
-                         service_name)
+        service_config = clownf_consul.service_get_config(log,
+                                                          self.ci_consul_cluster,
+                                                          service_name)
+        if service_config is None:
+            log.cl_error("failed to get the config of service [%s]", service_name)
             return -1
+
+        exclude_hostnames = service_config.lsc_disabled_hostnames
+        prefered_hostnames = service_config.lsc_prefered_hostnames
 
         for hostname in exclude_hostnames:
             exclude_dict[hostname] = "disabled in Consul config"
@@ -1098,6 +1174,7 @@ class ClownfishInstance():
             return -1
 
         ret = service.ls_mount(log, selected_hostnames=selected_hostnames,
+                               prefered_hostnames=prefered_hostnames,
                                exclude_dict=exclude_dict, quiet=quiet)
         return ret
 
@@ -1115,7 +1192,7 @@ class ClownfishInstance():
             return -1
         return service.ls_umount(log)
 
-    def ci_lustre_mount(self, log, lustrefs, only_service=False):
+    def ci_fs_mount(self, log, lustrefs, only_service=False):
         """
         Mount services of a Lustre file system.
         This function will check Consul on the hosts that do not allow to
@@ -1161,7 +1238,7 @@ class ClownfishInstance():
 
         return 0
 
-    def ci_lustre_umount(self, log, lustrefs, force=False):
+    def ci_fs_umount(self, log, lustrefs, force=False):
         """
         Umount lustre file system.
         This function will check whether autostart is enabled for any service.
@@ -1179,47 +1256,41 @@ class ClownfishInstance():
             return ret
         return 0
 
-    def ci_lustre_format(self, log, lustrefs, force=False):
+    def ci_fs_format(self, log, lustrefs, force=False, dryrun=False):
         """
         Format services of a Lustre file system.
         """
         fsname = lustrefs.lf_fsname
         if ((not force) and (lustrefs.lf_mgs is not None) and
-                (len(lustrefs.lf_mgs.lmgs_filesystems) > 1)):
-            log.cl_error("abort formatting file system [%s] because MGT [%s] "
-                         "is shared by another file system",
-                         fsname, lustrefs.lf_mgs.ls_service_name)
-            return -1
+            (len(lustrefs.lf_mgs.lmgs_filesystems) > 1)):
+            if dryrun:
+                log.cl_info("[Dry Run] formatting file system [%s] even MGT [%s] "
+                            "is shared by another file system",
+                            fsname, lustrefs.lf_mgs.ls_service_name)
+            else:
+                log.cl_error("abort formatting file system [%s] because MGT [%s] "
+                             "is shared by another file system",
+                             fsname, lustrefs.lf_mgs.ls_service_name)
+                return -1
 
-        if self.ci_lustre_umount(log, lustrefs, force=force):
-            return -1
+        if dryrun:
+            log.cl_info("[Dry Run] umounting file system [%s]",
+                        fsname)
+        else:
+            ret = self.ci_fs_umount(log, lustrefs, force=force)
+            if ret:
+                return -1
 
-        return lustrefs.lf_format(log, format_mgt=force)
+        return lustrefs.lf_format(log, format_mgt=True, dryrun=dryrun)
 
     def ci_lustre_name2service(self, log, service_name):
         """
         Return the service by searching the name
         """
-        if service_name in self.ci_mgs_dict:
-            service = self.ci_mgs_dict[service_name]
-        else:
-            fields = service_name.split("-")
-            if len(fields) != 2:
-                log.cl_error("unexpected service name [%s]", service_name)
-                return None
-
-            fsname = fields[0]
-            if fsname not in self.ci_lustre_dict:
-                log.cl_error("Lustre file system with name [%s] is not configured",
-                             fsname)
-                return None
-            lustrefs = self.ci_lustre_dict[fsname]
-            if service_name not in lustrefs.lf_service_dict:
-                log.cl_error("service [%s] is not configured for Lustre [%s]",
-                             service_name, fsname)
-                return None
-            service = lustrefs.lf_service_dict[service_name]
-        return service
+        if service_name not in self.ci_service_dict:
+            log.cl_error("service [%s] is not configured", service_name)
+            return None
+        return self.ci_service_dict[service_name]
 
     def ci_lustre_service_mount(self, log, service_name):
         """
@@ -1252,7 +1323,7 @@ class ClownfishInstance():
         log.cl_debug("umounted service [%s]", service_name)
         return 0
 
-    def _ci_lustre_autostart_enable_disable(self, log, lustrefs, enable=True):
+    def _ci_fs_autostart_enable_disable(self, log, lustrefs, enable=True):
         """
         Enable or disable autostart of all services/hosts in a Lustre file
         system
@@ -1270,33 +1341,24 @@ class ClownfishInstance():
             return -1
         return 0
 
-    def ci_lustre_autostart_enable(self, log, lustrefs):
+    def ci_fs_autostart_enable(self, log, lustrefs):
         """
         Enable autostart of all services/hosts in a Lustre file system
         """
-        return self._ci_lustre_autostart_enable_disable(log, lustrefs,
+        return self._ci_fs_autostart_enable_disable(log, lustrefs,
                                                         enable=True)
 
-    def ci_lustre_autostart_disable(self, log, lustrefs):
+    def ci_fs_autostart_disable(self, log, lustrefs):
         """
         Disable autostart of all services/hosts in a Lustre file system
         """
-        return self._ci_lustre_autostart_enable_disable(log, lustrefs,
+        return self._ci_fs_autostart_enable_disable(log, lustrefs,
                                                         enable=False)
 
-    def ci_cluster_install(self, log, iso=None, hosts=None):
+    def _ci_hosts_install(self, log, hosts):
         """
-        Install Clownfish and Consul on all host (could include localhost)
-        Lustre RPMs will not be installed on hosts. Lustre service will not be affected.
+        Install the cluster normally before starting up Consul cluster.
         """
-        # pylint: disable=too-many-branches
-        if hosts is None:
-            hosts = list(self.ci_host_dict.values())
-        ret = self._ci_init_install_or_prepare(log, iso=iso)
-        if ret:
-            log.cl_error("failed to prepare to install cluster")
-            return -1
-
         rpms = constant.CORAL_DEPENDENT_RPMS + clownf_constant.CLOWNF_DEPENDENT_RPMS
 
         ret = install_common.install_rpms_from_iso(log, self.ci_workspace,
@@ -1317,69 +1379,111 @@ class ClownfishInstance():
             send_fpath_dict[fpath] = fpath
             fpath = distribution.ldis_e2fsprogs_rpm_dir
             send_fpath_dict[fpath] = fpath
-        need_backup_fpaths = []
         install_cluster = \
-            install_common.CoralInstallationCluster(self.ci_workspace,
-                                                    self.ci_local_host,
-                                                    self.ci_iso_dir)
-        install_cluster.cic_add_hosts(hosts,
-                                      [],
-                                      rpms,
-                                      send_fpath_dict,
-                                      need_backup_fpaths,
-                                      coral_reinstall=True)
+            install_common.get_cluster(log, self.ci_workspace,
+                                       self.ci_local_host,
+                                       self.ci_iso_dir)
+        if install_cluster is None:
+            log.cl_error("failed to init installation cluster")
+            return -1
+        ret = install_cluster.cic_hosts_add(log, hosts,
+                                            package_names=rpms,
+                                            send_fpath_dict=send_fpath_dict)
+        if ret:
+            return -1
         ret = install_cluster.cic_install(log)
         if ret:
-            log.cl_error("failed to install dependent RPMs on all hosts of "
-                         "the cluster")
+            log.cl_error("failed to install on the hosts")
             return -1
+        return 0
+
+    def _ci_hosts_agent_restart_and_enable(self, log, hosts):
+        """
+        Start the normal hosts after starting up Consul cluster.
+        """
+        # pylint: disable=no-self-use
+        for host in hosts:
+            ret = self._ci_host_agent_restart_and_enable(log, host)
+            if ret:
+                return -1
+        return 0
+
+    def _ci_cluster_install_consul_only(self, log, hosts):
+        """
+        Install the Consul-only hosts.
+        """
+        # pylint: disable=no-self-use
+        uninstall_package_names = ["coral-clownfish"]
+        install_iso_package_patterns = ["coral-clownfish-*.rpm"]
+        send_relative_path_patterns = ["Packages/coral-clownfish-*",
+                                       "consul_*.zip"]
+        install_cluster = \
+            install_common.get_cluster(log, self.ci_workspace,
+                                       self.ci_local_host,
+                                       self.ci_iso_dir)
+        if install_cluster is None:
+            log.cl_error("failed to init installation cluster")
+            return -1
+        ret = install_cluster.cic_hosts_add(log, hosts,
+                                            coral_reinstall=False,
+                                            disable_selinux=False,
+                                            disable_firewalld=False,
+                                            change_sshd_max_startups=False,
+                                            config_rsyslog=False,
+                                            send_iso_dir=False,
+                                            send_relative_path_patterns=send_relative_path_patterns,
+                                            uninstall_package_names=uninstall_package_names,
+                                            install_iso_package_patterns=install_iso_package_patterns)
+        if ret:
+            return -1
+        ret = install_cluster.cic_install(log)
+        if ret:
+            log.cl_error("failed to install the Consul-only cluster")
+            return -1
+        return 0
+
+    def ci_cluster_install(self, log, iso=None, hosts=None):
+        """
+        Install Clownfish and Consul on all host (could include localhost)
+        Lustre RPMs will not be installed on hosts. Lustre service will not be affected.
+        """
+        # pylint: disable=too-many-branches
+        ret = self._ci_init_install_or_prepare(log, iso=iso)
+        if ret:
+            log.cl_error("failed to prepare to install cluster")
+            return -1
+
+        if hosts is None:
+            hosts = list(self.ci_host_dict.values())
+
+        normal_hosts = []
+        only_consul_hosts = []
+        for host in hosts:
+            # Do not install Consul-only hosts
+            if host.cfh_only_consul:
+                only_consul_hosts.append(host)
+            else:
+                normal_hosts.append(host)
+        if len(normal_hosts) > 0:
+            ret = self._ci_hosts_install(log, normal_hosts)
+            if ret:
+                log.cl_error("failed to install Clownfish on normal hosts")
+                return -1
+        if len(only_consul_hosts) > 0:
+            ret = self._ci_cluster_install_consul_only(log, only_consul_hosts)
+            if ret:
+                log.cl_error("failed to install Consul-only hosts")
+                return -1
 
         ret = self._ci_consul_init(log, force=False, install=True)
         if ret:
-            log.cl_error("failed to install Consul")
+            log.cl_error("failed to initialize Consul")
             return -1
 
-        for host in hosts:
-            log.cl_info("starting clownf_agent on host [%s]",
-                        host.sh_hostname)
-            command = ("systemctl daemon-reload")
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-            # Need to stop service, otherwise the running agent might not
-            # notice that the clownfish.conf has been changed.
-            ret = host.sh_service_stop(log, "clownf_agent")
-            if ret != 0:
-                log.cl_error("failed to stop clownf_agent service on host [%s]",
-                             host.sh_hostname)
-                return -1
-
-            ret = host.sh_service_start(log, "clownf_agent")
-            if ret != 0:
-                log.cl_error("failed to start clownf_agent service on host [%s]",
-                             host.sh_hostname)
-                return -1
-
-            log.cl_info("configuring autostart of clownf_agent on host [%s]",
-                        host.sh_hostname)
-            command = "systemctl enable clownf_agent"
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+        if len(normal_hosts) > 0:
+            ret = self._ci_hosts_agent_restart_and_enable(log, normal_hosts)
+            if ret:
+                log.cl_error("failed to start Clownfish on normal hosts")
                 return -1
 
         # Cleanup logs
@@ -1397,11 +1501,9 @@ class ClownfishInstance():
                                                  service_name,
                                                  consul_hostname=consul_hostname)
 
-    def ci_service_watcher_candidates(self, log, service):
+    def ci_service_watcher_candidates(self, service):
         """
-        Get the candidate watcher hostnames of the service
-
-        If not exist, return (0, None). Return (negative, None) on error.
+        Get the candidate watcher hostnames of the service.
         """
         # pylint: disable=no-self-use
         hostnames = []
@@ -1409,9 +1511,9 @@ class ClownfishInstance():
             host = instance.lsi_host
             hostname = host.sh_hostname
             hostnames.append(hostname)
-        return 0, hostnames
+        return hostnames
 
-    def ci_host_watching_candidate_services(self, log, host):
+    def ci_host_watching_candidate_services(self, host):
         """
         Get the candiadte service names that could be watched by the given
         host
@@ -1430,10 +1532,16 @@ class ClownfishInstance():
             log.cl_error("Lustre service [%s] does not exist",
                          service_name)
             return -1
-        return clownf_consul.service_autostart_check_enabled(log,
-                                                             self.ci_consul_cluster,
-                                                             service_name,
-                                                             consul_hostname=consul_hostname)
+        config = clownf_consul.service_get_config(log, self.ci_consul_cluster,
+                                                  service_name,
+                                                  consul_hostname=consul_hostname)
+        if config is None:
+            log.cl_error("failed to get runtime config of Lustre service [%s]",
+                         service_name)
+            return -1
+        if config.lsc_autostart:
+            return 1
+        return 0
 
     def ci_service_host_check_enabled(self, log, service_name, hostname,
                                       consul_hostname=None):
@@ -1493,12 +1601,12 @@ class ClownfishInstance():
         """
         service_name = service.ls_service_name
 
-        ret, exclude_hostnames = \
+        exclude_hostnames = \
             clownf_consul.service_disabled_hostnames(log,
                                                      self.ci_consul_cluster,
                                                      service_name,
                                                      consul_hostname=consul_hostname)
-        if ret:
+        if exclude_hostnames is None:
             log.cl_error("failed to get the disabled hosts of service [%s]",
                          service_name)
             return None
@@ -1530,6 +1638,43 @@ class ClownfishInstance():
         return self._ci_service_enabled_disabled_hostnames(log, service,
                                                            enable=False)
 
+    def ci_service_host_check_prefered(self, log, service_name, hostname,
+                                      consul_hostname=None):
+        """
+        Return 1 if the service is prefered to be mounted on host, 0 if not.
+        Negative on error.
+        """
+        service = self.ci_lustre_name2service(log, service_name)
+        if service is None:
+            log.cl_error("Lustre service [%s] does not exist",
+                         service_name)
+            return -1
+        return clownf_consul.service_host_check_prefered(log,
+                                                        self.ci_consul_cluster,
+                                                        service_name,
+                                                        hostname,
+                                                        consul_hostname=consul_hostname)
+
+    def ci_service_prefered_hostnames(self, log, service, consul_hostname=None):
+        """
+        Return hostnames that prefer to mount of the service
+        """
+        service_name = service.ls_service_name
+        prefered_hostnames = \
+            clownf_consul.service_prefered_hostnames(log, self.ci_consul_cluster,
+                                                     service_name,
+                                                     consul_hostname=consul_hostname)
+        if prefered_hostnames is None:
+            log.cl_error("failed to get the prefered hosts of service [%s]",
+                         service_name)
+            return None
+        hostnames = []
+        for instance in service.ls_instance_dict.values():
+            hostname = instance.lsi_host.sh_hostname
+            if hostname in prefered_hostnames:
+                hostnames.append(hostname)
+        return hostnames
+
     def ci_host_check_operating(self, log, host):
         """
         Whether the host is running operation commands (not include clownf_agent)
@@ -1550,7 +1695,7 @@ class ClownfishInstance():
         clownf_pids = retval.cr_stdout.splitlines()
 
         clownf_agent_pids = []
-        command = "pgrep clownf_agent"
+        command = "pgrep %s" % clownf_constant.CLONWF_AGENT_SERVICE_NAME
         retval = host.sh_run(log, command)
         if (retval.cr_exit_status == 1 and
                 retval.cr_stdout == ""):
@@ -1588,7 +1733,8 @@ class ClownfishInstance():
         If true, return 1, if false, return 0. Return negative on error.
         """
         # pylint: disable=no-self-use
-        command = "ps aux | grep clownf_agent | grep -v grep"
+        command = ("ps aux | grep %s | grep -v grep" %
+                   clownf_constant.CLONWF_AGENT_SERVICE_NAME)
         retval = host.sh_run(log, command)
         if (retval.cr_exit_status == 1 and
                 retval.cr_stdout == ""):
@@ -1660,22 +1806,6 @@ class ClownfishInstance():
         log.cl_info("log saved to [%s] on local host [%s]", self.ci_workspace,
                     self.ci_local_host.sh_hostname)
         return ret
-
-    def ci_clownf_agent_stop(self, log):
-        """
-        Stop all clownf_agents in the whole cluster
-        """
-        for host in self.ci_host_dict.values():
-            command = "systemctl stop clownf_agent"
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command, host.sh_hostname,
-                             retval.cr_exit_status, retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-        return 0
 
     def ci_is_symmetric(self, log):
         """
@@ -1749,74 +1879,190 @@ class ClownfishInstance():
                 return 0
         return 1
 
+    def _ci_host_agent_restart_and_enable(self, log, host):
+        """
+        Start the agent.
+        """
+        # pylint: disable=no-self-use
+        service_name = clownf_constant.CLONWF_AGENT_SERVICE_NAME
+        log.cl_info("restarting service [%s] on host [%s]",
+                    service_name, host.sh_hostname)
+        command = ("systemctl daemon-reload")
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        ret = host.sh_service_restart(log, service_name)
+        if ret:
+            log.cl_error("failed to restart service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+
+        ret = host.sh_service_enable(log, service_name)
+        if ret:
+            log.cl_error("failed to start service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        return 0
+
+    def ci_host_agent_stop(self, log, hostname):
+        """
+        Stop the agent.
+        """
+        if hostname not in self.ci_host_dict:
+            log.cl_error("host [%s] is not configured",
+                         hostname)
+            return -1
+
+        host = self.ci_host_dict[hostname]
+        service_name = clownf_constant.CLONWF_AGENT_SERVICE_NAME
+        ret = host.sh_service_stop(log, service_name)
+        if ret:
+            log.cl_error("failed to stop service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+
+        ret = host.sh_service_disable(log, service_name)
+        if ret:
+            log.cl_error("failed to disable service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        log.cl_info("stopped and disabled service [%s] on host [%s]",
+                    service_name, host.sh_hostname)
+        return 0
+
+    def ci_host_agents_stop(self, log):
+        """
+        Stop the all the agents.
+        """
+        rc = 0
+        for hostname in self.ci_host_dict:
+            ret = self.ci_host_agent_stop(log, hostname)
+            if ret:
+                log.cl_error("failed to stop agent on host [%s]",
+                             hostname)
+                rc = -1
+        return rc
+
+    def ci_host_agent_start(self, log, hostname):
+        """
+        Start the agent.
+        """
+        if hostname not in self.ci_host_dict:
+            log.cl_error("host [%s] is not configured",
+                         hostname)
+            return -1
+
+        host = self.ci_host_dict[hostname]
+        service_name = clownf_constant.CLONWF_AGENT_SERVICE_NAME
+        log.cl_info("starting service [%s] on host [%s]", service_name,
+                    host.sh_hostname)
+        ret = host.sh_service_start_enable(log, service_name,
+                                           restart=False)
+        if ret:
+            log.cl_error("failed to start service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        return 0
+
+    def ci_host_agents_start(self, log):
+        """
+        Start the all the agents.
+        """
+        rc = 0
+        for hostname in self.ci_host_dict:
+            ret = self.ci_host_agent_start(log, hostname)
+            if ret:
+                log.cl_error("failed to start agent on host [%s]",
+                             hostname)
+                rc = -1
+        return rc
+
 
 
 def parse_consul_server_config(log, config_fpath, consul_config, host_dict,
+                               all_host_dict,
                                simple_config):
     """
     Parse the config of Consul server
     """
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-branches
     consul_servers = {}
     consul_server_configs = utils.config_value(consul_config,
-                                               clownf_constant.CLF_SERVERS)
+                                               clownf_constant.CLOWNF_SERVERS)
     if consul_server_configs is None:
         log.cl_error("no [%s] is configured in Consul section",
-                     clownf_constant.CLF_SERVERS)
+                     clownf_constant.CLOWNF_SERVERS)
         return None
-    # CLF_SERVERS of CLF_CONSUL is nontrivial. CLF_HOSTNAME and CLF_BIND_ADDR
+    # CLOWNF_SERVERS of CLOWNF_CONSUL is nontrivial. CLOWNF_HOSTNAME and CLOWNF_BIND_ADDR
     # could be lists.
     simple_consul_server_configs = []
-    simple_consul_config = simple_config[clownf_constant.CLF_CONSUL]
-    simple_consul_config[clownf_constant.CLF_SERVERS] = simple_consul_server_configs
+    simple_consul_config = simple_config[clownf_constant.CLOWNF_CONSUL]
+    simple_consul_config[clownf_constant.CLOWNF_SERVERS] = simple_consul_server_configs
 
     for consul_server_config in consul_server_configs:
         hostname_config = utils.config_value(consul_server_config,
-                                             clownf_constant.CLF_HOSTNAME)
+                                             clownf_constant.CLOWNF_HOSTNAME)
         if hostname_config is None:
             log.cl_error("no [%s] is configured in one of Consul servers",
-                         clownf_constant.CLF_HOSTNAME)
+                         clownf_constant.CLOWNF_HOSTNAME)
             return None
 
         hostnames = cmd_general.parse_list_string(log, hostname_config)
         if hostnames is None:
             log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                          hostname_config,
-                         clownf_constant.CLF_HOSTNAME, config_fpath)
+                         clownf_constant.CLOWNF_HOSTNAME, config_fpath)
             return None
 
         bind_addr_config = utils.config_value(consul_server_config,
-                                              clownf_constant.CLF_BIND_ADDR)
+                                              clownf_constant.CLOWNF_BIND_ADDR)
         if bind_addr_config is None:
             log.cl_error("no [%s] is configured in one of Consul servers",
-                         clownf_constant.CLF_BIND_ADDR)
+                         clownf_constant.CLOWNF_BIND_ADDR)
             return None
 
         bind_addrs = cmd_general.parse_list_string(log, bind_addr_config)
         if bind_addrs is None:
             log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                          bind_addr_config,
-                         clownf_constant.CLF_BIND_ADDR, config_fpath)
+                         clownf_constant.CLOWNF_BIND_ADDR, config_fpath)
             return None
 
         if len(bind_addrs) != len(hostnames):
             log.cl_error("the number of [%s] should be equal to the "
                          "number of [%s]",
-                         clownf_constant.CLF_BIND_ADDR,
-                         clownf_constant.CLF_HOSTNAME)
+                         clownf_constant.CLOWNF_BIND_ADDR,
+                         clownf_constant.CLOWNF_HOSTNAME)
             return None
 
         index_number = 0
         for hostname in hostnames:
-            if hostname not in host_dict:
-                log.cl_error("host [%s] is configured as Consul server, "
-                             "but not as a non-standalone host, please "
-                             "correct file [%s]",
-                             hostname, config_fpath)
-                return None
+            if hostname in host_dict:
+                host = host_dict[hostname]
+            else:
+                if hostname not in all_host_dict:
+                    log.cl_error("missing host configuration for Consul server [%s], "
+                                 "please correct [%s]",
+                                 hostname, config_fpath)
+                    return None
+                host = all_host_dict[hostname]
+                if host.cfh_is_standalone:
+                    log.cl_error("Consul server conflicts with standalone "
+                                 "for host [%s], please correct [%s]",
+                                 hostname, config_fpath)
+                    return None
+                assert host.cfh_only_consul
 
             if hostname in consul_servers:
-                log.cl_error("multiple configurations for host [%s] as Consul server, "
+                log.cl_error("multiple Consul server configurations for host [%s], "
                              "please correct file [%s]",
                              hostname, config_fpath)
                 return None
@@ -1827,79 +2073,88 @@ def parse_consul_server_config(log, config_fpath, consul_config, host_dict,
             index_number += 1
 
             simple_consul_server_config = copy.deepcopy(consul_server_config)
-            simple_consul_server_config[clownf_constant.CLF_HOSTNAME] = hostname
-            simple_consul_server_config[clownf_constant.CLF_BIND_ADDR] = bind_addr
+            simple_consul_server_config[clownf_constant.CLOWNF_HOSTNAME] = hostname
+            simple_consul_server_config[clownf_constant.CLOWNF_BIND_ADDR] = bind_addr
             simple_consul_server_configs.append(simple_consul_server_config)
     return consul_servers
 
 
 def parse_consul_client_config(log, config_fpath, consul_config, host_dict,
+                               all_host_dict,
                                consul_server_dict, simple_config):
     """
     Parse the config of Consul client
     """
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-branches
     consul_clients = {}
 
-    consul_client_configs = utils.config_value(consul_config, clownf_constant.CLF_CLIENTS)
+    consul_client_configs = utils.config_value(consul_config, clownf_constant.CLOWNF_CLIENTS)
     if consul_client_configs is None:
         consul_client_configs = []
         log.cl_debug("no [%s] is configured in Consul section",
-                     clownf_constant.CLF_CLIENTS)
-    # CLF_CLIENTS of CLF_CONSUL is nontrivial. CLF_HOSTNAME and CLF_BIND_ADDR
+                     clownf_constant.CLOWNF_CLIENTS)
+    # CLOWNF_CLIENTS of CLOWNF_CONSUL is nontrivial. CLOWNF_HOSTNAME and CLOWNF_BIND_ADDR
     # could be lists.
     simple_consul_client_configs = []
-    simple_consul_config = simple_config[clownf_constant.CLF_CONSUL]
-    simple_consul_config[clownf_constant.CLF_CLIENTS] = simple_consul_client_configs
+    simple_consul_config = simple_config[clownf_constant.CLOWNF_CONSUL]
+    simple_consul_config[clownf_constant.CLOWNF_CLIENTS] = simple_consul_client_configs
 
     for consul_client_config in consul_client_configs:
         hostname_config = utils.config_value(consul_client_config,
-                                             clownf_constant.CLF_HOSTNAME)
+                                             clownf_constant.CLOWNF_HOSTNAME)
         if hostname_config is None:
             log.cl_error("no [%s] is configured in one of Consul clients",
-                         clownf_constant.CLF_HOSTNAME)
+                         clownf_constant.CLOWNF_HOSTNAME)
             return None
 
         hostnames = cmd_general.parse_list_string(log, hostname_config)
         if hostnames is None:
             log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                          hostname_config,
-                         clownf_constant.CLF_HOSTNAME, config_fpath)
+                         clownf_constant.CLOWNF_HOSTNAME, config_fpath)
             return None
 
         bind_addr_config = utils.config_value(consul_client_config,
-                                              clownf_constant.CLF_BIND_ADDR)
+                                              clownf_constant.CLOWNF_BIND_ADDR)
         if bind_addr_config is None:
             log.cl_error("no [%s] is configured in one of Consul clients",
-                         clownf_constant.CLF_BIND_ADDR)
+                         clownf_constant.CLOWNF_BIND_ADDR)
             return None
 
         bind_addrs = cmd_general.parse_list_string(log, bind_addr_config)
         if bind_addrs is None:
             log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                          bind_addr_config,
-                         clownf_constant.CLF_BIND_ADDR, config_fpath)
+                         clownf_constant.CLOWNF_BIND_ADDR, config_fpath)
             return None
 
         if len(bind_addrs) != len(hostnames):
             log.cl_error("the number of [%s] should be equal to the "
                          "number of [%s]",
-                         clownf_constant.CLF_BIND_ADDR,
-                         clownf_constant.CLF_HOSTNAME)
+                         clownf_constant.CLOWNF_BIND_ADDR,
+                         clownf_constant.CLOWNF_HOSTNAME)
             return None
 
         index_number = 0
         for hostname in hostnames:
-            if hostname not in host_dict:
-                log.cl_error("host [%s] is configured as Consul client, "
-                             "but not as a non-standalone host, please "
-                             "correct file [%s]",
-                             hostname, config_fpath)
-                return None
+            if hostname in host_dict:
+                host = host_dict[hostname]
+            else:
+                if hostname not in all_host_dict:
+                    log.cl_error("missing host configuration for Consul client [%s], "
+                                 "please correct [%s]",
+                                 hostname, config_fpath)
+                    return None
+                host = all_host_dict[hostname]
+                if host.cfh_is_standalone:
+                    log.cl_error("Consul client conflicts with standalone "
+                                 "for host [%s], please correct [%s]",
+                                 hostname, config_fpath)
+                    return None
+                assert host.cfh_only_consul
 
             if hostname in consul_server_dict:
-                log.cl_error("multiple configurations for host with ID [%s] "
-                             "is configured as Consul server/client, "
+                log.cl_error("multiple Consul client configuration for host [%s], "
                              "please correct file [%s]",
                              hostname, config_fpath)
                 return None
@@ -1909,26 +2164,25 @@ def parse_consul_client_config(log, config_fpath, consul_config, host_dict,
                              "please correct file [%s]",
                              hostname, config_fpath)
                 return None
-
-            host = host_dict[hostname]
             bind_addr = bind_addrs[index_number]
             consul_clients[hostname] = consul.ConsulClient(host, bind_addr)
             index_number += 1
 
             simple_consul_client_config = copy.deepcopy(consul_client_config)
-            simple_consul_client_config[clownf_constant.CLF_HOSTNAME] = hostname
-            simple_consul_client_config[clownf_constant.CLF_BIND_ADDR] = bind_addr
+            simple_consul_client_config[clownf_constant.CLOWNF_HOSTNAME] = hostname
+            simple_consul_client_config[clownf_constant.CLOWNF_BIND_ADDR] = bind_addr
             simple_consul_client_configs.append(simple_consul_client_config)
     return consul_clients
 
 
-def parse_consul_config(log, config_fpath, consul_config, host_dict,
-                        simple_config):
+def parse_consul_config(log, local_host, config_fpath, consul_config, host_dict,
+                        all_host_dict, simple_config):
     """
     Parse the config of Consul
     """
     consul_server_dict = parse_consul_server_config(log, config_fpath,
                                                     consul_config, host_dict,
+                                                    all_host_dict,
                                                     simple_config)
     if consul_server_dict is None:
         log.cl_error("failed to parse Consul server section of config")
@@ -1946,6 +2200,7 @@ def parse_consul_config(log, config_fpath, consul_config, host_dict,
 
     consul_client_dict = parse_consul_client_config(log, config_fpath,
                                                     consul_config, host_dict,
+                                                    all_host_dict,
                                                     consul_server_dict,
                                                     simple_config)
     if consul_client_dict is None:
@@ -1953,19 +2208,20 @@ def parse_consul_config(log, config_fpath, consul_config, host_dict,
         return None
 
     datacenter = utils.config_value(consul_config,
-                                    clownf_constant.CLF_DATACENTER)
+                                    clownf_constant.CLOWNF_DATACENTER)
     if datacenter is None:
         log.cl_error("no [%s] is configured in Consul section",
-                     clownf_constant.CLF_DATACENTER)
+                     clownf_constant.CLOWNF_DATACENTER)
         return None
 
     encrypt_key = utils.config_value(consul_config,
-                                     clownf_constant.CLF_ENCRYPT_KEY)
+                                     clownf_constant.CLOWNF_ENCRYPT_KEY)
     if encrypt_key is None:
         log.cl_debug("no [%s] is configured in Consul section",
-                     clownf_constant.CLF_ENCRYPT_KEY)
+                     clownf_constant.CLOWNF_ENCRYPT_KEY)
 
-    consul_cluster = consul.ConsulCluster(datacenter, consul_server_dict,
+    consul_cluster = consul.ConsulCluster(local_host.sh_hostname, datacenter,
+                                          consul_server_dict,
                                           consul_client_dict,
                                           encrypt_key=encrypt_key)
     return consul_cluster
@@ -1979,11 +2235,11 @@ def clownf_parse_libvirt_config(log, config_fpath, libvirt_config,
     """
     libvirt_server_hostname = \
         utils.config_value(libvirt_config,
-                           clownf_constant.CLF_LIBVIRT_SERVER)
+                           clownf_constant.CLOWNF_LIBVIRT_SERVER)
     if libvirt_server_hostname is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_LIBVIRT_SERVER,
-                     clownf_constant.CLF_LIBVIRT,
+                     clownf_constant.CLOWNF_LIBVIRT_SERVER,
+                     clownf_constant.CLOWNF_LIBVIRT,
                      hostname_config)
         return -1
 
@@ -1991,7 +2247,7 @@ def clownf_parse_libvirt_config(log, config_fpath, libvirt_config,
         libvirt_server_dict[hostname] = libvirt_server_hostname
 
     domain_name_config = utils.config_value(libvirt_config,
-                                            clownf_constant.CLF_DOMAIN_NAME)
+                                            clownf_constant.CLOWNF_DOMAIN_NAME)
     if domain_name_config is None:
         for hostname in hostnames:
             domain_name_dict[hostname] = hostname
@@ -2000,9 +2256,9 @@ def clownf_parse_libvirt_config(log, config_fpath, libvirt_config,
     if libvirt_server_hostname is None:
         log.cl_error("host [%s] has [%s] configured as [%s], but "
                      "no [%s] configured",
-                     hostname_config, clownf_constant.CLF_DOMAIN_NAME,
+                     hostname_config, clownf_constant.CLOWNF_DOMAIN_NAME,
                      domain_name_config,
-                     clownf_constant.CLF_LIBVIRT_SERVER)
+                     clownf_constant.CLOWNF_LIBVIRT_SERVER)
         return -1
 
     domain_names = cmd_general.parse_list_string(log,
@@ -2010,14 +2266,14 @@ def clownf_parse_libvirt_config(log, config_fpath, libvirt_config,
     if domain_names is None:
         log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                      domain_name_config,
-                     clownf_constant.CLF_DOMAIN_NAME, config_fpath)
+                     clownf_constant.CLOWNF_DOMAIN_NAME, config_fpath)
         return -1
 
     if len(domain_names) != len(hostnames):
         log.cl_error("the number of [%s] should be equal to the "
                      "number of [%s]",
-                     clownf_constant.CLF_DOMAIN_NAME,
-                     clownf_constant.CLF_HOSTNAME)
+                     clownf_constant.CLOWNF_DOMAIN_NAME,
+                     clownf_constant.CLOWNF_HOSTNAME)
         return -1
 
     index_number = 0
@@ -2036,41 +2292,41 @@ def clownf_parse_ipmi_config(log, local_host, config_fpath, ipmi_config,
     # pylint: disable=too-many-locals
     ipmi_interface = \
         utils.config_value(ipmi_config,
-                           clownf_constant.CLF_IPMI_INTERFACE)
+                           clownf_constant.CLOWNF_IPMI_INTERFACE)
     if ipmi_interface is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_IPMI_INTERFACE,
-                     clownf_constant.CLF_IPMI,
+                     clownf_constant.CLOWNF_IPMI_INTERFACE,
+                     clownf_constant.CLOWNF_IPMI,
                      hostname_config)
         return -1
 
     ipmi_username = \
         utils.config_value(ipmi_config,
-                           clownf_constant.CLF_IPMI_USERNAME)
+                           clownf_constant.CLOWNF_IPMI_USERNAME)
     if ipmi_username is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_IPMI_USERNAME,
-                     clownf_constant.CLF_IPMI,
+                     clownf_constant.CLOWNF_IPMI_USERNAME,
+                     clownf_constant.CLOWNF_IPMI,
                      hostname_config)
         return -1
 
     ipmi_password = \
         utils.config_value(ipmi_config,
-                           clownf_constant.CLF_IPMI_PASSWORD)
+                           clownf_constant.CLOWNF_IPMI_PASSWORD)
     if ipmi_password is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_IPMI_PASSWORD,
-                     clownf_constant.CLF_IPMI,
+                     clownf_constant.CLOWNF_IPMI_PASSWORD,
+                     clownf_constant.CLOWNF_IPMI,
                      hostname_config)
         return -1
 
     ipmi_hostname_config = \
         utils.config_value(ipmi_config,
-                           clownf_constant.CLF_IPMI_HOSTNAME)
+                           clownf_constant.CLOWNF_IPMI_HOSTNAME)
     if ipmi_hostname_config is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_IPMI_HOSTNAME,
-                     clownf_constant.CLF_IPMI,
+                     clownf_constant.CLOWNF_IPMI_HOSTNAME,
+                     clownf_constant.CLOWNF_IPMI,
                      hostname_config)
         return -1
 
@@ -2078,16 +2334,16 @@ def clownf_parse_ipmi_config(log, local_host, config_fpath, ipmi_config,
     if ipmi_hostnames is None:
         log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                      ipmi_hostname_config,
-                     clownf_constant.CLF_IPMI_HOSTNAME, config_fpath)
+                     clownf_constant.CLOWNF_IPMI_HOSTNAME, config_fpath)
         return -1
 
     ipmi_port_config = \
         utils.config_value(ipmi_config,
-                           clownf_constant.CLF_IPMI_PORT)
+                           clownf_constant.CLOWNF_IPMI_PORT)
     if ipmi_port_config is None:
         log.cl_error("no [%s] in [%s] config of host [%s]",
-                     clownf_constant.CLF_IPMI_PORT,
-                     clownf_constant.CLF_IPMI,
+                     clownf_constant.CLOWNF_IPMI_PORT,
+                     clownf_constant.CLOWNF_IPMI,
                      hostname_config)
         return -1
     ipmi_port_config = str(ipmi_port_config)
@@ -2096,24 +2352,24 @@ def clownf_parse_ipmi_config(log, local_host, config_fpath, ipmi_config,
     if ipmi_ports is None:
         log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                      ipmi_port_config,
-                     clownf_constant.CLF_IPMI_PORT, config_fpath)
+                     clownf_constant.CLOWNF_IPMI_PORT, config_fpath)
         return -1
 
     if len(ipmi_hostnames) > 1 and len(ipmi_ports) > 1:
         log.cl_error("both [%s] with value [%s] and [%s] with value [%s] are "
                      "configured as lists",
-                     clownf_constant.CLF_IPMI_HOSTNAME,
+                     clownf_constant.CLOWNF_IPMI_HOSTNAME,
                      ipmi_hostname_config,
-                     clownf_constant.CLF_IPMI_PORT,
+                     clownf_constant.CLOWNF_IPMI_PORT,
                      ipmi_port_config)
         return -1
 
     if len(hostnames) != len(ipmi_hostnames) * len(ipmi_ports):
         log.cl_error("number of [%s] with value [%s] and [%s] with value [%s] "
                      "does not match with hostname [%s]",
-                     clownf_constant.CLF_IPMI_HOSTNAME,
+                     clownf_constant.CLOWNF_IPMI_HOSTNAME,
                      ipmi_hostname_config,
-                     clownf_constant.CLF_IPMI_PORT,
+                     clownf_constant.CLOWNF_IPMI_PORT,
                      ipmi_port_config, hostname_config)
         return -1
 
@@ -2136,7 +2392,8 @@ def clownf_parse_ipmi_config(log, local_host, config_fpath, ipmi_config,
 
 def clownf_init_instance(log, workspace, config, config_fpath,
                          logdir_is_default, iso,
-                         mdt_instance_type=lustre.LustreMDTInstance):
+                         mdt_instance_type=lustre.LustreMDTInstance,
+                         ssh_for_local=True):
     """
     Parse the config and init the instance
     """
@@ -2144,24 +2401,28 @@ def clownf_init_instance(log, workspace, config, config_fpath,
     # pylint: disable=too-many-branches,too-many-statements
     # pylint: disable=bad-option-value,consider-using-get
     simple_config = copy.deepcopy(config)
-    local_host = ssh_host.get_local_host()
+    local_host = ssh_host.get_local_host(ssh=ssh_for_local)
+    target_cpu = local_host.sh_target_cpu(log)
+    if target_cpu is None:
+        log.cl_error("failed to get target CPU of host [%s]", local_host.sh_hostname)
+        return None
 
-    # CLF_FS_DISTRIBUTIONS is trivial
+    # CLOWNF_FS_DISTRIBUTIONS is trivial
     dist_configs = utils.config_value(config,
-                                      clownf_constant.CLF_FS_DISTRIBUTIONS)
+                                      clownf_constant.CLOWNF_FS_DISTRIBUTIONS)
     if dist_configs is None:
         log.cl_debug("no [%s] is configured in the config file [%s]",
-                     clownf_constant.CLF_FS_DISTRIBUTIONS, config_fpath)
+                     clownf_constant.CLOWNF_FS_DISTRIBUTIONS, config_fpath)
         dist_configs = []
 
     # Keys are the distribution IDs, values are LustreDistribution
     lustre_distribution_dict = {}
     for dist_config in dist_configs:
         lustre_distribution_id = utils.config_value(dist_config,
-                                                    clownf_constant.CLF_FS_DISTRIBUTION_ID)
+                                                    clownf_constant.CLOWNF_FS_DISTRIBUTION_ID)
         if lustre_distribution_id is None:
             log.cl_error("no [%s] is configured, please correct file [%s]",
-                         clownf_constant.CLF_FS_DISTRIBUTION_ID, config_fpath)
+                         clownf_constant.CLOWNF_FS_DISTRIBUTION_ID, config_fpath)
             return None
 
         if lustre_distribution_id in lustre_distribution_dict:
@@ -2170,47 +2431,47 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                          lustre_distribution_id, config_fpath)
             return None
 
-        lustre_rpm_dir = utils.config_value(dist_config,
-                                            clownf_constant.CLF_FS_RPM_DIR)
-        if lustre_rpm_dir is None:
+        lustre_release_dir = utils.config_value(dist_config,
+                                                clownf_constant.CLOWNF_LUSTRE_RELEASE_DIR)
+        if lustre_release_dir is None:
             log.cl_error("no [%s] is configured, please correct file [%s]",
-                         clownf_constant.CLF_FS_RPM_DIR, config_fpath)
+                         clownf_constant.CLOWNF_LUSTRE_RELEASE_DIR, config_fpath)
             return None
 
-        lustre_rpm_dir = lustre_rpm_dir.rstrip("/")
+        lustre_release_dir = lustre_release_dir.rstrip("/")
 
-        e2fsprogs_rpm_dir = utils.config_value(dist_config,
-                                               clownf_constant.CLF_E2FSPROGS_RPM_DIR)
-        if e2fsprogs_rpm_dir is None:
+        e2fsprogs_dir = utils.config_value(dist_config,
+                                           clownf_constant.CLOWNF_E2FSPROGS_DIR)
+        if e2fsprogs_dir is None:
             log.cl_error("no [%s] is configured, please correct file [%s]",
-                         clownf_constant.CLF_E2FSPROGS_RPM_DIR, config_fpath)
+                         clownf_constant.CLOWNF_E2FSPROGS_DIR, config_fpath)
             return None
 
-        e2fsprogs_rpm_dir = e2fsprogs_rpm_dir.rstrip("/")
+        e2fsprogs_dir = e2fsprogs_dir.rstrip("/")
 
-        lustre_dist = lustre.LustreDistribution(local_host, lustre_rpm_dir,
-                                                e2fsprogs_rpm_dir)
-        ret = lustre_dist.ldis_prepare(log)
+        lustre_dist = lustre.LustreDistribution(local_host, target_cpu, lustre_release_dir,
+                                                e2fsprogs_dir)
+        ret = lustre_dist.ldis_check(log, local_host, workspace)
         if ret:
-            log.cl_info("failed to prepare Lustre RPMs, installation will fail")
+            log.cl_info("failed to check Lustre RPMs, commands that installs Lustre will fail")
 
         lustre_distribution_dict[lustre_distribution_id] = lustre_dist
 
-    ssh_host_configs = utils.config_value(config, clownf_constant.CLF_HOSTS)
+    ssh_host_configs = utils.config_value(config, clownf_constant.CLOWNF_HOSTS)
     if ssh_host_configs is None:
         log.cl_error("can NOT find [%s] in the config file, "
                      "please correct file [%s]",
-                     clownf_constant.CLF_HOSTS, config_fpath)
+                     clownf_constant.CLOWNF_HOSTS, config_fpath)
         return None
-    # CLF_HOSTS is nontrivial. CLF_HOSTNAME and CLF_DOMAIN_NAME can be
+    # CLOWNF_HOSTS is nontrivial. CLOWNF_HOSTNAME and CLOWNF_DOMAIN_NAME can be
     # lists.
     simple_ssh_host_configs = []
-    simple_config[clownf_constant.CLF_HOSTS] = simple_ssh_host_configs
+    simple_config[clownf_constant.CLOWNF_HOSTS] = simple_ssh_host_configs
 
     host_dict = {}
     # Key is the hostname of VM, Value is the hostname of Libvirt server.
     libvirt_server_dict = {}
-    standalone_host_dict = {}
+    all_host_dict = {}
     # Key is VM's hostname, value is its domain name on the VM server
     domain_name_dict = {}
     # Key is the hostname of VM. Value is IPMIStonithHost
@@ -2218,11 +2479,11 @@ def clownf_init_instance(log, workspace, config, config_fpath,
     for host_config in ssh_host_configs:
         simple_ssh_host_config = copy.deepcopy(host_config)
         hostname_config = utils.config_value(host_config,
-                                             clownf_constant.CLF_HOSTNAME)
+                                             clownf_constant.CLOWNF_HOSTNAME)
         if hostname_config is None:
             log.cl_error("can NOT find [%s] in the config of SSH host "
                          "[%s], please correct file [%s]",
-                         clownf_constant.CLF_HOSTNAME, hostname_config,
+                         clownf_constant.CLOWNF_HOSTNAME, hostname_config,
                          config_fpath)
             return None
 
@@ -2230,21 +2491,29 @@ def clownf_init_instance(log, workspace, config, config_fpath,
         if hostnames is None:
             log.cl_error("[%s] as [%s] is invalid in the config file [%s]",
                          hostname_config,
-                         clownf_constant.CLF_HOSTNAME, config_fpath)
+                         clownf_constant.CLOWNF_HOSTNAME, config_fpath)
             return None
 
         for hostname in hostnames:
-            if hostname in standalone_host_dict or hostname in host_dict:
+            if hostname in all_host_dict:
                 log.cl_error("hostname [%s] is configured for multiple times",
                              hostname)
                 return None
 
+        ssh_port = utils.config_value(host_config,
+                                      clownf_constant.CLOWNF_SSH_PORT)
+        if ssh_port is None:
+            log.cl_debug("no [%s] is configured for host [%s], using 22",
+                         clownf_constant.CLOWNF_SSH_PORT,
+                         hostname_config)
+            ssh_port = 22
+
         lustre_distribution_id = utils.config_value(host_config,
-                                                    clownf_constant.CLF_FS_DISTRIBUTION_ID)
+                                                    clownf_constant.CLOWNF_FS_DISTRIBUTION_ID)
         if lustre_distribution_id is None:
             log.cl_debug("no [%s] is configured for host [%s], using Lustre "
                          "RPMs in the ISO",
-                         clownf_constant.CLF_FS_DISTRIBUTION_ID,
+                         clownf_constant.CLOWNF_FS_DISTRIBUTION_ID,
                          hostname_config)
             lustre_distribution = None
         else:
@@ -2257,23 +2526,23 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             lustre_distribution = lustre_distribution_dict[lustre_distribution_id]
 
         fs_server = utils.config_value(host_config,
-                                       clownf_constant.CLF_FS_SERVER)
+                                       clownf_constant.CLOWNF_FS_SERVER)
         if fs_server is None:
             fs_server = False
 
         fs_client = utils.config_value(host_config,
-                                       clownf_constant.CLF_FS_CLIENT)
+                                       clownf_constant.CLOWNF_FS_CLIENT)
         if fs_client is None:
             fs_client = False
 
         libvirt_config = utils.config_value(host_config,
-                                            clownf_constant.CLF_LIBVIRT)
+                                            clownf_constant.CLOWNF_LIBVIRT)
         ipmi_config = utils.config_value(host_config,
-                                         clownf_constant.CLF_IPMI)
+                                         clownf_constant.CLOWNF_IPMI)
         if libvirt_config is not None and ipmi_config is not None:
             log.cl_error("both [%s] and [%s] are configured for host [%s]",
-                         clownf_constant.CLF_LIBVIRT,
-                         clownf_constant.CLF_IPMI,
+                         clownf_constant.CLOWNF_LIBVIRT,
+                         clownf_constant.CLOWNF_IPMI,
                          hostname_config)
             return None
         if libvirt_config is not None:
@@ -2296,71 +2565,108 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                              hostname_config)
                 return None
 
-        standalone = utils.config_value(host_config, clownf_constant.CLF_STANDALONE)
+        standalone = utils.config_value(host_config,
+                                        clownf_constant.CLOWNF_STANDALONE)
         if standalone is None:
             standalone = False
 
+        only_consul = utils.config_value(host_config,
+                                         clownf_constant.CLOWNF_ONLY_CONSUL)
+        if only_consul is None:
+            only_consul = False
+
         if standalone:
             if fs_server:
-                log.cl_error("host [%s] is configured as standalone, but it is "
-                             "Lustre server, please correct file [%s]",
+                log.cl_error("standalone conflicts with Lustre server for "
+                             "host [%s], please correct file [%s]",
                              hostname_config, config_fpath)
                 return None
             if fs_client:
-                log.cl_error("host [%s] is configured as standalone, but it is "
-                             "Lustre client, please correct file [%s]",
+                log.cl_error("standalone conflicts with Lustre client for "
+                             "host [%s], please correct file [%s]",
                              hostname_config, config_fpath)
                 return None
 
-        if standalone and (libvirt_config is not None):
-            log.cl_error("host [%s] is configured as standalone, but it has "
-                         "[%s] configured, please correct file [%s]",
-                         hostname_config, clownf_constant.CLF_LIBVIRT,
-                         config_fpath)
-            return None
+            if only_consul:
+                log.cl_error("standalone conflicts with Consul only for "
+                             "host [%s], please correct file [%s]",
+                             hostname_config, config_fpath)
+                return None
+
+            if libvirt_config is not None:
+                log.cl_error("standalone conflicts with VM for host [%s], "
+                             "please correct file [%s]",
+                             hostname_config,
+                             config_fpath)
+                return None
+
+        if only_consul:
+            if fs_server:
+                log.cl_error("Consul only conflicts with Lustre server for "
+                             "host [%s], please correct file [%s]",
+                             hostname_config, config_fpath)
+                return None
+            if fs_client:
+                log.cl_error("Consul only conflicts with Lustre client for "
+                             "host [%s], please correct file [%s]",
+                             hostname_config, config_fpath)
+                return None
+            if libvirt_config is not None:
+                log.cl_error("Consul only conflicts with VM for host [%s], "
+                             "please correct file [%s]",
+                             hostname_config,
+                             config_fpath)
+                return None
 
         ssh_identity_file = utils.config_value(host_config,
-                                               clownf_constant.CLF_SSH_IDENTITY_FILE)
+                                               clownf_constant.CLOWNF_SSH_IDENTITY_FILE)
 
         for hostname in hostnames:
             local = hostname == local_host.sh_hostname
 
             host = ClownfHost(hostname,
-                              lustre_dist=lustre_distribution,
+                              local_lustre_distr=lustre_distribution,
                               identity_file=ssh_identity_file,
                               local=local,
+                              ssh_port=ssh_port,
                               is_server=fs_server,
-                              is_client=fs_client)
-            if standalone:
-                standalone_host_dict[hostname] = host
-            else:
+                              is_client=fs_client,
+                              is_standalone=standalone,
+                              only_consul=only_consul,
+                              ssh_for_local=ssh_for_local)
+            if local:
+                # Replace local host, so that ci_local_host has proper fields like
+                # lsh_instance_dict and so on.
+                local_host = host
+            if not standalone:
                 host_dict[hostname] = host
+            all_host_dict[hostname] = host
 
             simple_ssh_host_config = copy.deepcopy(host_config)
-            simple_ssh_host_config[clownf_constant.CLF_HOSTNAME] = hostname
+            simple_ssh_host_config[clownf_constant.CLOWNF_HOSTNAME] = hostname
 
             if hostname in libvirt_server_dict:
                 simple_libvirt_config = {}
-                simple_libvirt_config[clownf_constant.CLF_DOMAIN_NAME] = \
+                simple_libvirt_config[clownf_constant.CLOWNF_DOMAIN_NAME] = \
                     domain_name_dict[hostname]
-                simple_libvirt_config[clownf_constant.CLF_LIBVIRT_SERVER] = \
+                simple_libvirt_config[clownf_constant.CLOWNF_LIBVIRT_SERVER] = \
                     libvirt_server_dict[hostname]
-                simple_ssh_host_config[clownf_constant.CLF_LIBVIRT] = \
+                simple_ssh_host_config[clownf_constant.CLOWNF_LIBVIRT] = \
                     simple_libvirt_config
             if hostname in ipmi_stonith_dict:
                 ipmi_stonith = ipmi_stonith_dict[hostname]
                 simple_ipmi_config = {}
-                simple_ipmi_config[clownf_constant.CLF_IPMI_INTERFACE] = \
+                simple_ipmi_config[clownf_constant.CLOWNF_IPMI_INTERFACE] = \
                     ipmi_stonith.ipmish_interface
-                simple_ipmi_config[clownf_constant.CLF_IPMI_USERNAME] = \
+                simple_ipmi_config[clownf_constant.CLOWNF_IPMI_USERNAME] = \
                     ipmi_stonith.ipmish_username
-                simple_ipmi_config[clownf_constant.CLF_IPMI_PASSWORD] = \
+                simple_ipmi_config[clownf_constant.CLOWNF_IPMI_PASSWORD] = \
                     ipmi_stonith.ipmish_password
-                simple_ipmi_config[clownf_constant.CLF_IPMI_HOSTNAME] = \
+                simple_ipmi_config[clownf_constant.CLOWNF_IPMI_HOSTNAME] = \
                     ipmi_stonith.ipmish_hostname
-                simple_ipmi_config[clownf_constant.CLF_IPMI_PORT] = \
+                simple_ipmi_config[clownf_constant.CLOWNF_IPMI_PORT] = \
                     ipmi_stonith.ipmish_port
-                simple_ssh_host_config[clownf_constant.CLF_IPMI] = \
+                simple_ssh_host_config[clownf_constant.CLOWNF_IPMI] = \
                     simple_ipmi_config
 
             simple_ssh_host_configs.append(simple_ssh_host_config)
@@ -2372,17 +2678,19 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             return None
         domain_name = domain_name_dict[hostname]
         server_host = None
-        if libvirt_server_hostname in host_dict:
-            server_host = host_dict[libvirt_server_hostname]
-        elif libvirt_server_hostname in standalone_host_dict:
-            server_host = standalone_host_dict[libvirt_server_hostname]
-
-        if server_host is None:
-            log.cl_error("host [%s] is configured as libvirt server of host "
+        if libvirt_server_hostname not in all_host_dict:
+            log.cl_error("host [%s] is configured as libvirt server of VM "
                          "[%s], but itself is not configured",
                          libvirt_server_hostname, hostname)
             return None
+
+        server_host = all_host_dict[libvirt_server_hostname]
+
         if hostname not in host_dict:
+            if hostname in all_host_dict:
+                log.cl_error("VM [%s] should not be configured as standalone",
+                             hostname)
+                return None
             log.cl_error("host [%s] is not configured in the cluster",
                          hostname)
             return None
@@ -2400,25 +2708,25 @@ def clownf_init_instance(log, workspace, config, config_fpath,
         ipmi_stonith_host.sth_host = host
         stonith_dict[hostname] = ipmi_stonith_host
 
-    lustre_configs = utils.config_value(config, clownf_constant.CLF_FILESYSTEMS)
+    lustre_configs = utils.config_value(config, clownf_constant.CLOWNF_FILESYSTEMS)
     if lustre_configs is None:
         log.cl_error("no [%s] is configured, please correct file [%s]",
-                     clownf_constant.CLF_FILESYSTEMS, config_fpath)
+                     clownf_constant.CLOWNF_FILESYSTEMS, config_fpath)
         return None
 
-    mgs_configs = utils.config_value(config, clownf_constant.CLF_MGS_LIST)
+    mgs_configs = utils.config_value(config, clownf_constant.CLOWNF_MGS_LIST)
     if mgs_configs is None:
-        log.cl_debug("no [%s] is configured", clownf_constant.CLF_MGS_LIST)
+        log.cl_debug("no [%s] is configured", clownf_constant.CLOWNF_MGS_LIST)
         mgs_configs = []
 
     mgs_dict = {}
     for mgs_config in mgs_configs:
         # Parse MGS configs
-        mgs_id = utils.config_value(mgs_config, clownf_constant.CLF_MGS_ID)
+        mgs_id = utils.config_value(mgs_config, clownf_constant.CLOWNF_MGS_ID)
         if mgs_id is None:
             log.cl_error("no [%s] is configured for a MGS, please correct "
                          "file [%s]",
-                         clownf_constant.CLF_MGS_ID, config_fpath)
+                         clownf_constant.CLOWNF_MGS_ID, config_fpath)
             return None
         ret = lustre.check_mgs_id(log, mgs_id)
         if ret:
@@ -2430,37 +2738,37 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                          mgs_id, config_fpath)
             return None
 
-        backfstype = utils.config_value(mgs_config, clownf_constant.CLF_BACKFSTYPE)
+        backfstype = utils.config_value(mgs_config, clownf_constant.CLOWNF_BACKFSTYPE)
         if backfstype is None:
             log.cl_debug("no [%s] is configured for MGS [%s], using [%s] as "
-                         "default value", clownf_constant.CLF_BACKFSTYPE, mgs_id,
+                         "default value", clownf_constant.CLOWNF_BACKFSTYPE, mgs_id,
                          lustre.BACKFSTYPE_LDISKFS)
             backfstype = lustre.BACKFSTYPE_LDISKFS
 
         zpool_name = None
         if backfstype == lustre.BACKFSTYPE_ZFS:
-            zpool_name = utils.config_value(mgs_config, clownf_constant.CLF_ZPOOL_NAME)
+            zpool_name = utils.config_value(mgs_config, clownf_constant.CLOWNF_ZPOOL_NAME)
             if zpool_name is None:
                 log.cl_error("no [%s] is configured for MGS [%s]",
-                             clownf_constant.CLF_ZPOOL_NAME)
+                             clownf_constant.CLOWNF_ZPOOL_NAME)
                 return None
 
         mgs = lustre.LustreMGS(mgs_id, backfstype, zpool_name=zpool_name)
         mgs_dict[mgs_id] = mgs
 
-        instance_configs = utils.config_value(mgs_config, clownf_constant.CLF_INSTANCES)
+        instance_configs = utils.config_value(mgs_config, clownf_constant.CLOWNF_INSTANCES)
         if instance_configs is None:
             log.cl_error("no [%s] is configured for MGS [%s], please correct "
                          "file [%s]",
-                         clownf_constant.CLF_INSTANCES, mgs_id, config_fpath)
+                         clownf_constant.CLOWNF_INSTANCES, mgs_id, config_fpath)
             return None
 
         for instance_config in instance_configs:
-            hostname = utils.config_value(instance_config, clownf_constant.CLF_HOSTNAME)
+            hostname = utils.config_value(instance_config, clownf_constant.CLOWNF_HOSTNAME)
             if hostname is None:
                 log.cl_error("no host [%s] is configured for instance of MGS "
                              "[%s], please correct file [%s]",
-                             clownf_constant.CLF_HOSTNAME, mgs_id, config_fpath)
+                             clownf_constant.CLOWNF_HOSTNAME, mgs_id, config_fpath)
                 return None
 
             if hostname not in host_dict:
@@ -2471,11 +2779,11 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             lustre_host = host_dict[hostname]
             lustre_host.lsh_is_server = True
 
-            device = utils.config_value(instance_config, clownf_constant.CLF_DEVICE)
+            device = utils.config_value(instance_config, clownf_constant.CLOWNF_DEVICE)
             if device is None:
                 log.cl_error("no [%s] is configured for instance of "
                              "MGS [%s], please correct file [%s]",
-                             clownf_constant.CLF_DEVICE, mgs_id, config_fpath)
+                             clownf_constant.CLOWNF_DEVICE, mgs_id, config_fpath)
                 return None
 
             if backfstype == lustre.BACKFSTYPE_ZFS:
@@ -2493,28 +2801,28 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                                  device, mgs_id, config_fpath)
                     return None
 
-            nid = utils.config_value(instance_config, clownf_constant.CLF_NID)
+            nid = utils.config_value(instance_config, clownf_constant.CLOWNF_NID)
             if nid is None:
                 log.cl_error("no [%s] is configured for instance of "
                              "MGS [%s], please correct file [%s]",
-                             clownf_constant.CLF_NID, mgs_id, config_fpath)
+                             clownf_constant.CLOWNF_NID, mgs_id, config_fpath)
                 return None
 
             zpool_create = None
             if backfstype == lustre.BACKFSTYPE_ZFS:
                 zpool_create = utils.config_value(instance_config,
-                                                  clownf_constant.CLF_ZPOOL_CREATE)
+                                                  clownf_constant.CLOWNF_ZPOOL_CREATE)
                 if zpool_create is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "MGS [%s], please correct file [%s]",
-                                 clownf_constant.CLF_ZPOOL_CREATE, mgs_id, config_fpath)
+                                 clownf_constant.CLOWNF_ZPOOL_CREATE, mgs_id, config_fpath)
                     return None
 
-            mnt = utils.config_value(instance_config, clownf_constant.CLF_MNT)
+            mnt = utils.config_value(instance_config, clownf_constant.CLOWNF_MNT)
             if mnt is None:
                 log.cl_error("no [%s] is configured for instance of "
                              "MGS [%s], please correct file [%s]",
-                             clownf_constant.CLF_MNT, mgs_id, config_fpath)
+                             clownf_constant.CLOWNF_MNT, mgs_id, config_fpath)
                 return None
 
             mgsi = lustre.init_mgs_instance(log, mgs, lustre_host, device,
@@ -2525,10 +2833,10 @@ def clownf_init_instance(log, workspace, config, config_fpath,
     lustre_dict = {}
     for lustre_config in lustre_configs:
         # Parse general configs of Lustre file system
-        fsname = utils.config_value(lustre_config, clownf_constant.CLF_FSNAME)
+        fsname = utils.config_value(lustre_config, clownf_constant.CLOWNF_FSNAME)
         if fsname is None:
             log.cl_error("no [%s] is configured, please correct file [%s]",
-                         clownf_constant.CLF_FSNAME, config_fpath)
+                         clownf_constant.CLOWNF_FSNAME, config_fpath)
             return None
 
         if fsname in lustre_dict:
@@ -2544,10 +2852,10 @@ def clownf_init_instance(log, workspace, config, config_fpath,
         mgs_configured = False
 
         # Parse MGS config
-        mgs_id = utils.config_value(lustre_config, clownf_constant.CLF_MGS_ID)
+        mgs_id = utils.config_value(lustre_config, clownf_constant.CLOWNF_MGS_ID)
         if mgs_id is not None:
             log.cl_debug("[%s] is configured for file system [%s]",
-                         clownf_constant.CLF_MGS_ID, fsname)
+                         clownf_constant.CLOWNF_MGS_ID, fsname)
 
             if mgs_id not in mgs_dict:
                 log.cl_error("no MGS with ID [%s] is configured, please "
@@ -2567,27 +2875,27 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             mgs_configured = True
 
         # Parse MDT configs
-        mdt_configs = utils.config_value(lustre_config, clownf_constant.CLF_MDTS)
+        mdt_configs = utils.config_value(lustre_config, clownf_constant.CLOWNF_MDTS)
         if mdt_configs is None:
             log.cl_error("no [%s] is configured for file system [%s], please "
                          "correct file [%s]",
-                         clownf_constant.CLF_MDTS,
+                         clownf_constant.CLOWNF_MDTS,
                          fsname, config_fpath)
             return None
 
         for mdt_config in mdt_configs:
-            mdt_index = utils.config_value(mdt_config, clownf_constant.CLF_INDEX)
+            mdt_index = utils.config_value(mdt_config, clownf_constant.CLOWNF_INDEX)
             if mdt_index is None:
                 log.cl_error("no [%s] is configured for a MDT of file system "
                              "[%s], please correct file [%s]",
-                             clownf_constant.CLF_INDEX, fsname, config_fpath)
+                             clownf_constant.CLOWNF_INDEX, fsname, config_fpath)
                 return None
 
-            is_mgs = utils.config_value(mdt_config, clownf_constant.CLF_IS_MGS)
+            is_mgs = utils.config_value(mdt_config, clownf_constant.CLOWNF_IS_MGS)
             if is_mgs is None:
                 log.cl_debug("no [%s] is configured for MDT with index [%s] "
                              "of file system [%s], using default value [False]",
-                             clownf_constant.CLF_IS_MGS, mdt_index, fsname)
+                             clownf_constant.CLOWNF_IS_MGS, mdt_index, fsname)
                 is_mgs = False
 
             if is_mgs:
@@ -2598,22 +2906,22 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                     return None
                 mgs_configured = True
 
-            backfstype = utils.config_value(mdt_config, clownf_constant.CLF_BACKFSTYPE)
+            backfstype = utils.config_value(mdt_config, clownf_constant.CLOWNF_BACKFSTYPE)
             if backfstype is None:
                 log.cl_debug("no [%s] is configured for MDT with index [%s] "
                              "of file system [%s], using [%s] as the default "
-                             "value", clownf_constant.CLF_BACKFSTYPE, mdt_index, fsname,
+                             "value", clownf_constant.CLOWNF_BACKFSTYPE, mdt_index, fsname,
                              lustre.BACKFSTYPE_LDISKFS)
                 backfstype = lustre.BACKFSTYPE_LDISKFS
 
             zpool_name = None
             if backfstype == lustre.BACKFSTYPE_ZFS:
                 zpool_name = utils.config_value(mdt_config,
-                                                clownf_constant.CLF_ZPOOL_NAME)
+                                                clownf_constant.CLOWNF_ZPOOL_NAME)
                 if zpool_name is None:
                     log.cl_error("no [%s] is configured for MDT with index "
                                  "[%s] of file system [%s]",
-                                 clownf_constant.CLF_ZPOOL_NAME, mdt_index,
+                                 clownf_constant.CLOWNF_ZPOOL_NAME, mdt_index,
                                  fsname)
                     return None
 
@@ -2622,24 +2930,24 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             if mdt is None:
                 return None
 
-            instance_configs = utils.config_value(mdt_config, clownf_constant.CLF_INSTANCES)
+            instance_configs = utils.config_value(mdt_config, clownf_constant.CLOWNF_INSTANCES)
             if instance_configs is None:
                 log.cl_error("no [%s] is configured for MDT with index "
                              "[%s] of file system [%s], please correct "
                              "file [%s]",
-                             clownf_constant.CLF_INSTANCES,
+                             clownf_constant.CLOWNF_INSTANCES,
                              mdt_index,
                              fsname,
                              config_fpath)
                 return None
 
             for instance_config in instance_configs:
-                hostname = utils.config_value(instance_config, clownf_constant.CLF_HOSTNAME)
+                hostname = utils.config_value(instance_config, clownf_constant.CLOWNF_HOSTNAME)
                 if hostname is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "MDT with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_HOSTNAME, mdt_index,
+                                 clownf_constant.CLOWNF_HOSTNAME, mdt_index,
                                  fsname, config_fpath)
                     return None
 
@@ -2655,12 +2963,12 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                 lustre_host = host_dict[hostname]
                 lustre_host.lsh_is_server = True
 
-                device = utils.config_value(instance_config, clownf_constant.CLF_DEVICE)
+                device = utils.config_value(instance_config, clownf_constant.CLOWNF_DEVICE)
                 if device is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "MDT with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_DEVICE, mdt_index, fsname,
+                                 clownf_constant.CLOWNF_DEVICE, mdt_index, fsname,
                                  config_fpath)
                     return None
 
@@ -2683,34 +2991,34 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                                      config_fpath)
                         return None
 
-                nid = utils.config_value(instance_config, clownf_constant.CLF_NID)
+                nid = utils.config_value(instance_config, clownf_constant.CLOWNF_NID)
                 if nid is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "MDT with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_NID, mdt_index, fsname,
+                                 clownf_constant.CLOWNF_NID, mdt_index, fsname,
                                  config_fpath)
                     return None
 
                 zpool_create = None
                 if backfstype == lustre.BACKFSTYPE_ZFS:
                     zpool_create = utils.config_value(instance_config,
-                                                      clownf_constant.CLF_ZPOOL_CREATE)
+                                                      clownf_constant.CLOWNF_ZPOOL_CREATE)
                     if zpool_create is None:
                         log.cl_error("no [%s] is configured for an instance of "
                                      "MDT with index [%s] of file system [%s], "
                                      "please correct file [%s]",
-                                     clownf_constant.CLF_ZPOOL_CREATE,
+                                     clownf_constant.CLOWNF_ZPOOL_CREATE,
                                      mdt_index, fsname,
                                      config_fpath)
                         return None
 
-                mnt = utils.config_value(instance_config, clownf_constant.CLF_MNT)
+                mnt = utils.config_value(instance_config, clownf_constant.CLOWNF_MNT)
                 if mnt is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "MDT with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_MNT, mdt_index, fsname,
+                                 clownf_constant.CLOWNF_MNT, mdt_index, fsname,
                                  config_fpath)
                     return None
 
@@ -2727,39 +3035,39 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             return None
 
         # Parse OST configs
-        ost_configs = utils.config_value(lustre_config, clownf_constant.CLF_OSTS)
+        ost_configs = utils.config_value(lustre_config, clownf_constant.CLOWNF_OSTS)
         if ost_configs is None:
             log.cl_error("no [%s] is configured for file system [%s], "
                          "please correct file [%s]",
-                         clownf_constant.CLF_OSTS,
+                         clownf_constant.CLOWNF_OSTS,
                          fsname,
                          config_fpath)
             return None
 
         for ost_config in ost_configs:
-            ost_index = utils.config_value(ost_config, clownf_constant.CLF_INDEX)
+            ost_index = utils.config_value(ost_config, clownf_constant.CLOWNF_INDEX)
             if ost_index is None:
                 log.cl_error("no [%s] is configured for an OST of file "
                              "system [%s], please correct file [%s]",
-                             clownf_constant.CLF_INDEX, fsname,
+                             clownf_constant.CLOWNF_INDEX, fsname,
                              config_fpath)
                 return None
 
-            backfstype = utils.config_value(ost_config, clownf_constant.CLF_BACKFSTYPE)
+            backfstype = utils.config_value(ost_config, clownf_constant.CLOWNF_BACKFSTYPE)
             if backfstype is None:
                 log.cl_debug("no [%s] is configured for OST with index [%s] "
                              "of file system [%s], using [%s] as default",
-                             clownf_constant.CLF_BACKFSTYPE, ost_index, fsname,
+                             clownf_constant.CLOWNF_BACKFSTYPE, ost_index, fsname,
                              lustre.BACKFSTYPE_LDISKFS)
                 backfstype = lustre.BACKFSTYPE_LDISKFS
 
             zpool_name = None
             if backfstype == lustre.BACKFSTYPE_ZFS:
-                zpool_name = utils.config_value(ost_config, clownf_constant.CLF_ZPOOL_NAME)
+                zpool_name = utils.config_value(ost_config, clownf_constant.CLOWNF_ZPOOL_NAME)
                 if zpool_name is None:
                     log.cl_error("no [%s] is configured for OST with index "
                                  "[%s] of file system [%s]",
-                                 clownf_constant.CLF_ZPOOL_NAME, ost_index, fsname)
+                                 clownf_constant.CLOWNF_ZPOOL_NAME, ost_index, fsname)
                     return None
 
             ost = lustre.init_ost(log, lustre_fs, ost_index, backfstype,
@@ -2767,21 +3075,21 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             if ost is None:
                 return None
 
-            instance_configs = utils.config_value(ost_config, clownf_constant.CLF_INSTANCES)
+            instance_configs = utils.config_value(ost_config, clownf_constant.CLOWNF_INSTANCES)
             if instance_configs is None:
                 log.cl_error("no [%s] is configured for OST with index [%s] "
                              "of file system [%s], please correct file [%s]",
-                             clownf_constant.CLF_INSTANCES, ost_index, fsname,
+                             clownf_constant.CLOWNF_INSTANCES, ost_index, fsname,
                              config_fpath)
                 return None
 
             for instance_config in instance_configs:
-                hostname = utils.config_value(instance_config, clownf_constant.CLF_HOSTNAME)
+                hostname = utils.config_value(instance_config, clownf_constant.CLOWNF_HOSTNAME)
                 if hostname is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "OST with index [%s] of file system, please "
                                  "correct file [%s]",
-                                 clownf_constant.CLF_HOSTNAME, ost_index, fsname, config_fpath)
+                                 clownf_constant.CLOWNF_HOSTNAME, ost_index, fsname, config_fpath)
                     return None
 
                 if hostname not in host_dict:
@@ -2792,12 +3100,12 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                 lustre_host = host_dict[hostname]
                 lustre_host.lsh_is_server = True
 
-                device = utils.config_value(instance_config, clownf_constant.CLF_DEVICE)
+                device = utils.config_value(instance_config, clownf_constant.CLOWNF_DEVICE)
                 if device is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "OST with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_DEVICE, ost_index, fsname,
+                                 clownf_constant.CLOWNF_DEVICE, ost_index, fsname,
                                  config_fpath)
                     return None
 
@@ -2820,32 +3128,32 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                                      config_fpath)
                         return None
 
-                nid = utils.config_value(instance_config, clownf_constant.CLF_NID)
+                nid = utils.config_value(instance_config, clownf_constant.CLOWNF_NID)
                 if nid is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "OST with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_NID, ost_index, fsname,
+                                 clownf_constant.CLOWNF_NID, ost_index, fsname,
                                  config_fpath)
                     return None
 
                 zpool_create = None
                 if backfstype == lustre.BACKFSTYPE_ZFS:
-                    zpool_create = utils.config_value(instance_config, clownf_constant.CLF_ZPOOL_CREATE)
+                    zpool_create = utils.config_value(instance_config, clownf_constant.CLOWNF_ZPOOL_CREATE)
                     if zpool_create is None:
                         log.cl_error("no [%s] is configured for an instance of "
                                      "OST with index [%s] of file system [%s], "
                                      "please correct file [%s]",
-                                     clownf_constant.CLF_ZPOOL_CREATE, ost_index, fsname,
+                                     clownf_constant.CLOWNF_ZPOOL_CREATE, ost_index, fsname,
                                      config_fpath)
                         return None
 
-                mnt = utils.config_value(instance_config, clownf_constant.CLF_MNT)
+                mnt = utils.config_value(instance_config, clownf_constant.CLOWNF_MNT)
                 if mnt is None:
                     log.cl_error("no [%s] is configured for an instance of "
                                  "OST with index [%s] of file system [%s], "
                                  "please correct file [%s]",
-                                 clownf_constant.CLF_MNT, ost_index, fsname,
+                                 clownf_constant.CLOWNF_MNT, ost_index, fsname,
                                  config_fpath)
                     return None
 
@@ -2856,18 +3164,18 @@ def clownf_init_instance(log, workspace, config, config_fpath,
                     return None
         # Parse client configs
         client_configs = utils.config_value(lustre_config,
-                                            clownf_constant.CLF_CLIENTS)
+                                            clownf_constant.CLOWNF_CLIENTS)
         if client_configs is None:
             log.cl_debug("no [%s] is configured for a Lustre file system",
-                         clownf_constant.CLF_CLIENTS)
+                         clownf_constant.CLOWNF_CLIENTS)
             client_configs = []
 
         for client_config in client_configs:
-            hostname = utils.config_value(client_config, clownf_constant.CLF_HOSTNAME)
+            hostname = utils.config_value(client_config, clownf_constant.CLOWNF_HOSTNAME)
             if hostname is None:
                 log.cl_error("no [%s] is configured for a Lustre client, "
                              "please correct file [%s]",
-                             clownf_constant.CLF_HOSTNAME, config_fpath)
+                             clownf_constant.CLOWNF_HOSTNAME, config_fpath)
                 return None
 
             if hostname not in host_dict:
@@ -2879,11 +3187,11 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             lustre_host = host_dict[hostname]
             lustre_host.lsh_is_client = True
 
-            mnt = utils.config_value(client_config, clownf_constant.CLF_MNT)
+            mnt = utils.config_value(client_config, clownf_constant.CLOWNF_MNT)
             if mnt is None:
                 log.cl_error("no [%s] is configured for a client on host [%s], "
                              "please correct file [%s]",
-                             clownf_constant.CLF_MNT, hostname,
+                             clownf_constant.CLOWNF_MNT, hostname,
                              config_fpath)
                 return None
 
@@ -2892,18 +3200,19 @@ def clownf_init_instance(log, workspace, config, config_fpath,
             if client is None:
                 return None
 
-    consul_config = utils.config_value(config, clownf_constant.CLF_CONSUL)
+    consul_config = utils.config_value(config, clownf_constant.CLOWNF_CONSUL)
     if consul_config is None:
         log.cl_error("no [%s] section is configured",
-                     clownf_constant.CLF_CONSUL)
+                     clownf_constant.CLOWNF_CONSUL)
         return None
     consul_servers = {}
     consul_clients = {}
-    consul_cluster = parse_consul_config(log, config_fpath, consul_config,
-                                         host_dict, simple_config)
+    consul_cluster = parse_consul_config(log, local_host, config_fpath,
+                                         consul_config, host_dict,
+                                         all_host_dict, simple_config)
     if consul_cluster is None:
         log.cl_error("failed to parse [%s] section of config",
-                     clownf_constant.CLF_CONSUL)
+                     clownf_constant.CLOWNF_CONSUL)
         return None
 
     # Key is host ID

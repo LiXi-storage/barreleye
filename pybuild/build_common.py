@@ -61,8 +61,8 @@ class CoralPluginType():
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(self, plugin_name,
                  build_dependent_pips=None, is_devel=True,
-                 need_lustre_rpms=False, need_collectd=False,
-                 install_lustre=False,
+                 need_pack_lustre=False, need_collectd=False,
+                 need_lustre_for_build=False,
                  packages=None,
                  plugins=None):
         # The name of the plugin
@@ -70,15 +70,16 @@ class CoralPluginType():
         # Whether the plugin is only for devel
         self.cpt_is_devel = is_devel
         # Whether Lustre/E2fsprogs RPMs are needed in the ISO
-        self.cpt_need_lustre_rpms = need_lustre_rpms
+        self.cpt_need_pack_lustre = need_pack_lustre
         # Whether Collectd RPMs are needed
         self.cpt_need_collectd = need_collectd
         if build_dependent_pips is None:
             build_dependent_pips = []
-        # The pip packages to install before building
+        # The pip packages to install before building.
+        # Pip package can have the format like "PyInstaller==5.13.2".
         self.cpt_build_dependent_pips = build_dependent_pips
         # Whether install Lustre library RPM for build
-        self.cpt_install_lustre = install_lustre
+        self.cpt_need_lustre_for_build = need_lustre_for_build
         # Package names that this plugin depend on
         if packages is None:
             self.cpt_packages = []
@@ -90,7 +91,7 @@ class CoralPluginType():
         else:
             self.cpt_plugins = plugins
 
-    def cpt_build_dependent_packages(self, distro):
+    def cpt_build_dependent_packages(self, log, distro):
         """
         Return the RPMs needed to install before building.
         Return None on failure.
@@ -144,7 +145,7 @@ class CoralPackageBuild():
         # useful when need to install other newly buildt packages.
         self.cpb_depend_package_names = depend_package_names
 
-    def cpb_build_dependent_packages(self, distro):
+    def cpb_build_dependent_packages(self, log, host, distro):
         """
         Return the (RPMs/debs, pips) needed to install before building
         """
@@ -174,7 +175,7 @@ def coral_package_register(package):
 
 
 def install_pip3_package_from_file(log, host, type_cache, tarball_url,
-                                   expected_sha1sum, tarball_fname=None, tsinghua_mirror=False):
+                                   expected_sha1sum, tarball_fname=None):
     """
     Install pip3 package and cache it for future usage
     """
@@ -183,15 +184,13 @@ def install_pip3_package_from_file(log, host, type_cache, tarball_url,
     tarball_fpath = type_cache + "/" + tarball_fname
 
     ret = host.sh_download_file(log, tarball_url, tarball_fpath,
-                                expected_sha1sum,
+                                expected_checksum=expected_sha1sum,
                                 output_fname=tarball_fname)
     if ret:
         log.cl_error("failed to download Pyinstaller")
         return -1
 
     command = "pip3 install %s" % (tarball_fpath)
-    if tsinghua_mirror:
-        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -206,17 +205,10 @@ def install_pip3_package_from_file(log, host, type_cache, tarball_url,
     return 0
 
 
-def reinstall_rpm(log, host, packages_dir, rpm_name_prefix, rpm_fname):
+def install_rpm(log, host, packages_dir, rpm_name_prefix, rpm_fname):
     """
     Reinstall RPM
     """
-    rpm_name = rpm_fname[:-4]
-    ret = host.sh_rpm_query(log, rpm_name)
-    if ret == 0:
-        log.cl_debug("%s is already installed on host [%s], skipping",
-                     rpm_name, host.sh_hostname)
-        return 0
-
     ret = host.sh_rpm_find_and_uninstall(log, "grep %s" % rpm_name_prefix)
     if ret:
         log.cl_error("failed to uninstall RPM [%s] on host [%s]",
@@ -253,6 +245,12 @@ def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
                      rpm_name_prefix, packages_dir, host.sh_hostname)
         return -1
 
+    rpm_name = rpm_fname[:-4]
+    ret = host.sh_rpm_query(log, rpm_name)
+    if ret == 0:
+        log.cl_info("RPM [%s] already installed", rpm_name)
+        return 0
+
     lock_file = RPM_INSTALL_LOCK + "-" + rpm_name_prefix + ".lock"
     lock = filelock.FileLock(lock_file)
     ret = 0
@@ -260,15 +258,14 @@ def install_generated_rpm(log, host, packages_dir, extra_package_fnames,
     # package %s is already installed
     try:
         with lock.acquire(timeout=600):
-            ret = reinstall_rpm(log, host, packages_dir, rpm_name_prefix,
-                                rpm_fname)
+            ret = install_rpm(log, host, packages_dir, rpm_name_prefix,
+                              rpm_fname)
     except filelock.Timeout:
         ret = -1
-        log.cl_error("someone else is holding lock of file [%s] for more "
-                     "than 10 minutes, aborting",
+        log.cl_error("lock [%s] stuck, aborting",
                      lock_file)
     if ret:
-        log.cl_error("failed to reinstall RPM [%s] on host [%s]",
+        log.cl_error("failed to install RPM [%s] on host [%s]",
                      rpm_name_prefix, host.sh_hostname)
         return -1
     return 0
@@ -282,19 +279,20 @@ def packages_check_rpms(log, host, packages_dir, rpm_fnames):
         rpm_fpath = packages_dir + "/" + rpm_fname
         ret = host.sh_path_exists(log, rpm_fpath)
         if ret < 0 or ret == 0:
-            log.cl_info("RPM [%s] does not exist, need to build",
-                        rpm_fpath)
+            log.cl_debug("non-exist RPM [%s]",
+                         rpm_fpath)
             return -1
 
         ret = host.sh_rpm_checksig(log, rpm_fpath)
         if ret:
-            log.cl_info("RPM [%s] is broken, need to rebuild",
-                        rpm_fpath)
+            log.cl_debug("broken RPM [%s]",
+                         rpm_fpath)
             return -1
     return 0
 
 
-def packages_add_rpms(log, host, rpm_dir, packages_dir, expected_rpm_fnames):
+def packages_add_rpms(log, host, rpm_dir, packages_dir, expected_rpm_fnames,
+                      ignore_rpm_fnames=None):
     """
     Copy the generated RPMs to the package dir
     """
@@ -313,7 +311,9 @@ def packages_add_rpms(log, host, rpm_dir, packages_dir, expected_rpm_fnames):
 
     for fname in fnames:
         if fname not in expected_rpm_fnames:
-            log.cl_error("extra RPM [%s] is generated under dir [%s] "
+            if ignore_rpm_fnames is not None and fname in ignore_rpm_fnames:
+                continue
+            log.cl_error("extra RPM [%s] under dir [%s] "
                          "on host [%s]",
                          fname, rpm_dir, host.sh_hostname)
             return -1
@@ -383,9 +383,23 @@ def get_shared_build_cache(log, host, workspace, shared_cache):
     Get the shared build cache
     """
     # pylint: disable=abstract-class-instantiated
-    log.cl_info("copying shared cache from [%s] to [%s] on host [%s]",
-                shared_cache, workspace, host.sh_hostname)
+    log.cl_info("reusing build cache [%s]",
+                shared_cache)
+
     lock_file = build_constant.CORAL_BUILD_CACHE_LOCK
+    parent_dir = os.path.dirname(lock_file)
+    command = ("mkdir -p %s" % (parent_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
     lock = filelock.FileLock(lock_file)
     ret = 0
     try:

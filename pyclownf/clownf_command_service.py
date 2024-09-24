@@ -153,7 +153,7 @@ class LustreServiceCommand():
                                                   print_table=False)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def format(self, service_name, yes=False):
+    def format(self, service_name, yes=False, dryrun=False):
         """
         Format a Lustre service.
 
@@ -169,6 +169,7 @@ class LustreServiceCommand():
 
         :param service_name: Lustre service name to format.
         :param yes: Do not ask for confirmation, just format. Default: False.
+        :param dryrun: Do not format the device of the service. Default: False.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._lsc_config_fpath,
@@ -184,7 +185,11 @@ class LustreServiceCommand():
             clownf_command_common.exit_env(log, clownfish_instance, -1)
 
         cmd_general.check_argument_bool(log, "yes", yes)
-        if not yes:
+        cmd_general.check_argument_bool(log, "dryrun", dryrun)
+        if dryrun:
+            log.cl_info("[Dry Run] service [%s] will not be modified or formatted",
+                        service_name)
+        elif not yes:
             log.cl_info("Be careful! Data on the service [%s] will be "
                         "completely erased!", service_name)
             input_result = input("Are you sure to format Lustre service [%s]? [y/N] " % service_name)
@@ -200,17 +205,18 @@ class LustreServiceCommand():
                          mounted_instance.lsi_host.sh_hostname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
 
-        rc = service.ls_format(log)
+        rc = service.ls_format(log, dryrun=dryrun)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def hosts(self, service_name, status=False, disabled=False,
-              enabled=False, fields=None):
+              enabled=False, prefered=False, fields=None):
         """
         List all hosts that could provide a Lustre service.
         :param service_name: Lustre service name.
         :param status: print status of the hosts, default: False.
         :param enabled: only print hosts that enable this service, default: False.
         :param disabled: only print hosts that disable this service, default: False.
+        :param prefered: only print prefered hosts of this service, default: False.
         :param fields: fields to print, seperated by comma.
         """
         # pylint: disable=too-many-branches,too-many-locals
@@ -224,6 +230,7 @@ class LustreServiceCommand():
         cmd_general.check_argument_bool(log, "status", status)
         cmd_general.check_argument_bool(log, "disabled", disabled)
         cmd_general.check_argument_bool(log, "enabled", enabled)
+        cmd_general.check_argument_bool(log, "prefered", prefered)
         cmd_general.check_argument_types(log, "fields", fields,
                                          allow_none=True,
                                          allow_tuple=True, allow_str=True,
@@ -251,6 +258,18 @@ class LustreServiceCommand():
                                                                                service)
             if target_hostnames is None:
                 clownf_command_common.exit_env(log, clownfish_instance, -1)
+
+        if prefered:
+            prefered_hostnames = clownfish_instance.ci_service_prefered_hostnames(log,
+                                                                                  service)
+            if prefered_hostnames is None:
+                clownf_command_common.exit_env(log, clownfish_instance, -1)
+            if target_hostnames is None:
+                target_hostnames = prefered_hostnames
+            else:
+                for target_hostname in target_hostnames[:]:
+                    if target_hostname not in target_hostnames:
+                        target_hostnames.remove(target_hostname)
 
         host_dict = {}
         for service_instance in service.ls_instance_dict.values():
@@ -289,10 +308,10 @@ class LustreServiceCommand():
 
     def host_disable(self, service_name, hostname):
         """
-        Disable a service instance on a host
+        Disable a service instance on a host.
 
-        :param service_name: Lustre service name
-        :param hostname: name of the host
+        :param service_name: Lustre service name.
+        :param hostname: name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._lsc_config_fpath,
@@ -308,7 +327,26 @@ class LustreServiceCommand():
 
     def host_enable(self, service_name, hostname):
         """
-        Enable a service instance on a host
+        Enable to mount a service instance on a host.
+
+        :param service_name: Lustre service name.
+        :param hostname: name of the host.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._lsc_config_fpath,
+                                           self._lsc_logdir,
+                                           self._lsc_log_to_file,
+                                           self._lsc_iso)
+        service_name = cmd_general.check_argument_str(log, "service_name",
+                                                      service_name)
+        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        rc = clownf_command_common.instance_enable(log, clownfish_instance,
+                                                   hostname, service_name)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+    def host_prefer(self, service_name, hostname):
+        """
+        Prefer to mount a service instance on a host
 
         :param service_name: Lustre service name
         :param hostname: name of the host
@@ -321,8 +359,28 @@ class LustreServiceCommand():
         service_name = cmd_general.check_argument_str(log, "service_name",
                                                       service_name)
         hostname = cmd_general.check_argument_str(log, "hostname", hostname)
-        rc = clownf_command_common.instance_enable(log, clownfish_instance,
-                                                   hostname, service_name)
+        rc = clownf_command_common.instance_prefer(log, clownfish_instance,
+                                                   service_name, hostname)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+
+    def host_disprefer(self, service_name, hostname):
+        """
+        Disprefer to mount a service instance on a host.
+
+        :param service_name: Lustre service name.
+        :param hostname: name of the host.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._lsc_config_fpath,
+                                           self._lsc_logdir,
+                                           self._lsc_log_to_file,
+                                           self._lsc_iso)
+        service_name = cmd_general.check_argument_str(log, "service_name",
+                                                      service_name)
+        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        rc = clownf_command_common.instance_disprefer(log, clownfish_instance,
+                                                      service_name, hostname)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def watcher(self, service_name):
@@ -352,12 +410,8 @@ class LustreServiceCommand():
                          service_name)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
 
-        rc, watcher_candidates = \
-            clownfish_instance.ci_service_watcher_candidates(log, service)
-        if rc:
-            log.cl_error("failed to get the watcher candidates of service [%s]",
-                         service_name)
-            clownf_command_common.exit_env(log, clownfish_instance, -1)
+        watcher_candidates = \
+            clownfish_instance.ci_service_watcher_candidates(service)
 
         candidate_hosts = []
         for watcher_candidate in watcher_candidates:

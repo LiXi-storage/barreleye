@@ -24,7 +24,6 @@ ETC_CORAL_DIR = "/etc/coral"
 SOURCE_ISO_FNAME = "ISO"
 BUILD_PACKAGES = "Packages"
 SOURCE_ISO_PACKAGES_PATH = SOURCE_ISO_FNAME + "/" + BUILD_PACKAGES
-BUILD_PIP = "pip"
 CORAL_DIR = "/var/lib/coral"
 
 CORAL_LOG_DIR = "/var/log/coral"
@@ -32,23 +31,14 @@ CORAL_LOG_DIR = "/var/log/coral"
 CORAL_BUILD_CACHE = CORAL_LOG_DIR + "/build_cache"
 # Dir to save ISO cache. The files under it will be put into ISO of Coral.
 ISO_CACHE_FNAME = "iso_cache"
+
 # File name to save build cache.
 CORAL_BUILD_CACHE_TYPE_OPEN = "open"
-# File name to save development cache.
-CORAL_BUILD_CACHE_TYPE_DEVEL = "devel"
-# File name to save release cache.
-CORAL_BUILD_CACHE_TYPE_RELEASE = "release"
-# Dir to save development cache.
-CORAL_BUILD_CACHE_DEVEL_DIR = (CORAL_BUILD_CACHE + "/" +
-                               CORAL_BUILD_CACHE_TYPE_DEVEL)
 # Dir to save open cache.
 CORAL_BUILD_CACHE_OPEN_DIR = (CORAL_BUILD_CACHE + "/" +
                               CORAL_BUILD_CACHE_TYPE_OPEN)
-# Dir to save release cache.
-CORAL_BUILD_CACHE_RELEASE_DIR = (CORAL_BUILD_CACHE + "/" +
-                                 CORAL_BUILD_CACHE_TYPE_RELEASE)
-# Dir to save pip packages needed when coral command bootstrap from Internet
-CORAL_BUILD_CACHE_PIP_DIR = CORAL_BUILD_CACHE_DEVEL_DIR + "/" + BUILD_PIP
+CORAL_BUILD_CACHE_TYPES = [CORAL_BUILD_CACHE_TYPE_OPEN]
+
 
 ISO_FNAME = "iso"
 # ISO dir
@@ -63,18 +53,15 @@ SRPMS_DIR_BASENAME = "SRPMS"
 # Basename of RPMS
 RPMS_DIR_BASENAME = "RPMS"
 LUSTRE_RELEASE_INFO_FNAME = "lustre_release_info.yaml"
-LUSTRE_DIR_BASENAMES = [SRPMS_DIR_BASENAME, RPMS_DIR_BASENAME,
-                        LUSTRE_RELEASE_INFO_FNAME]
-E2FSPROGS_DIR_BASENAMES = [SRPMS_DIR_BASENAME, RPMS_DIR_BASENAME]
+E2FSPROGS_RELEASE_INFO_FNAME = "e2fsprogs_release_info.yaml"
 # Lustre SRPM dir
 CORAL_ISO_LUSTRE_SRPM_DIR = (CORAL_ISO_LUSTRE_DIR +
                              "/" + SRPMS_DIR_BASENAME)
 # Lustre RPM dir
 CORAL_ISO_LUSTRE_RPM_DIR = (CORAL_ISO_LUSTRE_DIR +
                             "/" + RPMS_DIR_BASENAME)
-E2FSPROGS_RPM_DIR_BASENAME = "e2fsprogs"
-CORAL_ISO_E2FSPROGS_DIR = (CORAL_ISO_DIR +
-                           "/" + E2FSPROGS_RPM_DIR_BASENAME)
+CORAL_E2FSPROGS_RELEASE_BASENAME = "e2fsprogs_release"
+CORAL_ISO_E2FSPROGS_DIR = (CORAL_ISO_DIR + "/" + CORAL_E2FSPROGS_RELEASE_BASENAME)
 
 #
 # RPM needed by almost all use cases of Coral.
@@ -120,6 +107,53 @@ CORAL_STR_RELEASE_NAME = "release_name"
 # The constant in VERSION of iso
 CORAL_STR_TARGET_CPU = "target_cpu"
 # The constant in VERSION of iso
-CORAL_STR_DISTRO_SHORT = "distro_short"
 # The constant in VERSION of iso
 CORAL_STR_RELEASE_DATE = "release_date"
+
+CORAL_LANGUAGES = ["zh", "en"]
+
+# The plain tag of Coral artifact
+CORAL_TAG_PLAIN = "plain"
+CORAL_ISO_PREFIX = "coral-"
+CORAL_ISO_SUFFIX = ".iso"
+
+# The info fname of artifact
+CORAL_ARTIFACT_INFO_FNAME = "artifact_info.yaml"
+
+# The path to save coral build artifacts
+CORAL_BUILD_ARTIFACTS = CORAL_LOG_DIR + "/coral_build_artifacts"
+# The path to save coral build jobs
+CORAL_BUILD_JOBS = CORAL_BUILD_ARTIFACTS + "/jobs"
+
+# The shortest time that a reboot could finish. It is used to check whether
+# a host has actually rebooted or not.
+SHORTEST_TIME_REBOOT = 10
+# The logest time that a reboot wil takes
+LONGEST_TIME_REBOOT = 240
+# The longest time that a simple command should finish
+LONGEST_SIMPLE_COMMAND_TIME = 600
+# Yum install is slow, so use a larger timeout value
+LONGEST_TIME_YUM_INSTALL = LONGEST_SIMPLE_COMMAND_TIME * 3
+# RPM install is slow, so use a larger timeout value
+LONGEST_TIME_RPM_INSTALL = LONGEST_SIMPLE_COMMAND_TIME * 2
+# The longest time that a issue reboot would stop the SSH server
+LONGEST_TIME_ISSUE_REBOOT = 10
+
+CORAL_REAF_DIR_NAME = "reaf"
+LUSTRE_VERSION_DEFINITION_DIR_NAME = "lustre_version_definitions"
+CORAL_REAF_DIR = CORAL_DIR + "/" + CORAL_REAF_DIR_NAME
+LUSTRE_VERSION_DEFINITION_DIR = CORAL_REAF_DIR + "/" + LUSTRE_VERSION_DEFINITION_DIR_NAME
+LUSTRE_VERSION_DEFINITION_SOURCE_PATH = "coral_reaf/" + LUSTRE_VERSION_DEFINITION_DIR_NAME
+
+CORAL_PUBLIC_KEY_FNAME = "public_key.gpg"
+
+LUSTRE_STR_ERROR = "error"
+LUSTRE_STR_HEALTHY = "healthy"
+LUSTRE_STR_UNHEALTHY = "UNHEALTHY"
+LUSTRE_STR_LBUG = "LBUG"
+
+
+LUSTRE_RELEASES_DIRNAME = "lustre_releases"
+LUSTRE_RELEASES_DIR = CORAL_LOG_DIR + "/" + LUSTRE_RELEASES_DIRNAME
+E2FSPROGS_RELEASES_DIRNAME = "e2fsprogs_releases"
+E2FSPROGS_RELEASES_DIR = CORAL_LOG_DIR + "/" + E2FSPROGS_RELEASES_DIRNAME

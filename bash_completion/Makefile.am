@@ -16,6 +16,13 @@ clownf:
 	mv clownf.tmp clownf
 endif
 
+if ENABLE_REAF
+COMPLETIONS += reaf
+reaf:
+	PYTHONPATH=$(PIP3_PACKAGE_PATH) ../reaf -- --completion > reaf.tmp || exit 1; \
+	mv reaf.tmp reaf
+endif
+
 
 clean-local:
 	rm -f $(COMPLETIONS)

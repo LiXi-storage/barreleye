@@ -51,7 +51,7 @@ Support for Lustre-2.14 (the latest LTS release, stability to be tested) is unde
 
 To build Barreleye, please run the following command under the source code directory:
 
-`# ./coral build`
+`# ./cbuild build`
 
 Please note that:
 
@@ -75,7 +75,7 @@ drwxr-xr-x 6 root root    4096 Mar 24 10:21 iso_cache
 drwxr-xr-x 2 root root    4096 Mar 21 20:56 pip
 ```
 
-The download URLs of dependencies can be got from command `./coral barrele urls`.
+The download URLs of dependencies can be got from command `./cbuild barrele urls`.
 
 # Installation
 
@@ -95,7 +95,7 @@ Updating / installing...
 * Modify the Barreleye configuration file:
 
 ```
-# cp /etc/coral/barreleye.conf.example /etc/coral/barreleye.conf
+# cp /etc/coral/example_configs/barreleye.conf /etc/coral/barreleye.conf
 # vi /etc/coral/barreleye.conf
 ```
 

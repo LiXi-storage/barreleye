@@ -1,0 +1,8 @@
+#!/usr/bin/python3 -u
+"""
+Coral Reaf commands
+"""
+from pyreaf import reaf
+
+if __name__ == "__main__":
+    reaf.main()

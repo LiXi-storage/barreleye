@@ -46,7 +46,7 @@ def coral_version_from_git(log, local_host, source_dir):
 
     Return (version, major, minor, extra)
     """
-    command = "cd %s && git describe" % source_dir
+    command = "cd %s && git describe --abbrev=9" % source_dir
     retval = local_host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "

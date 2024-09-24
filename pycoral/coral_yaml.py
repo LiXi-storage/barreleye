@@ -26,7 +26,7 @@ def write_yaml_file(log, prefix, config, config_fpath):
         with open(config_fpath, 'w', encoding='utf-8') as yaml_file:
             yaml_file.write(config_string)
     except:
-        log.cl_error("failed to flush config to file [%s] on host [%s]: %s",
+        log.cl_error("failed to save content of file [%s] on host [%s]: %s",
                      config_fpath, socket.gethostname(),
                      traceback.format_exc())
         return -1

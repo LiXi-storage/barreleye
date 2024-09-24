@@ -4,7 +4,6 @@ Library for Lustre file system management
 # pylint: disable=too-many-lines
 import re
 import os
-import socket
 
 # Local libs
 from pycoral import utils
@@ -12,6 +11,7 @@ from pycoral import os_distro
 from pycoral import ssh_host
 from pycoral import constant
 from pycoral import lustre_version
+from pycoral import release_info
 
 LUSTRE_SERVICE_TYPE_MGT = "MGT"
 LUSTRE_SERVICE_TYPE_MDT = "MDT"
@@ -234,12 +234,15 @@ class LustreServiceInstance():
     # pylint: disable=too-many-instance-attributes
     def __init__(self, service, host, device, mnt, nid,
                  zpool_create=None):
+        # LustreService
         self.lsi_service = service
+        # The host that provides the service instance.
         self.lsi_host = host
+        # The path of device, e.g. /dev/sdb
         self.lsi_device = device
+        # The mount point of the service, e.g. /mnt/lustre0-MDT0000
         self.lsi_mnt = mnt
         self.lsi_nid = nid
-        self.lsi_hostname = host.sh_hostname
         self.lsi_zpool_create = zpool_create
 
     def _lsi_real_device(self, log):
@@ -263,7 +266,98 @@ class LustreServiceInstance():
             return -1, None
         return 0, retval.cr_stdout.strip()
 
-    def lsi_format(self, log):
+    def _lsi_zfs_pool_create(self, log, dryrun=False):
+        """
+        Create ZFS pool
+        """
+        # pylint: disable=too-many-branches
+        service = self.lsi_service
+        service_name = service.ls_service_name
+        host = self.lsi_host
+        hostname = host.sh_hostname
+
+        if self.lsi_zpool_create is None:
+            log.cl_error("no zpool_create configured for service "
+                         "[%s] on host [%s]", service_name, hostname)
+            return -1
+
+        fields = self.lsi_device.split("/")
+        if len(fields) != 2:
+            log.cl_error("unexpected device [%s] for service [%s] on "
+                         "host [%s], should have the format of "
+                         "[pool/dataset]",
+                         self.lsi_device, service_name, hostname)
+            return -1
+        zfs_pool = fields[0]
+
+        zfs_pools = host.sh_zfspool_list(log)
+        if zfs_pools is None:
+            log.cl_error("failed to list ZFS pools on host [%s]",
+                         hostname)
+            return -1
+
+        if zfs_pool in zfs_pools:
+            command = "zpool destroy %s" % (zfs_pool)
+            if dryrun:
+                log.cl_info("[Dry run] run command [%s] on host [%s]",
+                            command, hostname)
+            else:
+                retval = host.sh_run(log, command, timeout=10)
+                if retval.cr_exit_status:
+                    log.cl_error("failed to run command [%s] on host [%s], "
+                                 "ret = [%d], stdout = [%s], stderr = [%s]",
+                                 command,
+                                 hostname,
+                                 retval.cr_exit_status,
+                                 retval.cr_stdout,
+                                 retval.cr_stderr)
+                    return -1
+
+        fields = self.lsi_zpool_create.split()
+        if len(fields) <= 1:
+            log.cl_error("unexpected zpool_create command [%s] for "
+                         "service [%s] on host [%s]",
+                         self.lsi_zpool_create, service_name, hostname)
+            return -1
+
+        # Get rid of the symbol links to avoid following error from
+        # zpool_create:
+        # missing link: ... was partitioned but ... is missing
+        zpool_create = fields[0]
+        for field in fields[1:]:
+            if field.startswith("/"):
+                command = "readlink -f %s" % field
+                retval = host.sh_run(log, command)
+                if retval.cr_exit_status:
+                    log.cl_error("failed to run command [%s] on host [%s], "
+                                 "ret = [%d], stdout = [%s], stderr = [%s]",
+                                 command,
+                                 hostname,
+                                 retval.cr_exit_status,
+                                 retval.cr_stdout,
+                                 retval.cr_stderr)
+                    return -1
+                zpool_create += " " + retval.cr_stdout.strip()
+            else:
+                zpool_create += " " + field
+
+        if dryrun:
+            log.cl_info("[Dry Run] running command [%s] on host [%s]",
+                        zpool_create, hostname)
+        else:
+            retval = host.sh_run(log, zpool_create)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             zpool_create,
+                             hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+        return 0
+
+    def lsi_format(self, log, dryrun=False):
         """
         Format this service device
         """
@@ -274,8 +368,11 @@ class LustreServiceInstance():
         hostname = host.sh_hostname
         backfstype = service.ls_backfstype
 
-        log.cl_info("formatting service [%s] on host [%s]",
-                    service_name, hostname)
+        message = ("formatting service [%s] on host [%s]" %
+                   (service_name, hostname))
+        if dryrun:
+            message = "[Dry Run] " + message
+        log.cl_info(message)
         service = self.lsi_service
         mgs_nid_string = ""
         if service.ls_service_type == LUSTRE_SERVICE_TYPE_MGT:
@@ -293,76 +390,10 @@ class LustreServiceInstance():
             return -1
 
         if backfstype == BACKFSTYPE_ZFS:
-            if self.lsi_zpool_create is None:
-                log.cl_error("no zpool_create configured for service "
-                             "[%s] on host [%s]", service_name, hostname)
-                return -1
-
-            fields = self.lsi_device.split("/")
-            if len(fields) != 2:
-                log.cl_error("unexpected device [%s] for service [%s] on "
-                             "host [%s], should have the format of "
-                             "[pool/dataset]",
-                             self.lsi_device, service_name, hostname)
-                return -1
-            zfs_pool = fields[0]
-
-            zfs_pools = host.sh_zfspool_list(log)
-            if zfs_pools is None:
-                log.cl_error("failed to list ZFS pools on host [%s]",
-                             hostname)
-                return -1
-
-            if zfs_pool in zfs_pools:
-                command = "zpool destroy %s" % (zfs_pool)
-                retval = host.sh_run(log, command, timeout=10)
-                if retval.cr_exit_status:
-                    log.cl_error("failed to run command [%s] on host [%s], "
-                                 "ret = [%d], stdout = [%s], stderr = [%s]",
-                                 command,
-                                 hostname,
-                                 retval.cr_exit_status,
-                                 retval.cr_stdout,
-                                 retval.cr_stderr)
-                    return -1
-
-            fields = self.lsi_zpool_create.split()
-            if len(fields) <= 1:
-                log.cl_error("unexpected zpool_create command [%s] for "
-                             "service [%s] on host [%s]",
-                             self.lsi_zpool_create, service_name, hostname)
-                return -1
-
-            # Get rid of the symbol links to avoid following error from
-            # zpool_create:
-            # missing link: ... was partitioned but ... is missing
-            zpool_create = fields[0]
-            for field in fields[1:]:
-                if field.startswith("/"):
-                    command = "readlink -f %s" % field
-                    retval = host.sh_run(log, command)
-                    if retval.cr_exit_status:
-                        log.cl_error("failed to run command [%s] on host [%s], "
-                                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                                     command,
-                                     hostname,
-                                     retval.cr_exit_status,
-                                     retval.cr_stdout,
-                                     retval.cr_stderr)
-                        return -1
-                    zpool_create += " " + retval.cr_stdout.strip()
-                else:
-                    zpool_create += " " + field
-
-            retval = host.sh_run(log, zpool_create)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             zpool_create,
-                             hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+            ret = self._lsi_zfs_pool_create(log, dryrun=dryrun)
+            if ret:
+                log.cl_error("failed to create ZFS pool of service [%s]",
+                             service_name)
                 return -1
 
         mkfsoptions_string = ""
@@ -394,6 +425,11 @@ class LustreServiceInstance():
                     backfstype, mgs_nid_string, index_argument,
                     mkfsoptions_string))
         command += " " + self.lsi_device
+
+        if dryrun:
+            log.cl_info("[Dry Run] running command [%s] on host [%s]",
+                        command, host.sh_hostname)
+            return 0
 
         retval = host.sh_run(log, command, timeout=None)
         if retval.cr_exit_status:
@@ -758,6 +794,7 @@ class LustreServiceInstance():
         return 1
 
 
+
 class LustreService():
     """
     Lustre service parent class for MDT/MGS/OST
@@ -765,7 +802,7 @@ class LustreService():
     # pylint: disable=too-many-instance-attributes
     def __init__(self, lustre_fs, service_type, service_index,
                  backfstype, zpool_name=None):
-        # For MGS, ls_lustre_fs is None.
+        # For MGS, ls_lustre_fs is None. LustreFilesystem
         self.ls_lustre_fs = lustre_fs
         # Keys are hostname, values are LustreServiceInstance
         self.ls_instance_dict = {}
@@ -838,7 +875,7 @@ class LustreService():
         """
         Add instance of this service
         """
-        hostname = instance.lsi_hostname
+        hostname = instance.lsi_host.sh_hostname
         if hostname in self.ls_instance_dict:
             log.cl_error("instance of service [%s] already exists "
                          "for host [%s]",
@@ -882,10 +919,12 @@ class LustreService():
                     selected_hostnames.remove(hostname)
         return selected_hostnames
 
-    def _ls_instance_dict_sort_by_load(self, log, instances):
+    def _ls_instances_sort(self, log, instances, prefered_hostnames=None):
         """
         Sort the instances by their loads. If an instance has problem, remove
-        the instance from the list.
+        the instance from the list. The instances on prefered hosts will be
+        moved to the head of the list in the oder of load. The prefered_hostnames
+        list itself do not have any order.
         """
         sort_instances = []
         for instance in instances:
@@ -906,6 +945,13 @@ class LustreService():
 
         sort_instances.sort(key=lambda instance: instance.lsis_load)
         sorted_instances = []
+        if prefered_hostnames:
+            for sort_instance in sort_instances[:]:
+                service_instance = sort_instance.lsis_instance
+                if service_instance.lsi_host.sh_hostname not in prefered_hostnames:
+                    continue
+                sorted_instances.append(service_instance)
+                sort_instances.remove(sort_instance)
         for sort_instance in sort_instances:
             sorted_instances.append(sort_instance.lsis_instance)
         instances[:] = sorted_instances
@@ -934,7 +980,7 @@ class LustreService():
             log.cl_error("%s: %s", current_reason, hostname_string)
 
     def ls_mount(self, log, selected_hostnames=None, exclude_dict=None,
-                 quiet=False):
+                 prefered_hostnames=None, quiet=False):
         """
         Mount this service
         """
@@ -971,7 +1017,8 @@ class LustreService():
             self._ls_complain_no_mountable(log, exclude_dict)
             return -1
 
-        self._ls_instance_dict_sort_by_load(log, instances)
+        self._ls_instances_sort(log, instances,
+                                prefered_hostnames=prefered_hostnames)
 
         instance = self._ls_mounted_instance(log,
                                              down_hostnames=down_hostnames)
@@ -1132,7 +1179,7 @@ class LustreService():
                 return ret
         return 0
 
-    def ls_format(self, log):
+    def ls_format(self, log, dryrun=False):
         """
         Format this service.
         Service should have been umounted.
@@ -1140,15 +1187,15 @@ class LustreService():
         if len(self.ls_instance_dict) == 0:
             return -1
 
-        log.cl_info("formatting service [%s]", self.ls_service_name)
         for instance in self.ls_instance_dict.values():
-            ret = instance.lsi_format(log)
+            ret = instance.lsi_format(log, dryrun=dryrun)
             if ret == 0:
                 log.cl_debug("formatted service [%s]", self.ls_service_name)
                 return 0
         log.cl_error("failed to format service [%s]",
                      self.ls_service_name)
         return -1
+
 
 
 class LustreMGS(LustreService):
@@ -1359,32 +1406,35 @@ class LustreFilesystem():
                     hosts.append(ost_host)
         return hosts
 
-    def lf_format(self, log, format_mgt=False):
+    def lf_format(self, log, format_mgt=False, dryrun=False):
         """
         Format the whole file system.
         :param format_mgt: format the standalone MGT.
         """
-        log.cl_info("formatting file system [%s]", self.lf_fsname)
+        message = "formatting file system [%s]" % self.lf_fsname
+        if dryrun:
+            message = "[Dry Run] " + message
+        log.cl_info(message)
         if len(self.lf_mgs_nids()) == 0:
             log.cl_error("the MGS nid of Lustre file system [%s] is not "
                          "configured, not able to format", self.lf_fsname)
             return -1
 
         for service_name, mdt in self.lf_mdt_dict.items():
-            ret = mdt.ls_format(log)
+            ret = mdt.ls_format(log, dryrun=dryrun)
             if ret:
                 log.cl_error("failed to format MDT [%s]", service_name)
                 return -1
 
         for service_name, ost in self.lf_ost_dict.items():
-            ret = ost.ls_format(log)
+            ret = ost.ls_format(log, dryrun=dryrun)
             if ret:
                 log.cl_error("failed to format OST [%s]", service_name)
                 return -1
 
         if self.lf_mgs is not None and format_mgt:
             service_name = self.lf_mgs.ls_service_name
-            ret = self.lf_mgs.ls_format(log)
+            ret = self.lf_mgs.ls_format(log, dryrun=dryrun)
             if ret:
                 log.cl_error("failed to format MGT [%s]", service_name)
                 return -1
@@ -1633,6 +1683,7 @@ class LustreClient():
         self.lc_lustre_fs = lustre_fs
         self.lc_host = host
         self.lc_mnt = mnt
+        # Name of the client.
         self.lc_client_name = ("%s:%s" % (host.sh_hostname, mnt))
 
     def lc_get_uuid(self, log):
@@ -1896,15 +1947,79 @@ def init_client(log, lustre_fs, host, mnt, add_to_host=False):
     return lustre_client
 
 
+def lustre_read_release_info(log, local_host, workspace, host, release_dir):
+    """
+    Read Lustre release info.
+    """
+    rinfo = release_info.rinfo_read_from_dir(log, local_host, workspace,
+                                             host, release_dir,
+                                             constant.LUSTRE_RELEASE_INFO_FNAME)
+    if rinfo is None:
+        return None
+    rinfo.rli_extra_relative_fpaths.append(constant.LUSTRE_RELEASE_INFO_FNAME)
+    return rinfo
+
+
+def lustre_read_release_info_local(log, local_host, release_dir):
+    """
+    Read Lustre release info on local host.
+    """
+    return lustre_read_release_info(log, local_host,
+                                    None,  # workspace
+                                    local_host,  # host
+                                    release_dir)
+
+
+def e2fsprogs_read_release_info(log, local_host, workspace, host, release_dir):
+    """
+    Read E2fsprogs release info.
+    """
+    rinfo = release_info.rinfo_read_from_dir(log, local_host, workspace,
+                                             host, release_dir,
+                                             constant.E2FSPROGS_RELEASE_INFO_FNAME)
+    if rinfo is None:
+        return None
+    rinfo.rli_extra_relative_fpaths.append(constant.E2FSPROGS_RELEASE_INFO_FNAME)
+    return rinfo
+
+
+
+def e2fsprogs_read_release_info_local(log, local_host, release_dir):
+    """
+    Read E2fsprogs release info on local host.
+    """
+    return e2fsprogs_read_release_info(log, local_host,
+                                       None,  # workspace
+                                       local_host,  # host
+                                       release_dir)
+
+def lustre_get_relative_rpm_dir(target_cpu):
+    """
+    Return the relative RPM dir of Lustre
+    """
+    return constant.RPMS_DIR_BASENAME + "/" + target_cpu
+
+
+def lustre_get_rpm_dir(release_dir, target_cpu):
+    """
+    Return the RPM dir of Lustre
+    """
+    return (release_dir + "/" + lustre_get_relative_rpm_dir(target_cpu))
+
+
 class LustreDistribution():
     """
     Lustre Distribution, including Lustre, kernel, e2fsprogs RPMs
     """
     # pylint: disable=too-many-instance-attributes,too-few-public-methods
-    def __init__(self, local_host, lustre_rpm_dir, e2fsprogs_rpm_dir):
+    def __init__(self, host, target_cpu, lustre_dir, e2fsprogs_dir,
+                 nondist_lustre_relative_fpaths=None,
+                 nondist_lustre_relative_dir_paths=None):
+        # Dir of Lustre release
+        self.ldis_lustre_dir = lustre_dir
         # Dir that contains Lustre RPM files
-        self.ldis_lustre_rpm_dir = lustre_rpm_dir
-        # Key is "RPM_*", value is the name of the RPM
+        self.ldis_lustre_rpm_dir = lustre_get_rpm_dir(lustre_dir, target_cpu)
+        # Key is "RPM_*", value is the fname of the RPM
         self.ldis_lustre_rpm_dict = {}
         # LustreVersion
         self.ldis_lustre_version = None
@@ -1914,33 +2029,362 @@ class LustreDistribution():
         self.ldis_zfs_support = True
         # Ldiskfs is supported in the Lustre RPMs
         self.ldis_ldiskfs_support = True
+        # Dir that contains Lustre RPM files
+        self.ldis_e2fsprogs_dir = e2fsprogs_dir
+        # Target CPU
+        self.ldis_target_cpu = target_cpu
         # E2fsprogs dir that contains RPM files
-        self.ldis_e2fsprogs_rpm_dir = e2fsprogs_rpm_dir
+        self.ldis_e2fsprogs_rpm_dir = (e2fsprogs_dir + "/" + constant.RPMS_DIR_BASENAME +
+                                       "/" + target_cpu)
         # The RPMs are checked and has no problem
-        self.ldis_prepared = False
-        # Local host to run command
-        self.ldis_local_host = local_host
+        self.ldis_checked = False
+        # Host that this distribution is on.
+        self.ldis_host = host
         # e2fsprogs version, e.g. "1.45.2.wc1"
         self.ldis_e2fsprogs_version = None
+        # The release info of Lustre. Type: ReleaseInfo.
+        self.ldis_lustre_rinfo = None
+        # The release info of E2fsprogs. Type: ReleaseInfo.
+        self.ldis_e2fsprogs_rinfo = None
+        # Fpaths ignored when copying/packing the Lustre release dir.
+        if nondist_lustre_relative_fpaths is None:
+            nondist_lustre_relative_fpaths = []
+        self.ldis_nondist_lustre_relative_fpaths = nondist_lustre_relative_fpaths
+        # Dir paths ignored when copying/packing the Lustre release dir.
+        if nondist_lustre_relative_dir_paths is None:
+            nondist_lustre_relative_dir_paths = []
+        self.ldis_nondist_lustre_relative_dir_paths = nondist_lustre_relative_dir_paths
 
-    def _ldis_check_e2fsprogs(self, log):
+    def _ldis_install_kernel(self, log):
         """
-        Check whether e2fsprogs dir contain expected RPMs
+        Install the kernel in this release.
         """
-        local_host = self.ldis_local_host
+        # pylint: disable=too-many-branches,too-many-statements
+        host = self.ldis_host
+        distro = host.sh_distro(log)
+        if distro is None:
+            log.cl_error("failed to get distro of host [%s]",
+                         host.sh_hostname)
+            return -1
+        if distro not in [os_distro.DISTRO_RHEL7,
+                          os_distro.DISTRO_RHEL8]:
+            log.cl_error("unsupported distro [%s] on host [%s]",
+                         distro, host.sh_hostname)
+            return -1
 
-        command = "ls %s" % self.ldis_e2fsprogs_rpm_dir
-        retval = local_host.sh_run(log, command)
+        log.cl_info("installing Lustre kernel RPM on host [%s]", host.sh_hostname)
+        if lustre_version.LVD_RPM_KERNEL_FIRMWARE in self.ldis_lustre_rpm_dict:
+            rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL_FIRMWARE]
+            command = ("rpm -ivh --force %s/%s" %
+                       (self.ldis_lustre_rpm_dir, rpm_name))
+            retval = host.sh_run(log, command,
+                                 timeout=constant.LONGEST_TIME_RPM_INSTALL)
+            if retval.cr_exit_status != 0:
+                log.cl_error("failed to run commnad [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command, host.sh_hostname, retval.cr_exit_status,
+                             retval.cr_stdout, retval.cr_stderr)
+                return -1
+
+        rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL]
+        command = ("rpm -ivh --force %s/%s" %
+                   (self.ldis_lustre_rpm_dir, rpm_name))
+        if lustre_version.LVD_RPM_KERNEL_CORE in self.ldis_lustre_rpm_dict:
+            rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL_CORE]
+            command += " " + self.ldis_lustre_rpm_dir + "/" + rpm_name
+        if lustre_version.LVD_RPM_KERNEL_MODULES in self.ldis_lustre_rpm_dict:
+            rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL_MODULES]
+            command += " " + self.ldis_lustre_rpm_dir + "/" + rpm_name
+        retval = host.sh_run(log, command,
+                             timeout=constant.LONGEST_TIME_RPM_INSTALL)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run commnad [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command, host.sh_hostname, retval.cr_exit_status,
+                         retval.cr_stdout, retval.cr_stderr)
+            return -1
+
+        # Somehow crashkernel=auto doen't work for RHEL7 sometimes
+        log.cl_info("changing boot argument of crashkernel on host [%s]",
+                    host.sh_hostname)
+
+        exist_config_fpath = None
+        config_fpaths = ["/boot/grub2/grub.cfg",
+                         "/boot/efi/EFI/redhat/grub.cfg",
+                         "/boot/efi/EFI/centos/grub.cfg",
+                         "/boot/efi/EFI/rocky/grub.cfg"]
+        for config_fpath in config_fpaths:
+            ret = host.sh_path_exists(log, config_fpath)
+            if ret < 0:
+                log.cl_error("failed to check whether [%s] exists on host [%s]",
+                             config_fpath, host.sh_hostname)
+                return -1
+            if ret:
+                if exist_config_fpath is not None:
+                    log.cl_error("both [%s] and [%s] exist on host [%s]",
+                                 config_fpath, exist_config_fpath,
+                                 host.sh_hostname)
+                exist_config_fpath = config_fpath
+        if exist_config_fpath is None:
+            log.cl_error("failed to find any file of [%s] on host [%s]",
+                         utils.list2string(config_fpaths), host.sh_hostname)
+            return -1
+
+        command = ("sed -i 's/crashkernel=auto/crashkernel=128M/g' %s" %
+                   exist_config_fpath)
+        retval = host.sh_run(log, command)
         if retval.cr_exit_status != 0:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command, local_host.sh_hostname,
+                         command, host.sh_hostname, retval.cr_exit_status,
+                         retval.cr_stdout, retval.cr_stderr)
+            return -1
+        return 0
+
+    def _ldis_install_ofed(self, log):
+        """
+        Install OFED in this release.
+        """
+        host = self.ldis_host
+        ofed_rpms = get_mofed_rpm_fnames(log, host, self.ldis_lustre_rpm_dir)
+        if ofed_rpms is None:
+            log.cl_info("no OFED RPM found, skipping OFED installation on host [%s]",
+                        host.sh_hostname)
+            return 0
+
+        log.cl_info("installing OFED RPM on host [%s]", host.sh_hostname)
+
+        # New version of mlnx-tools might block the installation of old
+        # version mlnx-ofa_kernel, but please do not add it to this list.
+        # The reason is, new mlnx-ofa_kernel like 5.8 depends on mlnx-tools.
+        # Keeping existing mlnx-tools at least gives an chance for manual
+        # fixing of missing mlnx-tools.
+        mlnx_key_rpms = ["mlnx-ofa_kernel",
+                         "mlnx-ofa_kernel-devel",
+                         "mlnx-ofa_kernel-debuginfo",
+                         "kmod-mlnx-ofa_kernel"]
+
+        rpm_string = ""
+        for rpm_name in mlnx_key_rpms:
+            if host.sh_has_rpm(log, rpm_name):
+                if rpm_string != "":
+                    rpm_string += " "
+                rpm_string += rpm_name
+
+        if rpm_string != "":
+            command = "rpm -e --nodeps "+ rpm_string
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status != 0:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+
+        command = "rpm -ivh --nodeps"
+        for ofed_rpm in ofed_rpms:
+            command += " " + self.ldis_lustre_rpm_dir + "/" + ofed_rpm
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
+        return 0
 
-        fnames = retval.cr_stdout.splitlines()
+    def ldis_send_from_local(self, log, host, lustre_dir, e2fsprogs_dir):
+        """
+        Send this local distribution to a remote host.
+        """
+        if not self.ldis_host.sh_is_localhost():
+            log.cl_error("sending Lustre release from remote host is not supported")
+            return None
+        local_host = self.ldis_host
+        target_cpu = host.sh_target_cpu(log)
+        if target_cpu is None:
+            log.cl_error("failed to get cpu type of host [%s]",
+                         host.sh_hostname)
+            return None
+        if target_cpu != self.ldis_target_cpu:
+            log.cl_error("cpu type [%s] of host [%s] is different with [%s] "
+                         "of host [%s]", target_cpu,
+                         target_cpu, host.sh_hostname, self.ldis_target_cpu,
+                         local_host.sh_hostname)
+            return None
+
+        remote_distr = LustreDistribution(host, target_cpu, lustre_dir, e2fsprogs_dir)
+        remote_distr.ldis_zfs_support = self.ldis_zfs_support
+        remote_distr.ldis_ldiskfs_support = self.ldis_ldiskfs_support
+        remote_distr.ldis_lustre_rpm_dict = self.ldis_lustre_rpm_dict.copy()
+        remote_distr.ldis_lustre_version = self.ldis_lustre_version
+        remote_distr.ldis_kernel_version = self.ldis_kernel_version
+        remote_distr.ldis_checked = self.ldis_checked
+        remote_distr.ldis_e2fsprogs_version = self.ldis_e2fsprogs_version
+        remote_distr.ldis_lustre_rinfo = self.ldis_lustre_rinfo
+        remote_distr.ldis_e2fsprogs_rinfo = self.ldis_e2fsprogs_rinfo
+        remote_distr.ldis_nondist_lustre_relative_fpaths = \
+            list(self.ldis_nondist_lustre_relative_fpaths)
+        remote_distr.ldis_nondist_lustre_relative_dir_paths = \
+            list(self.ldis_nondist_lustre_relative_dir_paths)
+
+        lustre_rinfo = self.ldis_lustre_rinfo
+        ret = lustre_rinfo.rli_files_send(log, local_host,
+                                          self.ldis_lustre_dir,
+                                          host,
+                                          remote_distr.ldis_lustre_dir)
+        if ret:
+            log.cl_error("failed to send Lustre release [%s] on local host "
+                         "[%s] to dir [%s] on host [%s]",
+                         self.ldis_lustre_dir,
+                         local_host.sh_hostname,
+                         remote_distr.ldis_lustre_dir,
+                         host.sh_hostname)
+            return None
+
+        e2fsprogs_rinfo = self.ldis_e2fsprogs_rinfo
+        ret = e2fsprogs_rinfo.rli_files_send(log, local_host,
+                                             self.ldis_e2fsprogs_dir,
+                                             host,
+                                             remote_distr.ldis_e2fsprogs_dir)
+        if ret:
+            log.cl_error("failed to send e2fsprogs release [%s] on local host "
+                         "[%s] to dir [%s] on host [%s]",
+                         self.ldis_e2fsprogs_dir,
+                         local_host.sh_hostname,
+                         remote_distr.ldis_e2fsprogs_dir,
+                         host.sh_hostname)
+            return None
+        return remote_distr
+
+    def ldis_needed_zfs_rpm_fnames(self, log):
+        """
+        Return ZFS RPM file names needed to install.
+        """
+        # pylint: disable=too-many-branches
+        host = self.ldis_host
+        fnames = host.sh_get_dir_fnames(log, self.ldis_lustre_rpm_dir)
+        if fnames is None:
+            log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                         self.ldis_lustre_rpm_dir, host.sh_hostname)
+            return None
+
+        needed_fnames = []
+        for fname in fnames:
+            if fname.startswith("libnvpair"):
+                needed_fnames.append(fname)
+                continue
+            if fname.startswith("libuutil"):
+                needed_fnames.append(fname)
+                continue
+
+            if fname.startswith("libzfs"):
+                if "devel" in fname:
+                    continue
+                needed_fnames.append(fname)
+                continue
+
+            if fname.startswith("libzpool"):
+                needed_fnames.append(fname)
+                continue
+
+            if fname.startswith("kmod-zfs"):
+                if "devel" in fname:
+                    continue
+                needed_fnames.append(fname)
+                continue
+
+            if fname.startswith("zfs-debuginfo"):
+                continue
+            if fname.startswith("zfs-dkms"):
+                continue
+            if fname.startswith("zfs-dracut"):
+                continue
+            if fname.startswith("zfs-kmod-debuginfo"):
+                continue
+            if fname.startswith("zfs-test"):
+                continue
+            if fname.startswith("zfs"):
+                needed_fnames.append(fname)
+                continue
+        return needed_fnames
+
+    def _ldis_install_zfs(self, log):
+        """
+        Install ZFS in this release.
+        """
+        host = self.ldis_host
+        log.cl_info("installing ZFS RPMs on host [%s]", host.sh_hostname)
+        install_timeout = constant.LONGEST_SIMPLE_COMMAND_TIME * 2
+        rpm_fnames = self.ldis_needed_zfs_rpm_fnames(log)
+        if rpm_fnames is None:
+            log.cl_error("failed to get ZFS rpms of Lustre release")
+            return -1
+        if len(rpm_fnames) == 0:
+            log.cl_error("no ZFS rpms is found")
+            return -1
+        command = "cd %s && rpm -ivh" % self.ldis_lustre_rpm_dir
+        for rpm_fname in rpm_fnames:
+            command += " " + rpm_fname
+        retval = host.sh_run(log, command, timeout=install_timeout)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def _ldis_install_lustre_rpms(self, log):
+        """
+        Install Lustre in this release.
+        """
+        host = self.ldis_host
+        install_timeout = constant.LONGEST_SIMPLE_COMMAND_TIME * 2
+        log.cl_info("installing Lustre RPMs on host [%s]", host.sh_hostname)
+        for rpm_type in lustre_version.LUSTRE_RPM_TYPES:
+            if rpm_type not in self.ldis_lustre_rpm_dict:
+                continue
+
+            command = ("rpm -ivh --force --nodeps %s/%s" %
+                       (self.ldis_lustre_rpm_dir,
+                        self.ldis_lustre_rpm_dict[rpm_type]))
+            retval = host.sh_run(log, command,
+                                 timeout=install_timeout)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command, host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+        return 0
+
+    def _ldis_check_e2fsprogs(self, log, local_host, workspace):
+        """
+        Check whether e2fsprogs dir contain expected RPMs
+        """
+        # pylint: disable=too-many-branches
+        host = self.ldis_host
+
+        fnames = host.sh_get_dir_fnames(log, self.ldis_e2fsprogs_rpm_dir)
+        if fnames is None:
+            log.cl_error("failed to get the file names under [%s] of "
+                         "host [%s]",
+                         self.ldis_e2fsprogs_rpm_dir,
+                         host.sh_hostname)
+            return -1
+
         for fname in fnames:
             if not fname.endswith(".rpm"):
                 continue
@@ -1950,7 +2394,7 @@ class LustreDistribution():
 
             command = ("rpm -qp %s/%s --queryformat '%%{version}-%%{release} %%{url}'" %
                        (self.ldis_e2fsprogs_rpm_dir, fname))
-            retval = local_host.sh_run(log, command)
+            retval = host.sh_run(log, command)
             if retval.cr_exit_status != 0:
                 log.cl_error("failed to run command [%s] on host [%s], "
                              "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -1964,7 +2408,7 @@ class LustreDistribution():
             if len(lines) != 1:
                 log.cl_error("unexpected output of command [%s] on host [%s], "
                              "stdout = [%s]",
-                             command, local_host.sh_hostname,
+                             command, host.sh_hostname,
                              retval.cr_stdout)
                 return -1
             line = lines[0]
@@ -1972,84 +2416,126 @@ class LustreDistribution():
             if len(fields) != 2:
                 log.cl_error("unexpected output of command [%s] on host [%s], "
                              "stdout = [%s]",
-                             command, local_host.sh_hostname,
+                             command, host.sh_hostname,
                              retval.cr_stdout)
                 return -1
 
             if ("wc" not in fields[0]) or ("whamcloud" not in fields[1]):
                 log.cl_error("improper e2fsprogs rpms under dir [%s] of host [%s]",
                              self.ldis_e2fsprogs_rpm_dir,
-                             local_host.sh_hostname)
+                             host.sh_hostname)
                 return -1
             self.ldis_e2fsprogs_version = fields[0]
         if self.ldis_e2fsprogs_version is None:
-            log.cl_error("no e2fsprogs under dir [%s] of host [%s]",
-                         self.ldis_e2fsprogs_rpm_dir, local_host.sh_hostname)
+            log.cl_error("failed to find e2fsprogs under dir [%s] of host [%s]",
+                         self.ldis_e2fsprogs_rpm_dir, host.sh_hostname)
             return -1
+
+        rinfo = e2fsprogs_read_release_info(log, local_host, workspace, host,
+                                            self.ldis_e2fsprogs_dir)
+        if rinfo is None:
+            log.cl_error("failed to read E2fsprogs release info from dir [%s]",
+                         self.ldis_e2fsprogs_dir)
+            return -1
+        if rinfo.rli_file_dict is None:
+            log.cl_error("E2fsprogs release [%s] on host [%s] does not contain file information",
+                         self.ldis_e2fsprogs_dir,
+                         local_host.sh_hostname)
+            return -1
+        complete = rinfo.rli_files_are_complete(log, host, self.ldis_e2fsprogs_dir,
+                                                ignore_unncessary_files=True)
+        if complete < 0:
+            return -1
+        if not complete:
+            log.cl_error("E2fsprogs release is not complete")
+            return -1
+
+        self.ldis_e2fsprogs_rinfo = rinfo
         return 0
 
-    def _ldis_check_lustre(self, log):
+    def _ldis_check_lustre(self, log, local_host, workspace,
+                           definition_dir=constant.LUSTRE_VERSION_DEFINITION_DIR):
         """
-        Prepare the RPMs
+        Check the Lustre RPMs
         """
-        # pylint: disable=too-many-branches
-        local_hostname = socket.gethostname()
-        try:
-            rpm_files = os.listdir(self.ldis_lustre_rpm_dir)
-        except:
-            log.cl_error("failed to list dir [%s] on local host [%s]",
-                         self.ldis_lustre_rpm_dir, local_hostname)
+        # pylint: disable=too-many-branches,too-many-statements
+        # pylint: disable=too-many-locals
+        host = self.ldis_host
+        rpm_files = host.sh_get_dir_fnames(log, self.ldis_lustre_rpm_dir)
+        if rpm_files is None:
+            log.cl_error("failed to get fnames under dir [%s] on host [%s]",
+                         self.ldis_lustre_rpm_dir, host.sh_hostname)
+            return -1
+
+        version_db = lustre_version.load_lustre_version_database(log, local_host,
+                                                                 definition_dir)
+        if version_db is None:
+            log.cl_error("failed to load version database [%s]",
+                         definition_dir)
             return -1
 
         self.ldis_lustre_version, self.ldis_lustre_rpm_dict = \
-            lustre_version.match_lustre_version_from_rpms(log, rpm_files)
+            version_db.lvd_match_version_from_rpms(log, rpm_files)
         if self.ldis_lustre_version is None:
             log.cl_error("failed to detect Lustre version from RPMs under "
-                         "dir [%s] on local host [%s]",
-                         self.ldis_lustre_rpm_dir, local_hostname)
+                         "dir [%s] on host [%s]",
+                         self.ldis_lustre_rpm_dir,
+                         host.sh_hostname)
             return -1
-        log.cl_info("detected Lustre version [%s] under dir [%s]",
-                    self.ldis_lustre_version.lv_name,
-                    self.ldis_lustre_rpm_dir)
+        log.cl_info("Lustre version [%s] detected from RPM files",
+                    self.ldis_lustre_version.lv_version_name)
 
-        ldiskfs_disable_reasons = []
-        zfs_disable_reasons = []
-        missing_rpms = []
+        ldiskfs_disable_reasons = ""
+        zfs_disable_reasons = ""
+        missing_rpms = ""
         for rpm_name in self.ldis_lustre_version.lv_rpm_pattern_dict:
             if rpm_name in lustre_version.LUSTRE_CLIENT_REQUIRED_RPM_TYPES:
                 continue
             if rpm_name not in self.ldis_lustre_rpm_dict:
-                if rpm_name in (lustre_version.RPM_OSD_LDISKFS,
-                                lustre_version.RPM_OSD_LDISKFS_MOUNT):
-                    ldiskfs_disable_reasons.append(rpm_name)
-                elif rpm_name in (lustre_version.RPM_OSD_ZFS,
-                                  lustre_version.RPM_OSD_ZFS_MOUNT):
-                    zfs_disable_reasons.append(rpm_name)
+                if rpm_name in (lustre_version.LVD_LUSTRE_OSD_LDISKFS,
+                                lustre_version.LVD_LUSTRE_OSD_LDISKFS_MOUNT):
+                    if ldiskfs_disable_reasons != "":
+                        ldiskfs_disable_reasons += ","
+                    ldiskfs_disable_reasons += rpm_name
+                elif rpm_name in (lustre_version.LVD_LUSTRE_OSD_ZFS,
+                                  lustre_version.LVD_LUSTRE_OSD_ZFS_MOUNT):
+                    if zfs_disable_reasons != "":
+                        zfs_disable_reasons += ","
+                    zfs_disable_reasons += rpm_name
+                elif rpm_name in (lustre_version.LVD_RPM_KERNEL_CORE,
+                                  lustre_version.LVD_RPM_KERNEL_MODULES):
+                    # kernel-core and kernel-modules do not exist for RHEL7
+                    # kernels.
+                    pass
                 else:
-                    missing_rpms.append(rpm_name)
+                    if missing_rpms != "":
+                        missing_rpms += ","
+                    missing_rpms += rpm_name
 
-        if len(missing_rpms) > 0:
-            log.cl_error("failed to find RPM for %s as version [%s] under "
+        if missing_rpms != "":
+            log.cl_error("failed to find RPMs [%s] with version [%s] under "
                          "dir [%s]",
-                         missing_rpms,
-                         self.ldis_lustre_version.lv_name,
+                         missing_rpms, self.ldis_lustre_version.lv_version_name,
                          self.ldis_lustre_rpm_dir)
             return -1
 
-        if len(ldiskfs_disable_reasons) > 0:
-            log.cl_info("disabling ldiskfs support because no RPM found "
-                        "for %s",
+        if ldiskfs_disable_reasons != "":
+            log.cl_info("ldiskfs support due to missing rpms [%s]",
                         ldiskfs_disable_reasons)
             self.ldis_ldiskfs_support = False
 
-        if len(zfs_disable_reasons) > 0:
-            log.cl_info("disabling zfs support because no RPM found for %s",
+        if zfs_disable_reasons != "":
+            log.cl_info("zfs support disabled due to missing rpms [%s]",
                         zfs_disable_reasons)
             self.ldis_zfs_support = False
 
-        kernel_rpm_name = self.ldis_lustre_rpm_dict[lustre_version.RPM_KERNEL]
+        if lustre_version.LVD_RPM_KERNEL_CORE in self.ldis_lustre_rpm_dict:
+            kernel_rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL_CORE]
+        else:
+            kernel_rpm_name = self.ldis_lustre_rpm_dict[lustre_version.LVD_RPM_KERNEL]
+
         kernel_rpm_path = (self.ldis_lustre_rpm_dir + '/' + kernel_rpm_name)
-        command = ("rpm -qpl %s | grep /lib/modules |"
+        command = ("rpm -qpl %s | grep /lib/modules/ |"
                    "sed 1q | awk -F '/' '{print $4}'" %
                    kernel_rpm_path)
         retval = utils.run(command)
@@ -2061,23 +2547,187 @@ class LustreDistribution():
                          retval.cr_stderr)
             return -1
         self.ldis_kernel_version = retval.cr_stdout.strip()
-        self.ldis_prepared = True
+
+        rinfo = lustre_read_release_info(log, local_host, workspace,
+                                         host, self.ldis_lustre_dir)
+        if rinfo is None:
+            log.cl_error("failed to read Lustre release info from dir [%s] on host [%s]",
+                         self.ldis_lustre_dir, host.sh_hostname)
+            return -1
+        rinfo.rli_nondist_relative_fpaths = self.ldis_nondist_lustre_relative_fpaths
+        rinfo.rli_nondist_relative_dir_paths = self.ldis_nondist_lustre_relative_dir_paths
+        if rinfo.rli_file_dict is None:
+            log.cl_error("Lustre release [%s] on host [%s] does not contain file information",
+                         self.ldis_lustre_dir,
+                         host.sh_hostname)
+            return -1
+        complete = rinfo.rli_files_are_complete(log, host, self.ldis_lustre_dir,
+                                                ignore_unncessary_files=True)
+        if complete < 0:
+            return -1
+        if not complete:
+            log.cl_error("Lustre release [%s] is not complete", self.ldis_lustre_dir)
+            return -1
+
+        self.ldis_lustre_rinfo = rinfo
+        self.ldis_checked = True
         return 0
 
-    def ldis_prepare(self, log):
+    def ldis_check(self, log, local_host, workspace,
+                   definition_dir=constant.LUSTRE_VERSION_DEFINITION_DIR):
         """
         Prepare the RPMs
         """
-        rc = self._ldis_check_e2fsprogs(log)
+        rc = self._ldis_check_e2fsprogs(log, local_host, workspace)
         if rc:
             log.cl_error("failed to check e2fsprogs RPMs")
             return -1
 
-        rc = self._ldis_check_lustre(log)
+        rc = self._ldis_check_lustre(log, local_host, workspace, definition_dir=definition_dir)
         if rc:
             log.cl_error("failed to check Lustre RPMs")
             return -1
-        self.ldis_prepared = True
+        self.ldis_checked = True
+        return 0
+
+    def _ldis_missing_devel_types(self, log, local_host):
+        """
+        Return the RPM fnames that need to be installed.
+        """
+        rpm_dict = {}
+        rpm_name_dict = {}
+        rpm_name_dict[lustre_version.LVD_LUSTRE] = "lustre"
+        rpm_dict[lustre_version.LVD_LUSTRE] = self.ldis_lustre_rpm_dict[lustre_version.LVD_LUSTRE]
+        if lustre_version.LVD_LUSTRE_DEVEL in self.ldis_lustre_rpm_dict:
+            rpm_name_dict[lustre_version.LVD_LUSTRE_DEVEL] = "lustre-devel"
+            rpm_dict[lustre_version.LVD_LUSTRE_DEVEL] = self.ldis_lustre_rpm_dict[lustre_version.LVD_LUSTRE_DEVEL]
+
+        missing_rpm_types = []
+        for rpm_type in rpm_dict:
+            rpm_name = rpm_name_dict[rpm_type]
+            command = "rpm -qi %s" % rpm_name
+
+            retval = local_host.sh_run(log, command)
+            if retval.cr_exit_status == 0:
+                continue
+            missing_rpm_types.append(rpm_type)
+        return missing_rpm_types
+
+    def ldis_install_lustre_devel_rpms(self, log, host):
+        """
+        Install Lustre until on local host
+        """
+        missing_rpm_types = self._ldis_missing_devel_types(log, host)
+        if len(missing_rpm_types) == 0:
+            return 0
+
+        log.cl_info("installing RPM [%s] for build on host [%s]",
+                    utils.list2string(missing_rpm_types), host.sh_hostname)
+        command = "rpm -ivh --nodeps"
+        for rpm_type in missing_rpm_types:
+            rpm_name = self.ldis_lustre_rpm_dict[rpm_type]
+            rpm_fpath = self.ldis_lustre_rpm_dir + "/" + rpm_name
+            command += " " + rpm_fpath
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        missing_rpm_types = self._ldis_missing_devel_types(log, host)
+
+        if len(missing_rpm_types) != 0:
+            log.cl_error("Lustre rpms [%s] are still not installed",
+                         utils.list2string(missing_rpm_types))
+            return -1
+        return 0
+
+    def ldis_install_e2fsprogs_rpms(self, log):
+        """
+        Install E2fsprogs until on host
+        """
+        host = self.ldis_host
+        need_install = False
+        retval = host.sh_run(log, "rpm -q e2fsprogs --queryformat '%{version}-%{release}'")
+        if retval.cr_exit_status:
+            log.cl_info("installing e2fsprogs [%s] on host [%s]",
+                        self.ldis_e2fsprogs_version, host.sh_hostname)
+            need_install = True
+        else:
+            current_version = retval.cr_stdout
+            if self.ldis_e2fsprogs_version != current_version:
+                log.cl_info("upgrading e2fsprogs from [%s] to [%s] on host [%s]",
+                            current_version, self.ldis_e2fsprogs_version,
+                            host.sh_hostname)
+                need_install = True
+
+        if not need_install:
+            log.cl_info("e2fsprogs [%s] already installed on host [%s]",
+                        self.ldis_e2fsprogs_version,
+                        host.sh_hostname)
+            return 0
+
+        command = "rpm -Uvh %s/*.rpm" % self.ldis_e2fsprogs_rpm_dir
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def ldis_can_skip_install_lustre(self, log, host):
+        """
+        Check whether the install of Lustre RPMs could be skipped
+        """
+        for rpm_fname in self.ldis_lustre_rpm_dict.values():
+            log.cl_debug("checking whether RPM [%s] is installed on "
+                         "host [%s]", rpm_fname, host.sh_hostname)
+            rpm_name, _ = os.path.splitext(rpm_fname)
+            if not host.sh_has_rpm(log, rpm_name):
+                log.cl_debug("RPM [%s] is not installed on host [%s], "
+                             "will not skip install",
+                             rpm_name, host.sh_hostname)
+                return False
+        return True
+
+    def ldis_install(self, log):
+        """
+        Install this release.
+        """
+        ret = self._ldis_install_kernel(log)
+        if ret:
+            log.cl_error("failed to install Lustre kernel")
+            return -1
+
+        ret = self._ldis_install_ofed(log)
+        if ret:
+            log.cl_error("failed to install OFED")
+            return -1
+
+        ret = self.ldis_install_e2fsprogs_rpms(log)
+        if ret:
+            log.cl_error("failed to install e2fsprogs")
+            return -1
+
+        if self.ldis_zfs_support:
+            ret = self._ldis_install_zfs(log)
+            if ret:
+                log.cl_error("failed to install ZFS")
+                return -1
+
+        ret = self._ldis_install_lustre_rpms(log)
+        if ret:
+            log.cl_error("failed to install Lustre RPMs")
+            return -1
         return 0
 
 
@@ -2088,20 +2738,61 @@ def lustre_client_id(fsname, mnt):
     return "%s:%s" % (fsname, mnt)
 
 
+class LustreOBDDevice():
+    """
+    The device status got from "lctl devices"
+    """
+    # pylint: disable=too-many-instance-attributes,too-few-public-methods
+    def __init__(self, device_index, status, type_name,
+                 obd_name, obd_uuid, refcount):
+        # String of device index
+        self.lobd_device_index = device_index
+        # ST: stopping, IN: inactive, UP: set_up, AT: attached, __: else.
+        self.lobd_device_status = status
+        # Device type, e.g. mds, osd-ldiskfs, mgc, lod, mdt, mdd, qmt, osp, lwp.
+        self.lobd_type_name = type_name
+        # OBD name, e.g. MDS, lustre0-MDT0000-osd, MGS, MGC10.0.1.1@tcp,
+        # lustre0-MDT0000-mdtlov, lustre0-MDT0000, lustre0-QMT0000,
+        # lustre0-MDT0001-osp-MDT0000, lustre0-OST0000-osc-MDT0000,
+        # lustre0-MDT0000-lwp-MDT0000
+        self.lobd_obd_name = obd_name
+        # UUID, e.g. MDS_uuid, lustre0-MDT0000-osd_UUID, MGS,
+        # c00a4a1f-5e08-4054-9b81-f4b055923152, lustre0-MDT0000-mdtlov_UUID,
+        # lustre0-MDT0000_UUID, lustre0-MDD0000_UUID, lustre0-QMT0000_UUID,
+        # lustre0-MDT0000-mdtlov_UUID, lustre0-MDT0000-lwp-MDT0000_UUID
+        self.lobd_uuid = obd_uuid
+        # String of reference count
+        self.lobd_refcount = refcount
+
+
+def obd_line2device(log, line):
+    """
+    See obd_device_list_seq_show() for the outout format.
+    """
+    fields = line.split()
+    if len(fields) != 6:
+        log.cl_error("unexpected field number of line [%s]", line)
+        return None
+    device_index = fields[0]
+    status = fields[1]
+    type_name = fields[2]
+    obd_name = fields[3]
+    obd_uuid = fields[4]
+    refcount = fields[5]
+    return LustreOBDDevice(device_index, status, type_name,
+                           obd_name, obd_uuid, refcount)
+
+
 class LustreHost(ssh_host.SSHHost):
     # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """
     Each host being used to run Lustre tests has an object of this
     """
-    LSH_ERROR = "error"
-    LSH_HEALTHY = "healthy"
-    LSH_UNHEALTHY = "UNHEALTHY"
-    LSH_LBUG = "LBUG"
-
-    def __init__(self, hostname, lustre_dist=None, identity_file=None,
-                 local=False, is_server=False, is_client=False,
+    def __init__(self, hostname, identity_file=None,
+                 ssh_port=22, local=False, is_server=False, is_client=False,
                  ssh_for_local=True, login_name="root"):
-        super().__init__(hostname, identity_file=identity_file, local=local,
+        super().__init__(hostname, identity_file=identity_file,
+                         ssh_port=ssh_port, local=local,
                          ssh_for_local=ssh_for_local, login_name=login_name)
         # key: $fsname:$mnt, value: LustreClient object
         self.lsh_clients = {}
@@ -2114,8 +2805,6 @@ class LustreHost(ssh_host.SSHHost):
         self.lsh_mgsi = None
         # Key: ls_service_name, value instance object
         self.lsh_instance_dict = {}
-        # LustreDistribution. If not want to install Lustre, set this to None
-        self.lsh_lustre_dist = lustre_dist
         self.lsh_lustre_version_major = None
         self.lsh_lustre_version_minor = None
         self.lsh_lustre_version_patch = None
@@ -2481,21 +3170,27 @@ class LustreHost(ssh_host.SSHHost):
 
         return 0
 
-    def _lsh_lustre_uninstall(self, log):
-        # pylint: disable=too-many-return-statements,too-many-branches
-        # pylint: disable=too-many-statements
+    def _lsh_yum_cleanup(self, log):
         """
-        Uninstall Lustre RPMs
+        Cleanup YUM repository.
         """
-        ret = self.sh_run(log, "rpm --rebuilddb")
-        if ret.cr_exit_status != 0:
-            log.cl_error("failed to run 'rpm --rebuilddb' on host "
-                         "[%s], ret = %d, stdout = [%s], stderr = [%s]",
-                         self.sh_hostname, ret.cr_exit_status,
-                         ret.cr_stdout, ret.cr_stderr)
+        distro = self.sh_distro(log)
+        if distro is None:
+            log.cl_error("failed to get distro of host [%s]",
+                         self.sh_hostname)
+            return -1
+        if distro != os_distro.DISTRO_RHEL7:
+            return 0
+        command = "rpm --rebuilddb"
+        retval = self.sh_run(log, command)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         self.sh_hostname, retval.cr_exit_status,
+                         retval.cr_stdout, retval.cr_stderr)
             return -1
 
-        log.cl_info("killing all yum processes on host [%s]",
+        log.cl_info("cleaning up yum processes on host [%s]",
                     self.sh_hostname)
         ret = self.sh_run(log, "ps aux | grep -v grep | grep yum | "
                           "awk '{print $2}'")
@@ -2521,12 +3216,10 @@ class LustreHost(ssh_host.SSHHost):
                     self.sh_hostname)
         ret = self.sh_run(log, "which yum-complete-transaction")
         if ret.cr_exit_status != 0:
-            ret = self.sh_run(log, "yum install yum-utils -y")
-            if ret.cr_exit_status != 0:
-                log.cl_error("failed to install yum-utils on host "
-                             "[%s], ret = %d, stdout = [%s], stderr = [%s]",
-                             self.sh_hostname, ret.cr_exit_status,
-                             ret.cr_stdout, ret.cr_stderr)
+            ret = self.sh_yum_install(log, ["yum-utils"])
+            if ret:
+                log.cl_error("failed to install yum-utils on host [%s]",
+                             self.sh_hostname)
                 return -1
 
         ret = self.sh_run(log, "yum-complete-transaction")
@@ -2536,454 +3229,90 @@ class LustreHost(ssh_host.SSHHost):
                          self.sh_hostname, ret.cr_exit_status,
                          ret.cr_stdout, ret.cr_stderr)
             return -1
+        return 0
 
+    def _lsh_lustre_uninstall(self, log):
+        # pylint: disable=too-many-return-statements,too-many-branches
+        # pylint: disable=too-many-statements
+        """
+        Uninstall Lustre RPMs
+        """
         log.cl_info("uninstalling existing Lustre RPMs on host [%s]",
                     self.sh_hostname)
-        ret = self.sh_rpm_find_and_uninstall(log, "grep lustre")
-        if ret != 0:
-            log.cl_error("failed to uninstall Lustre RPMs on host "
-                         "[%s]", self.sh_hostname)
-            return -1
-
-        zfs_rpms = ["libnvpair1", "libuutil1", "libzfs2", "libzpool2",
-                    "kmod-spl", "kmod-zfs", "spl", "zfs"]
-        rpm_string = ""
-        for zfs_rpm in zfs_rpms:
-            if self.sh_has_rpm(log, zfs_rpm):
-                if rpm_string != "":
-                    rpm_string += " "
-                rpm_string += zfs_rpm
-
-        if rpm_string != "":
-            retval = self.sh_run(log, "rpm -e --nodeps %s" % rpm_string)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to uninstall ZFS RPMs on host "
-                             "[%s], ret = %d, stdout = [%s], stderr = [%s]",
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        return 0
-
-    def _lsh_install_e2fsprogs(self, log, workspace):
-        """
-        Install e2fsprogs RPMs for Lustre
-        """
-        # pylint: disable=too-many-return-statements,too-many-locals
-        lustre_dist = self.lsh_lustre_dist
-        e2fsprogs_dir = lustre_dist.ldis_e2fsprogs_rpm_dir
-        command = ("mkdir -p %s" % workspace)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-        basename = os.path.basename(e2fsprogs_dir)
-        host_copying_rpm_dir = workspace + "/" + basename
-        host_e2fsprogs_rpm_dir = workspace + "/" + "e2fsprogs_rpms"
-
-        ret = self.sh_send_file(log, e2fsprogs_dir, workspace)
-        if ret:
-            log.cl_error("failed to send e2fsprogs RPMs [%s] on local host to "
-                         "directory [%s] on host [%s]",
-                         e2fsprogs_dir, workspace,
-                         self.sh_hostname)
-            return -1
-
-        if host_copying_rpm_dir != host_e2fsprogs_rpm_dir:
-            command = ("mv %s %s" % (host_copying_rpm_dir, host_e2fsprogs_rpm_dir))
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        need_install = False
-        retval = self.sh_run(log,
-                             "rpm -q e2fsprogs --queryformat '%{version}-%{release}'")
-        if retval.cr_exit_status != 0:
-            need_install = True
-        else:
-            current_version = retval.cr_stdout
-            if lustre_dist.ldis_e2fsprogs_version != current_version:
-                need_install = True
-        if not need_install:
-            log.cl_info("e2fsprogs RPMs with version [%s] are already "
-                        "installed on host [%s]", current_version,
-                        self.sh_hostname)
-            return 0
-
-        log.cl_info("installing e2fsprogs RPMs with version [%s] on host [%s]",
-                    lustre_dist.ldis_e2fsprogs_version, self.sh_hostname)
-        command = "rpm -Uvh %s/*.rpm" % host_e2fsprogs_rpm_dir
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to run command [%s] on host [%s], ret = %d, "
-                         "stdout = [%s], stderr = [%s]",
-                         command, self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout, retval.cr_stderr)
-            return -1
-
-        return 0
-
-    def _lsh_update_ssh_config(self, log):
-        """
-        Update SSH config
-        """
-        host_key_config = "StrictHostKeyChecking no"
-        retval = self.sh_run(log, r"grep StrictHostKeyChecking /etc/ssh/ssh_config "
-                             r"| grep -v \#")
-        if retval.cr_exit_status != 0:
-            retval = self.sh_run(log, "echo '%s' >> /etc/ssh/ssh_config" %
-                                 host_key_config)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to change ssh config on host [%s]",
-                             self.sh_hostname)
-                return -1
-        else:
-            line = retval.cr_stdout.strip()
-            if line != host_key_config:
-                log.cl_error("unexpected StrictHostKeyChecking config on "
-                             "host [%s], expected [%s], got [%s]",
-                             self.sh_hostname, host_key_config,
-                             line)
+        names = ["lustre", "libnvpair", "libuutil", "libzfs",
+                 "libzpool", "kmod-spl", "kmod-zfs", "spl", "zfs"]
+        for name in names:
+            grep_command = "grep " + name
+            ret = self.sh_rpm_find_and_uninstall(log, grep_command)
+            if ret != 0:
+                log.cl_error("failed to uninstall RPMs with name [%s] on host "
+                             "[%s]", name, self.sh_hostname)
                 return -1
         return 0
 
-    def _lsh_install_ofed(self, log, host_lustre_rpm_dir):
+    def lsh_lustre_install(self, log, workspace, local_lustre_distr):
         """
-        Install ofed if necessary
+        Install Lustre RPMs on a host.
         """
-        fnames = self.sh_get_dir_fnames(log, host_lustre_rpm_dir)
-        if fnames is None:
-            log.cl_error("failed to get the file names under [%s] of "
-                         "host [%s]",
-                         host_lustre_rpm_dir, self.sh_hostname)
+        local_host = local_lustre_distr.ldis_host
+        if not local_lustre_distr.ldis_checked:
+            log.cl_error("Lustre release [%s] on local host [%s] has not been checked",
+                         local_lustre_distr.ldis_lustre_dir,
+                         local_host.sh_hostname)
             return -1
 
-        mlnx_ofa_kernel_fname = None
-        prefix = "mlnx-ofa_kernel-"
-        length = len(prefix)
-        for fname in fnames:
-            if len(fname) <= length:
-                continue
-            if not fname.startswith(prefix):
-                continue
-            first_char = fname[length:length + 1]
-            if not first_char.isdigit():
-                continue
-            mlnx_ofa_kernel_fname = fname
-            break
-        if mlnx_ofa_kernel_fname is None:
-            log.cl_info("no OFED RPM found, skipping OFED installation on host [%s]",
-                        self.sh_hostname)
-            return 0
-
-        log.cl_info("installing OFED RPM on host [%s]", self.sh_hostname)
-
-        # New version of mlnx-tools might block the installation of old
-        # version mlnx-ofa_kernel, but please do not add it to this list.
-        # The reason is, new mlnx-ofa_kernel like 5.8 depends on mlnx-tools.
-        # Keeping existing mlnx-tools at least gives an chance for manual
-        # fixing of missing mlnx-tools.
-        mlnx_key_rpms = ["mlnx-ofa_kernel",
-                         "mlnx-ofa_kernel-devel",
-                         "mlnx-ofa_kernel-debuginfo",
-                         "kmod-mlnx-ofa_kernel"]
-
-        rpm_string = ""
-        for rpm_name in mlnx_key_rpms:
-            if self.sh_has_rpm(log, rpm_name):
-                if rpm_string != "":
-                    rpm_string += " "
-                rpm_string += rpm_name
-
-        if rpm_string != "":
-            command = "rpm -e --nodeps "+ rpm_string
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        command = ("rpm -ivh  %s/%s %s/kmod-mlnx-ofa_kernel-*.rpm" %
-                   (host_lustre_rpm_dir, mlnx_ofa_kernel_fname,
-                    host_lustre_rpm_dir))
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-        return 0
-
-    def lsh_lustre_install(self, log, workspace):
-        """
-        Install Lustre RPMs on a host
-        """
-        # pylint: disable=too-many-return-statements,too-many-branches
-        # pylint: disable=too-many-statements,too-many-locals
-        lustre_dist = self.lsh_lustre_dist
-        if not lustre_dist.ldis_prepared:
-            log.cl_error("Lustre RPMs [%s] is not prepared for host [%s]",
-                         lustre_dist.lr_distribution_id,
-                         self.sh_hostname)
-            return -1
-        command = ("mkdir -p %s" % workspace)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-        basename = os.path.basename(lustre_dist.ldis_lustre_rpm_dir)
-        host_copying_rpm_dir = workspace + "/" + basename
-        host_lustre_rpm_dir = workspace + "/" + "lustre_dist"
-
-        ret = self.sh_send_file(log, lustre_dist.ldis_lustre_rpm_dir,
-                                workspace)
-        if ret:
-            log.cl_error("failed to send Lustre RPMs [%s] on local host to "
-                         "directory [%s] on host [%s]",
-                         lustre_dist.ldis_lustre_rpm_dir, workspace,
-                         self.sh_hostname)
-            return -1
-
-        if host_copying_rpm_dir != host_lustre_rpm_dir:
-            command = ("mv %s %s" % (host_copying_rpm_dir, host_lustre_rpm_dir))
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        ret = self._lsh_update_ssh_config(log)
+        log.cl_info("updating ssh config of host [%s]", self.sh_hostname)
+        ret = self.sh_disable_ssh_key_checking(log)
         if ret:
             log.cl_error("failed to update SSH config on host [%s]",
                          self.sh_hostname)
             return -1
 
-        log.cl_info("installing kernel RPM on host [%s]",
+        log.cl_info("installing Lustre release [%s] of local host [%s] on host [%s]",
+                    local_lustre_distr.ldis_lustre_dir,
+                    local_host.sh_hostname,
                     self.sh_hostname)
-        if lustre_version.RPM_KERNEL_FIRMWARE in lustre_dist.ldis_lustre_rpm_dict:
-            rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_KERNEL_FIRMWARE]
-            retval = self.sh_run(log, "rpm -ivh --force %s/%s" %
-                                 (host_lustre_rpm_dir, rpm_name),
-                                 timeout=ssh_host.LONGEST_TIME_RPM_INSTALL)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to install kernel RPM on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             self.sh_hostname, retval.cr_exit_status,
-                             retval.cr_stdout, retval.cr_stderr)
-                return -1
 
-        rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_KERNEL]
-        retval = self.sh_run(log, "rpm -ivh --force %s/%s" %
-                             (host_lustre_rpm_dir, rpm_name),
-                             timeout=ssh_host.LONGEST_TIME_RPM_INSTALL)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to install kernel RPM on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         self.sh_hostname, retval.cr_exit_status,
-                         retval.cr_stdout, retval.cr_stderr)
-            return -1
-
-        distro = self.sh_distro(log)
-        if distro is None:
-            log.cl_error("failed to get distro of host [%s]",
+        host_lustre_dir = workspace + "/" + constant.CORAL_LUSTRE_RELEASE_BASENAME
+        host_e2fsprogs_dir = workspace + "/" + constant.CORAL_E2FSPROGS_RELEASE_BASENAME
+        remote_dist = local_lustre_distr.ldis_send_from_local(log, self,
+                                                              host_lustre_dir,
+                                                              host_e2fsprogs_dir)
+        if remote_dist is None:
+            log.cl_error("failed to send Lustre release to host [%s]",
                          self.sh_hostname)
             return -1
-        if distro == os_distro.DISTRO_RHEL7:
-            # Somehow crashkernel=auto doen't work for RHEL7 sometimes
-            log.cl_info("changing boot argument of crashkernel on host [%s]",
-                        self.sh_hostname)
-            bios_based_config = "/boot/grub2/grub.cfg"
-            uefi_based_config = "/boot/efi/EFI/redhat/grub.cfg"
-            uefi_centos_based_config = "/boot/efi/EFI/centos/grub.cfg"
-
-            ret = self.sh_path_exists(log, bios_based_config)
-            if ret < 0:
-                log.cl_error("failed to check whether [%s] exists on host [%s]",
-                             bios_based_config, self.sh_hostname)
-                return -1
-            bios_based_config_exists = bool(ret)
-
-            ret = self.sh_path_exists(log, uefi_based_config)
-            if ret < 0:
-                log.cl_error("failed to check whether [%s] exists on host [%s]",
-                             uefi_based_config, self.sh_hostname)
-                return -1
-            uefi_based_config_exists = bool(ret)
-
-            ret = self.sh_path_exists(log, uefi_centos_based_config)
-            if ret < 0:
-                log.cl_error("failed to check whether [%s] exists on host [%s]",
-                             uefi_centos_based_config, self.sh_hostname)
-                return -1
-            uefi_centos_based_config_exists = bool(ret)
-            if ((not bios_based_config_exists) and
-                    (not uefi_based_config_exists) and
-                    (not uefi_centos_based_config_exists)):
-                log.cl_error("none of boot config files [%s], [%s] and [%s] "
-                             "exists on host [%s]",
-                             bios_based_config, uefi_based_config,
-                             uefi_centos_based_config,
-                             self.sh_hostname)
-                return -1
-            if bios_based_config_exists:
-                config = bios_based_config
-            elif uefi_based_config_exists:
-                config = uefi_based_config
-            elif uefi_centos_based_config:
-                config = uefi_centos_based_config
-
-            command = ("sed -i 's/crashkernel=auto/crashkernel=128M/g' %s" %
-                       config)
-            retval = self.sh_run(log, command)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command, self.sh_hostname, retval.cr_exit_status,
-                             retval.cr_stdout, retval.cr_stderr)
-                return -1
-        else:
-            log.cl_error("unsupported distro [%s]", distro)
-            return -1
-
-        ret = self._lsh_install_ofed(log, host_lustre_rpm_dir)
+        ret = remote_dist.ldis_install(log)
         if ret:
-            log.cl_error("failed to install OFED on host [%s]",
-                         self.sh_hostname)
+            log.cl_error("failed to install Lustre release [%s] on host [%s]",
+                         host_lustre_dir, self.sh_hostname)
             return -1
-
-        if self._lsh_install_e2fsprogs(log, workspace):
-            log.cl_error("failed to install e2fsprogs on host [%s]",
-                         self.sh_hostname)
-            return -1
-
-        # Remove any files under the test directory to avoid FID problem
-        log.cl_debug("removing directory [%s] on host [%s]",
-                     LUSTRE_TEST_SCRIPT_DIR, self.sh_hostname)
-        retval = self.sh_run(log, "rm %s -fr" % LUSTRE_TEST_SCRIPT_DIR)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to remove [%s] on host "
-                         "[%s], ret = %d, stdout = [%s], stderr = [%s]",
-                         LUSTRE_TEST_SCRIPT_DIR, self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-        if lustre_dist.ldis_zfs_support:
-            log.cl_info("installing ZFS RPMs on host [%s]", self.sh_hostname)
-            install_timeout = ssh_host.LONGEST_SIMPLE_COMMAND_TIME * 2
-            retval = self.sh_run(log, "cd %s && rpm -ivh libnvpair1-* libuutil1-* "
-                                 "libzfs2-0* libzpool2-0* kmod-spl-[34]* "
-                                 "kmod-zfs-[34]* spl-0* zfs-0*" %
-                                 (host_lustre_rpm_dir),
-                                 timeout=install_timeout)
-            if retval.cr_exit_status != 0:
-                log.cl_error("failed to install ZFS RPMs on host "
-                             "[%s], ret = %d, stdout = [%s], stderr = [%s]",
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        log.cl_info("installing Lustre RPMs on host [%s]", self.sh_hostname)
-        for rpm_type in lustre_version.LUSTRE_RPM_TYPES:
-            if rpm_type not in lustre_dist.ldis_lustre_rpm_dict:
-                continue
-            install_timeout = ssh_host.LONGEST_SIMPLE_COMMAND_TIME * 2
-            command = ("rpm -ivh --force --nodeps %s/%s" %
-                       (host_lustre_rpm_dir,
-                        lustre_dist.ldis_lustre_rpm_dict[rpm_type]))
-            retval = self.sh_run(log, command,
-                                 timeout=install_timeout)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command, self.sh_hostname,
-                             retval.cr_exit_status, retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        log.cl_info("installed RPMs under [%s] on host [%s]",
-                    host_lustre_rpm_dir, self.sh_hostname)
-
         return 0
 
-    def _lsh_lustre_reinstall(self, log, workspace):
+    def _lsh_lustre_reinstall(self, log, workspace, local_lustre_distr):
         """
         Reinstall Lustre RPMs
         """
+        ret = self._lsh_yum_cleanup(log)
+        if ret:
+            log.cl_error("failed to cleanup YUM status on host [%s]",
+                         self.sh_hostname)
+            return -1
+
         ret = self._lsh_lustre_uninstall(log)
         if ret:
             log.cl_error("failed to uninstall Lustre RPMs on host [%s]",
                          self.sh_hostname)
             return -1
 
-        ret = self.lsh_lustre_install(log, workspace)
+        ret = self.lsh_lustre_install(log, workspace, local_lustre_distr)
         if ret != 0:
             log.cl_error("failed to install RPMs on host [%s]",
                          self.sh_hostname)
             return -1
         return 0
 
-    def _lsh_can_skip_install(self, log):
-        """
-        Check whether the install of Lustre RPMs could be skipped
-        """
-        lustre_dist = self.lsh_lustre_dist
-        for rpm_name in lustre_dist.ldis_lustre_rpm_dict.values():
-            log.cl_debug("checking whether RPM [%s] is installed on "
-                         "host [%s]", rpm_name, self.sh_hostname)
-            name, ext = os.path.splitext(rpm_name)
-            if ext != ".rpm":
-                log.cl_debug("RPM [%s] does not have .rpm subfix,"
-                             "go on anyway", rpm_name)
-            if not self.sh_has_rpm(log, name):
-                log.cl_debug("RPM [%s] is not installed on host [%s], "
-                             "will not skip install",
-                             rpm_name, self.sh_hostname)
-                return False
-        return True
-
-    def _lsh_lustre_check_clean(self, log, quiet=True):
+    def _lsh_lustre_check_clean(self, log, local_lustre_distr, quiet=True):
         """
         Check whether the host is clean for running Lustre
         """
@@ -2993,16 +3322,16 @@ class LustreHost(ssh_host.SSHHost):
             func = log.cl_error
             log.cl_info("checking whether host [%s] is clean to run Lustre",
                         self.sh_hostname)
-        if self.lsh_lustre_dist is None:
-            func("Lustre RPMs is not configured for host [%s]",
+        if local_lustre_distr is None:
+            func("Lustre release is not configured for host [%s]",
                  self.sh_hostname)
             return -1
-        if not self.lsh_lustre_dist.ldis_prepared:
-            func("Lustre RPMs [%s] is not prepared for host [%s]",
-                 self.lsh_lustre_dist.lr_distribution_id,
+        if not local_lustre_distr.ldis_checked:
+            func("Lustre release [%s] is not prepared for host [%s]",
+                 local_lustre_distr.ldis_lustre_dir,
                  self.sh_hostname)
             return -1
-        kernel_version = self.lsh_lustre_dist.ldis_kernel_version
+        kernel_version = local_lustre_distr.ldis_kernel_version
         # Check whether kernel is installed kernel
         if not self.sh_is_up(log):
             func("host [%s] is not up", self.sh_hostname)
@@ -3031,12 +3360,12 @@ class LustreHost(ssh_host.SSHHost):
                     self.sh_hostname)
         return 0
 
-    def lsh_lustre_prepare(self, log, workspace, lazy_prepare=False,
-                           skip_reboot=False):
+    def lsh_lustre_prepare(self, log, workspace, local_lustre_distr,
+                           lazy_prepare=False, skip_reboot=False):
         """
         Prepare the host for running Lustre
         """
-        # pylint: disable=too-many-branches
+        # pylint: disable=too-many-branches,too-many-statements
         if (not self.lsh_is_server) and (not self.lsh_is_client):
             # Just cleanup the Lustre module to make the health_check happy
             ret = self.sh_run(log, "which lustre_rmmod")
@@ -3056,8 +3385,7 @@ class LustreHost(ssh_host.SSHHost):
                 return -1
             return 0
 
-        lustre_dist = self.lsh_lustre_dist
-        if lustre_dist is None:
+        if local_lustre_distr is None:
             if self.lsh_is_server:
                 log.cl_error("failed to prepare Lustre server [%s] because Lustre RPMs is not configured",
                              self.sh_hostname)
@@ -3065,16 +3393,17 @@ class LustreHost(ssh_host.SSHHost):
             log.cl_info("Lustre RPMs is not configured for host [%s], do not prepare Lustre",
                         self.sh_hostname)
             return 0
-        if not lustre_dist.ldis_prepared:
-            log.cl_error("failed to prepare host [%s] because Lustre RPMs [%s] is not prepared",
-                         lustre_dist.lr_distribution_id,
+        if not local_lustre_distr.ldis_checked:
+            log.cl_error("Lustre release [%s] has not been checked",
+                         local_lustre_distr.ldis_lustre_dir,
                          self.sh_hostname)
             return -1
-        if lazy_prepare and self._lsh_can_skip_install(log):
+        if lazy_prepare and local_lustre_distr.ldis_can_skip_install_lustre(log, self):
             log.cl_info("skipping installation of Lustre RPMs on host [%s]",
                         self.sh_hostname)
         else:
-            ret = self._lsh_lustre_reinstall(log, workspace)
+            ret = self._lsh_lustre_reinstall(log, workspace,
+                                             local_lustre_distr)
             if ret:
                 log.cl_error("failed to reinstall Lustre RPMs on host [%s]",
                              self.sh_hostname)
@@ -3103,21 +3432,28 @@ class LustreHost(ssh_host.SSHHost):
             need_reboot = True
 
         if lazy_prepare and not need_reboot:
-            ret = self._lsh_lustre_check_clean(log)
+            ret = self._lsh_lustre_check_clean(log, local_lustre_distr)
             if ret:
                 log.cl_debug("host [%s] need a reboot to change the kernel "
                              "or cleanup the status of Lustre",
                              self.sh_hostname)
                 need_reboot = True
+            else:
+                ret = self.sh_service_start_enable(log, "kdump")
+                if ret:
+                    log.cl_error("failed to start and enable kdump service")
+                    return -1
 
         if not lazy_prepare:
             need_reboot = True
 
         if need_reboot:
-            ret = self.sh_kernel_set_default(log, lustre_dist.ldis_kernel_version)
+            default_kernel = "/boot/vmlinuz-" + local_lustre_distr.ldis_kernel_version
+            ret = self.sh_kernel_set_default(log, default_kernel)
             if ret:
                 log.cl_error("failed to set default kernel of host [%s] to [%s]",
-                             self.sh_hostname, lustre_dist.ldis_kernel_version)
+                             self.sh_hostname,
+                             default_kernel)
                 return -1
 
             if skip_reboot:
@@ -3130,10 +3466,16 @@ class LustreHost(ssh_host.SSHHost):
                 log.cl_error("failed to reboot host [%s]", self.sh_hostname)
                 return -1
 
-            ret = self._lsh_lustre_check_clean(log, quiet=False)
+            ret = self._lsh_lustre_check_clean(log, local_lustre_distr,
+                                               quiet=False)
             if ret:
                 log.cl_error("host [%s] is not clean to run Lustre",
                              self.sh_hostname)
+                return -1
+
+            ret = self.sh_service_start_enable(log, "kdump")
+            if ret:
+                log.cl_error("failed to start and enable kdump service")
                 return -1
 
         return 0
@@ -3309,17 +3651,17 @@ class LustreHost(ssh_host.SSHHost):
 
     def lsh_healty_check(self, log):
         """
-        Return the healthy check result. Return LSH_ERROR on failure
+        Return the healthy check result. Return LUSTRE_STR_ERROR on failure
         """
         if (not self.lsh_is_server) and (not self.lsh_is_client):
-            return LustreHost.LSH_HEALTHY
+            return constant.LUSTRE_STR_HEALTHY
 
         modules = self.sh_lsmod(log)
         if modules is None:
-            return LustreHost.LSH_ERROR
+            return constant.LUSTRE_STR_ERROR
 
         if "lustre" not in modules:
-            return LustreHost.LSH_HEALTHY
+            return constant.LUSTRE_STR_HEALTHY
 
         command = 'lctl get_param -n health_check'
         retval = self.sh_run(log, command)
@@ -3330,21 +3672,21 @@ class LustreHost(ssh_host.SSHHost):
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
-            return LustreHost.LSH_ERROR
+            return constant.LUSTRE_STR_ERROR
         healthy = retval.cr_stdout.strip()
         if healthy == "healthy":
-            return LustreHost.LSH_HEALTHY
+            return constant.LUSTRE_STR_HEALTHY
         if healthy == "NOT HEALTHY":
-            return LustreHost.LSH_UNHEALTHY
+            return constant.LUSTRE_STR_UNHEALTHY
         if healthy == "LBUG":
-            return LustreHost.LSH_LBUG
+            return constant.LUSTRE_STR_LBUG
         log.cl_error("unexpected output of command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",
                      command, self.sh_hostname,
                      retval.cr_exit_status,
                      retval.cr_stdout,
                      retval.cr_stderr)
-        return LustreHost.LSH_ERROR
+        return constant.LUSTRE_STR_ERROR
 
     def lsh_panic_on_lbug_disable(self, log):
         """
@@ -3497,173 +3839,88 @@ class LustreHost(ssh_host.SSHHost):
             return None
         return label
 
-    def lsh_pool_list(self, log, fsname):
+    def lsh_get_obd_device_dict(self, log):
         """
-        Get the pool list of a file system.
+        Return a dict of LustreOBDDevice(). Key is obd name.
+
+        See obd_device_list_seq_show() for the output format.
+        Example output of "lctl device_list":
+  0 UP osd-ldiskfs lustre0-MDT0000-osd lustre0-MDT0000-osd_UUID 12
+  1 UP mgs MGS MGS 16
+  2 UP mgc MGC10.0.2.97@tcp 8854c555-7e53-4f14-8d69-5b854f71dd1e 4
+  3 UP mds MDS MDS_uuid 2
+  4 UP lod lustre0-MDT0000-mdtlov lustre0-MDT0000-mdtlov_UUID 3
+  5 UP mdt lustre0-MDT0000 lustre0-MDT0000_UUID 22
+  6 UP mdd lustre0-MDD0000 lustre0-MDD0000_UUID 3
+  7 UP qmt lustre0-QMT0000 lustre0-QMT0000_UUID 3
+  8 UP lwp lustre0-MDT0000-lwp-MDT0000 lustre0-MDT0000-lwp-MDT0000_UUID 4
+  9 UP osd-ldiskfs lustre0-OST0001-osd lustre0-OST0001-osd_UUID 4
+ 10 UP ost OSS OSS_uuid 2
+ 11 UP osp lustre0-OST0000-osc-MDT0000 lustre0-MDT0000-mdtlov_UUID 4
+ 12 UP obdfilter lustre0-OST0001 lustre0-OST0001_UUID 4
+ 13 UP lwp lustre0-MDT0000-lwp-OST0001 lustre0-MDT0000-lwp-OST0001_UUID 4
+ 14 UP osp lustre0-OST0001-osc-MDT0000 lustre0-MDT0000-mdtlov_UUID 4
+ 15 UP osp lustre0-OST0002-osc-MDT0000 lustre0-MDT0000-mdtlov_UUID 4
+ 16 UP osp lustre0-OST0003-osc-MDT0000 lustre0-MDT0000-mdtlov_UUID 4
+ 17 UP osp lustre0-OST0004-osc-MDT0000 lustre0-MDT0000-mdtlov_UUID 4
+ 18 UP lov lustre0-clilov-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 3
+ 19 UP lmv lustre0-clilmv-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 20 UP mdc lustre0-MDT0000-mdc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 21 UP osc lustre0-OST0000-osc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 22 UP osc lustre0-OST0001-osc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 23 UP osc lustre0-OST0002-osc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 24 UP osc lustre0-OST0003-osc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
+ 25 UP osc lustre0-OST0004-osc-ffff95f70170b800 0bf8d41f-fc2b-4dc0-ae72-0127d8ef83c5 4
         """
-        command = "lctl pool_list %s" % (fsname)
+        obd_device_dict = {}
+        command = "lctl device_list"
         retval = self.sh_run(log, command)
         if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
+                         command, self.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
-            return None
+            return obd_device_dict
 
         lines = retval.cr_stdout.splitlines()
-        if len(lines) < 1:
-            log.cl_error("unexpected line of command stdout [%s] on "
-                         "host [%s], ret = [%d], stdout = [%s], "
-                         "stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return None
+        for line in lines:
+            obd_device = obd_line2device(log, line)
+            if obd_device is None:
+                return None
 
-        return lines[1:]
+            if obd_device.lobd_obd_name in obd_device_dict:
+                log.cl_error("multiple OBD device with same name [%s] on host [%s]",
+                             obd_device.lobd_obd_name, self.sh_hostname)
+                return None
+            obd_device_dict[obd_device.lobd_obd_name] = obd_device
+        return obd_device_dict
 
-    def lsh_pool_create(self, log, full_pool_name):
+    def lsh_mgs_running(self, log):
         """
-        Create pool on the file system. Needs to run on MGS.
+        Return 1 if MGS is running on this host. Return 0 if not. Return -1 on error.
         """
-        command = "lctl pool_new %s" % (full_pool_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+        obd_device_dict = self.lsh_get_obd_device_dict(log)
+        if obd_device_dict is None:
+            log.cl_error("failed to get OBD devices")
             return -1
+        if "MGS" in obd_device_dict:
+            return 1
         return 0
 
-    def lsh_pool_destroy(self, log, full_pool_name):
+    def lsh_mdt_running(self, log):
         """
-        Destroy a pool on the file system. Needs to run on MGS.
+        Return 1 if MDT is running on this host. Return 0 if not. Return -1 on error.
         """
-        command = "lctl pool_destroy %s" % (full_pool_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+        obd_device_dict = self.lsh_get_obd_device_dict(log)
+        if obd_device_dict is None:
+            log.cl_error("failed to get OBD devices")
             return -1
+        for obd_device in obd_device_dict.values():
+            if obd_device.lobd_type_name == "mdt":
+                return 1
         return 0
-
-    def lsh_pool_add(self, log, full_pool_name, ost_name):
-        """
-        Add OST to a pool. Needs to run on MGS.
-        """
-        command = "lctl pool_add %s %s" % (full_pool_name, ost_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-        return 0
-
-    def lsh_pool_remove(self, log, full_pool_name, ost_name):
-        """
-        Remove OST from a pool. Needs to run on MGS.
-        """
-        command = "lctl pool_remove %s %s" % (full_pool_name, ost_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-        return 0
-
-    def lsh_check_lctl_device(self, log, device_name, quiet=False):
-        """
-        Check the host has Lustre device
-        """
-        command = "lctl device %s" % (device_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            if not quiet:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             self.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-            return -1
-        return 0
-
-    def lsh_get_pool_uuids(self, log, full_pool_name):
-        """
-        Return the list of OST UUIDs belong to an OST pool
-        """
-        command = "lctl pool_list %s" % (full_pool_name)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return None
-
-        lines = retval.cr_stdout.splitlines()
-        if len(lines) < 1:
-            log.cl_error("unexpected line of command stdout [%s] on "
-                         "host [%s], ret = [%d], stdout = [%s], "
-                         "stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return None
-
-        return lines[1:]
-
-    def lsh_has_object_on_ost(self, log, fpath, ost_uuid):
-        """
-        Check whether an file has object(s) on an OST
-        """
-        command = "lfs getstripe --ost %s %s" % (ost_uuid, fpath)
-        retval = self.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-        if len(retval.cr_stdout) == 0:
-            return 0
-
-        return 1
-
 
 def get_fsname_from_service_name(service_name):
     """
@@ -3734,59 +3991,23 @@ def get_fsname_from_device(log, host, device_path):
     return 0, fsname
 
 
-def get_lustre_dist(log, local_host, lustre_dir, e2fsprogs_dir,
-                    distr_type=LustreDistribution):
+def get_lustre_dist(log, local_host, workspace, lustre_dir, e2fsprogs_dir,
+                    distr_type=LustreDistribution,
+                    definition_dir=constant.LUSTRE_VERSION_DEFINITION_DIR):
     """
     Return Lustre distribution
     """
-    ret = local_host.sh_check_dir_content(log, lustre_dir,
-                                          constant.LUSTRE_DIR_BASENAMES,
-                                          ignore_extra_contents=True,
-                                          cleanup=False)
-    if ret:
-        log.cl_error("directory [%s] does not have expected content",
-                     lustre_dir)
-        return None
-
     target_cpu = local_host.sh_target_cpu(log)
     if target_cpu is None:
         log.cl_error("failed to get target cpu of host [%s]",
                      local_host.sh_hostname)
         return None
-
-    lustre_rpms_dir = lustre_dir + "/" + constant.RPMS_DIR_BASENAME
-    ret = local_host.sh_check_dir_content(log, lustre_rpms_dir,
-                                          ["noarch", target_cpu],
-                                          cleanup=False)
+    lustre_dist = distr_type(local_host, target_cpu, lustre_dir,
+                             e2fsprogs_dir)
+    ret = lustre_dist.ldis_check(log, local_host, workspace,
+                                 definition_dir=definition_dir)
     if ret:
-        log.cl_error("directory [%s] does not have expected content",
-                     lustre_rpms_dir)
-        return None
-
-    ret = local_host.sh_check_dir_content(log, e2fsprogs_dir,
-                                          constant.E2FSPROGS_DIR_BASENAMES,
-                                          cleanup=False)
-    if ret:
-        log.cl_error("directory [%s] does not have expected content",
-                     e2fsprogs_dir)
-        return None
-
-    e2fsprogs_rpms_dir = e2fsprogs_dir + "/" + constant.RPMS_DIR_BASENAME
-    ret = local_host.sh_check_dir_content(log, e2fsprogs_rpms_dir,
-                                          [target_cpu],
-                                          cleanup=False)
-    if ret:
-        log.cl_error("directory [%s] does not have expected content",
-                     e2fsprogs_rpms_dir)
-        return None
-
-    lustre_arch_rpms_dir = lustre_rpms_dir + "/" + target_cpu
-    e2fsprogs_arch_rpms_dir = e2fsprogs_rpms_dir + "/" + target_cpu
-    lustre_dist = distr_type(local_host, lustre_arch_rpms_dir,
-                             e2fsprogs_arch_rpms_dir)
-    ret = lustre_dist.ldis_prepare(log)
-    if ret:
-        log.cl_error("Lustre/E2fsprogs RPMs are not valid")
+        log.cl_error("failed to check Lustre release")
         return None
     return lustre_dist
 
@@ -3808,3 +4029,53 @@ def check_mgs_id(log, mgs_id):
                      mgs_id)
         return -1
     return 0
+
+
+def filter_mofed_rpm_fnames(log, fnames, ignore_missing=False):
+    """
+    Return the fnames of mlnx-ofa_kernel RPMs, e.g.
+    mlnx-ofa_kernel-5.8-OFED.5.8.3.0.7.1.x86_64.rpm
+    kmod-mlnx-ofa_kernel-5.8-OFED.5.8.3.0.7.1.x86_64.rpm
+    """
+    prefixes = ["mlnx-ofa_kernel-",
+                "kmod-mlnx-ofa_kernel-"]
+    # Key is prefix, value is the RPM name.
+    fname_dict = {}
+    for fname in fnames:
+        for prefix in prefixes:
+            if not fname.startswith(prefix):
+                continue
+            length = len(prefix)
+            first_char = fname[length:length + 1]
+            if not first_char.isdigit():
+                continue
+            if prefix in fname_dict:
+                log.cl_error("multiple rpms found with prefix [%s], "
+                             "[%s] and [%s]",
+                             prefix,
+                             fname_dict[prefix],
+                             fname)
+                return None
+            fname_dict[prefix] = fname
+    if not ignore_missing:
+        for prefix in prefixes:
+            if prefix not in fname_dict:
+                log.cl_error("missing rpm with prefix [%s]",
+                             prefix)
+                return None
+    return list(fname_dict.values())
+
+
+
+def get_mofed_rpm_fnames(log, host, rpm_dir):
+    """
+    Return the fnames of mlnx-ofa_kernel RPMs, e.g.
+    mlnx-ofa_kernel-5.8-OFED.5.8.3.0.7.1.x86_64.rpm
+    kmod-mlnx-ofa_kernel-5.8-OFED.5.8.3.0.7.1.x86_64.rpm
+    """
+    fnames = host.sh_get_dir_fnames(log, rpm_dir)
+    if fnames is None:
+        log.cl_error("failed to get the file names under [%s] of "
+                     "host [%s]", rpm_dir, host.sh_hostname)
+        return None
+    return filter_mofed_rpm_fnames(log, fnames)

@@ -1,5 +1,5 @@
 dnl Process this file with autoconf to produce a configure script.
-AC_INIT([coral],[m4_esyscmd(./coral version show)],[Coralfs],[coral])
+AC_INIT([coral],[m4_esyscmd(./cbuild version show)],[Coralfs],[coral])
 AC_CONFIG_SRCDIR(./pycoral/ssh_host.py)
 AC_CANONICAL_TARGET
 AC_CONFIG_HEADERS(config.h)
@@ -208,9 +208,34 @@ AC_MSG_RESULT([$enable_clownf])
 AC_SUBST(ENABLE_CLOWNF, $enable_clownf)
 AS_IF([test "$enable_clownf" = "yes"],
       [CCLOWNF_SUBDIR="cclownf"
+       CLOWNF_AGENT="clownf_agent"
        enable_go="yes"])
 AC_SUBST(CCLOWNF_SUBDIR)
+AC_SUBST(CLOWNF_AGENT)
 AM_CONDITIONAL(ENABLE_CLOWNF, test "$enable_clownf" = "yes")
+
+# -------- whether enable Coral Reaf --------
+AC_MSG_CHECKING([whether enable Coral Reaf])
+AC_ARG_ENABLE([reaf],
+    AS_HELP_STRING([--disable-reaf],
+                   [disable Coral Reaf]),
+              [], [enable_reaf="yes"])
+AC_MSG_RESULT([$enable_reaf])
+AC_SUBST(ENABLE_REAF, $enable_reaf)
+AM_CONDITIONAL(ENABLE_REAF, test "$enable_reaf" = "yes")
+
+# -------- whether enable Coral Reaf C codes --------
+AC_ARG_ENABLE([creaf],
+    AS_HELP_STRING([--disable-creaf],
+                   [disable Coral Reaf C codes]),
+              [], [enable_creaf="yes"])
+AS_IF([test "$enable_reaf" != "no" -a "$enable_creaf" != "no"],
+      [], [enable_creaf="no"])
+AS_IF([test "$enable_creaf" = "yes"],
+      [CREAF_SUBDIR="creaf"])
+AC_SUBST(CREAF_SUBDIR)
+AC_MSG_RESULT([$enable_creaf])
+AM_CONDITIONAL(ENABLE_CREAF, test "$enable_creaf" = "yes")
 
 
 # -------- whether need to build Go codes under gocoral --------
@@ -252,7 +277,9 @@ AC_CONFIG_FILES([Makefile
                  barreleye/Makefile
                  cclownf/Makefile
                  ccoral/Makefile
+                 creaf/Makefile
                  coral.spec
+                 example_configs/Makefile
                  pybuild/Makefile
                  pycheck/Makefile
                  gocoral/Makefile

@@ -5,110 +5,101 @@ import os
 from pybuild import build_common
 from pycoral import clog
 from pycoral import cmd_general
+from pycoral import constant
 from pycoral import ssh_host
-
-# pic is not really a language, but it will be in the shared directory.
-LANGUAGES = ["zh", "en", "pic"]
-
-
-class CoralDocFile():
-    """
-    Each doc file has an object of this type
-    """
-    # pylint: disable=too-few-public-methods
-    def __init__(self, local_host, doc_dir, language, relative_path):
-        # Local host to run commands
-        self.cdf_local_host = local_host
-        # Absolute path to doc dir
-        self.cdf_doc_dir = doc_dir
-        # The language
-        self.cdf_language = language
-        # The relative path under doc/$language, e.g. barreleye/README.md
-        self.cdf_relative_path = relative_path
-        # Line number of the doc file
-        self._cdf_line_number = None
-        # Absolute path
-        self.cdf_fpath = "%s/%s/%s" % (doc_dir, language, relative_path)
-
-    def cdf_line_number(self, log):
-        """
-        Parse the doc file to get the line number.
-        """
-        if self._cdf_line_number is not None:
-            return self._cdf_line_number
-        command = "cat %s | wc -l" % self.cdf_fpath
-        retval = self.cdf_local_host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.cdf_local_host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-        line_number_str = retval.cr_stdout.strip()
-        try:
-            line_number = int(line_number_str)
-        except:
-            log.cl_error("invalid output [%s] of command [%s] on host [%s]",
-                         retval.cr_stdout,
-                         command,
-                         self.cdf_local_host.sh_hostname)
-            return -1
-        self._cdf_line_number = line_number
-        return self._cdf_line_number
 
 
 def check_doc(log, doc_dir):
     """
     Check the doc
     """
+    # pylint: disable=too-many-locals,too-many-branches
     local_host = ssh_host.get_local_host(ssh=False)
     languages = local_host.sh_get_dir_fnames(log, doc_dir)
     if languages is None:
         log.cl_error("failed to get fnames under [%s] of host [%s]",
                      doc_dir, local_host.sh_hostname)
         return -1
-    # Key is the relative file path under language dir. The value is the
-    # line number of the file. If the line numbers are different between
+
+    # The doc file shall has the format of
+    # ${prefix}.${language}.{suffix}, e.g. manual.zh.md or help.zh.txt
+    # This script will compare the files with different language but the
+    # same prefix and suffix. If the line numbers are different between
     # different languages, that means inconsistency.
-    line_number_dict = {}
-    for language in languages:
-        if language not in LANGUAGES:
-            log.cl_error("unexpected language [%s] under [%s] of host [%s]",
-                         language, doc_dir, local_host.sh_hostname)
+
+    command = "cd %s && find . -type f" % doc_dir
+    retval = local_host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     local_host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    # Each item of the dict is a diction. One diction for each language.
+    # The keys of each diction is file paths of ${prefix}.{suffix}
+    # The values are the line number of file ${prefix}.{language}.{suffix}
+    languages_dict = {}
+    fpaths_without_language = []
+    for language in constant.CORAL_LANGUAGES:
+        languages_dict[language] = {}
+
+    relative_fpaths = retval.cr_stdout.splitlines()
+    for relative_fpath in relative_fpaths:
+        fpath = doc_dir + "/" + relative_fpath
+        dirname = os.path.dirname(relative_fpath)
+        fname = os.path.basename(relative_fpath)
+        fields = fname.split(".")
+        # Not has format of a.{language}.md
+        if len(fields) < 3:
+            continue
+
+        # Not supported language
+        language = fields[-2]
+        if language not in constant.CORAL_LANGUAGES:
+            continue
+
+        language_dict = languages_dict[language]
+
+        suffix = fields[-1]
+        prefixes = fields[:-2]
+        prefix_string = ".".join(prefixes)
+        fpath_without_language = (dirname + "/" + prefix_string + "." +
+                                  suffix)
+        fpaths_without_language.append(fpath_without_language)
+        if fpath_without_language in language_dict:
+            log.cl_error("duplicated fname without language for file [%s]",
+                         relative_fpath)
             return -1
 
-        lang_dir = doc_dir + "/" + language
-        command = "cd %s && find . -type f" % lang_dir
-        retval = local_host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         local_host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+        line_number = local_host.sh_file_line_number(log, fpath)
+        if line_number < 0:
+            log.cl_error("failed to get the line number of path [%s]",
+                         fpath)
             return -1
 
-        relative_fpaths = retval.cr_stdout.splitlines()
-        for relative_fpath in relative_fpaths:
-            doc_file = CoralDocFile(local_host, doc_dir, language,
-                                    relative_fpath)
-            log.cl_info("checking doc [%s]", doc_file.cdf_fpath)
-            line_number = doc_file.cdf_line_number(log)
-            if relative_fpath in line_number_dict:
-                old_line_number = line_number_dict[relative_fpath]
-                if old_line_number != line_number:
-                    log.cl_error("inconsistent line number of doc [%s] "
-                                 "between languages, %s vs. %s",
-                                 relative_fpath, old_line_number,
-                                 line_number)
-                    return -1
-            else:
-                line_number_dict[relative_fpath] = line_number
+        language_dict[fpath_without_language] = line_number
+        if fpath_without_language not in fpaths_without_language:
+            fpaths_without_language.append(fpath_without_language)
+
+    for fpath_without_language in fpaths_without_language:
+        line_number = -1
+        for language in constant.CORAL_LANGUAGES:
+            language_dict = languages_dict[language]
+            if fpath_without_language not in language_dict:
+                continue
+            if line_number == -1:
+                line_number = language_dict[fpath_without_language]
+                continue
+            if language_dict[fpath_without_language] != line_number:
+                log.cl_error("inconsistent of doc [%s], %s vs. %s",
+                             fpath_without_language,
+                             language_dict[fpath_without_language],
+                             line_number)
+                return -1
     return 0
 
 

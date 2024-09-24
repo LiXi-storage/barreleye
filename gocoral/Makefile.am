@@ -1,2 +1,2 @@
-SUBDIRS = clownf_agent
+SUBDIRS = @CLOWNF_AGENT@
 

@@ -1,0 +1,35 @@
+#
+# Definition file of Lustre ES 6.2 version (YAML format)
+#
+# Since 2.14.0-ddn87 (include), the following patch is included and the
+# format of proc entires has been changed dramatically. Thus, consider the
+# versions between 2.14.0-ddn0 and 2.14.0-ddn86 as the ES6.0 and the
+# 2.14.0-ddn87+ as ES6.1.
+#
+# LU-15642 obdclass: use consistent stats units
+#
+# Since 2.14.0-ddn132 (include), the following patch is included and the
+# format of MDT jobstats has been changed by adding parallel_rename_file
+# and parallel_rename_dir. Thus, consider the versions between 2.14.0-ddn87
+# and 2.14.0-ddn131 as the ES6.1 and the 2.14.0-ddn132+ as ES6.2.
+#
+# LU-15913 mdt: disable parallel rename for striped dirs
+#
+priority: 2014008
+lustre_version: 'es6.2'
+rpm_patterns:
+    kernel: '^(kernel-3.+\.rpm)$'
+    lustre: '^(lustre-2\.14\.[0]_ddn.+\.rpm)$'
+    lustre_iokit: '^(lustre-iokit-2\.14\.[0].+\.rpm)$'
+    lustre_kmod: '^(kmod-lustre-2\.14\.[0]_ddn.+\.rpm)$'
+    lustre_osd_ldiskfs: '^(kmod-lustre-osd-ldiskfs-2\.14\.[0]_ddn.+\.rpm)$'
+    lustre_osd_ldiskfs_mount: '^(lustre-osd-ldiskfs-mount-2\.14\.[0].+\.rpm)$'
+    lustre_osd_zfs: '^(kmod-lustre-osd-zfs-2\.14\.[0]_ddn.+\.rpm)$'
+    lustre_osd_zfs_mount: '^(lustre-osd-zfs-mount-2\.14\.[0].+\.rpm)$'
+    lustre_tests: '^(lustre-tests-2.+\.rpm)$'
+    lustre_tests_kmod: '^(kmod-lustre-tests-2.+\.rpm)$'
+    lustre_devel: '^(lustre-devel-2\.14\.[0]_ddn.+\.rpm)$'
+    lustre_client: '^(lustre-client-2\.14\.[0]_ddn.+\.rpm)$'
+    kmod_lustre_client: '^(kmod-lustre-client-2\.14\.[0]_ddn.+\.rpm)$'
+deb_pattern: '^(2\.14\.[0]-ddn.+)$'
+collectd_definition_file: "lustre-b_es6_2.xml"

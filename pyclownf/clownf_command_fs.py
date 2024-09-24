@@ -29,9 +29,9 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         cmd_general.check_argument_bool(log, "status", status)
-        lustres = list(clownfish_instance.ci_lustre_dict.values())
-        rc = clownf_command_common.print_lustres(log, clownfish_instance,
-                                                 lustres, status=status)
+        filesystems = list(clownfish_instance.ci_fs_dict.values())
+        rc = clownf_command_common.print_filesystems(log, clownfish_instance,
+                                                     filesystems, status=status)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def services(self, fsname, status=False, fields=None):
@@ -53,11 +53,11 @@ class LustreFilesystemCommand():
                                          allow_none=True,
                                          allow_tuple=True, allow_str=True,
                                          allow_bool=True)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         services = list(lustrefs.lf_service_dict.values())
         rc = clownf_command_common.print_services(log, clownfish_instance,
                                                   services, status=status,
@@ -83,11 +83,11 @@ class LustreFilesystemCommand():
                                          allow_none=True,
                                          allow_tuple=True, allow_str=True,
                                          allow_bool=True)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         host_dict = lustrefs.lf_host_dict()
         rc = clownf_command_common.print_hosts(log, clownfish_instance,
                                                list(host_dict.values()),
@@ -108,11 +108,11 @@ class LustreFilesystemCommand():
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
         cmd_general.check_argument_bool(log, "status", status)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         clients = list(lustrefs.lf_client_dict.values())
         rc = clownf_command_common.print_clients(log, clownfish_instance,
                                                  clients,
@@ -130,15 +130,15 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
-        lustres = [lustrefs]
-        rc = clownf_command_common.print_lustres(log, clownfish_instance,
-                                                 lustres, status=True,
-                                                 print_table=False)
+        filesystem = clownfish_instance.ci_fs_dict[fsname]
+        filesystems = [filesystem]
+        rc = clownf_command_common.print_filesystems(log, clownfish_instance,
+                                                     filesystems, status=True,
+                                                     print_table=False)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def mount(self, fsname):
@@ -155,12 +155,12 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
-        rc = clownfish_instance.ci_lustre_mount(log, lustrefs)
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
+        rc = clownfish_instance.ci_fs_mount(log, lustrefs)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def umount(self, fsname, force=False):
@@ -179,15 +179,16 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
-        rc = clownfish_instance.ci_lustre_umount(log, lustrefs, force=force)
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
+        rc = clownfish_instance.ci_fs_umount(log, lustrefs, force=force)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def format(self, fsname, yes=False, force=False):
+    def format(self, fsname, yes=False, force=False,
+               dryrun=False):
         """
         Format all Lustre devices in the Lustre file system.
 
@@ -200,7 +201,9 @@ class LustreFilesystemCommand():
         :param fsname: Name of the Lustre file system.
         :param yes: Do not ask for confirmation, just format. Default: False.
         :param force: Format the MGT even it is share by other file systems.
-            Default: False
+            Default: False.
+        :param dryrun: Do not format anyone of services in the file system.
+            Default: False.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._lfc_config_fpath,
@@ -210,13 +213,16 @@ class LustreFilesystemCommand():
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
         cmd_general.check_argument_bool(log, "yes", yes)
         cmd_general.check_argument_bool(log, "force", force)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        cmd_general.check_argument_bool(log, "dryrun", dryrun)
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
 
-        if not yes:
+        if dryrun:
+            log.cl_info("[Dry Run] no service will be modified or formatted")
+        elif not yes:
             message = "Be careful! Data on the following services will be completely erased: "
             service_str = ""
             for service in lustrefs.lf_service_dict.values():
@@ -230,7 +236,8 @@ class LustreFilesystemCommand():
                 log.cl_info("quiting without touching anything")
                 clownf_command_common.exit_env(log, clownfish_instance, 1)
 
-        rc = clownfish_instance.ci_lustre_format(log, lustrefs, force=force)
+        rc = clownfish_instance.ci_fs_format(log, lustrefs, force=force,
+                                             dryrun=dryrun)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def autostart_enable(self, fsname):
@@ -244,12 +251,12 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
-        rc = clownfish_instance.ci_lustre_autostart_enable(log, lustrefs)
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
+        rc = clownfish_instance.ci_fs_autostart_enable(log, lustrefs)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def autostart_disable(self, fsname):
@@ -263,12 +270,12 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
-        rc = clownfish_instance.ci_lustre_autostart_disable(log, lustrefs)
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
+        rc = clownfish_instance.ci_fs_autostart_disable(log, lustrefs)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def autostart_status(self, fsname, full=False):
@@ -284,11 +291,11 @@ class LustreFilesystemCommand():
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
         cmd_general.check_argument_bool(log, "full", full)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         hosts = list(lustrefs.lf_host_dict().values())
         services = list(lustrefs.lf_service_dict.values())
         rc = clownf_command_common.print_autostart(log, clownfish_instance,
@@ -308,11 +315,11 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         hosts = list(lustrefs.lf_host_dict().values())
         services = list(lustrefs.lf_service_dict.values())
         rc = clownf_command_common.print_autostart(log, clownfish_instance,
@@ -331,11 +338,11 @@ class LustreFilesystemCommand():
                                            self._lfc_log_to_file,
                                            self._lfc_iso)
         fsname = cmd_general.check_argument_str(log, "fsname", fsname)
-        if fsname not in clownfish_instance.ci_lustre_dict:
+        if fsname not in clownfish_instance.ci_fs_dict:
             log.cl_error("Lustre file system [%s] is not configured",
                          fsname)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        lustrefs = clownfish_instance.ci_lustre_dict[fsname]
+        lustrefs = clownfish_instance.ci_fs_dict[fsname]
         hosts = list(lustrefs.lf_host_dict().values())
         rc = clownf_command_common.print_watching(log, clownfish_instance,
                                                   hosts)

@@ -4,6 +4,7 @@ Clownfish command entrance
 from fire import Fire
 from pyclownf import clownf_command_common
 from pyclownf import clownf_command_host
+from pyclownf import clownf_command_agent
 from pyclownf import clownf_constant
 from pyclownf import clownf_command_cluster
 from pyclownf import clownf_command_fs
@@ -31,7 +32,8 @@ def clownf_simplify_config(ccommand):
         clownf_command_common.init_env(config,
                                        logdir,
                                        log_to_file,
-                                       ccommand._cfc_iso
+                                       ccommand._cfc_iso,
+                                       ssh_for_local=False
                                        )
     ret = clownfish_instance.ci_dump_simplified_config(log)
     clownf_command_common.exit_env(log, clownfish_instance, ret)
@@ -50,12 +52,13 @@ class ClownfCommand():
     cluster = clownf_command_cluster.ClusterCommand()
     fs = clownf_command_fs.LustreFilesystemCommand()
     consul = clownf_command_consul.ConsulCommand()
-    host = clownf_command_host.HostCommand()
+    host = clownf_command_host.ClownfHostCommand()
+    agent = clownf_command_agent.ClownfAgentCommand()
     client = clownf_command_client.LustreClientCommand()
     simple_config = clownf_simplify_config
 
     def __init__(self, config=clownf_constant.CLOWNF_CONFIG,
-                 log=clownf_constant.CLF_LOG_DIR, debug=False, iso=None):
+                 log=clownf_constant.CLOWNF_LOG_DIR, debug=False, iso=None):
         # pylint: disable=protected-access,unused-argument
         self._cfc_config_fpath = config
         self._cfc_logdir = log
@@ -67,6 +70,7 @@ class ClownfCommand():
         self.consul._init(config, log, debug, iso)
         self.host._init(config, log, debug, iso)
         self.client._init(config, log, debug, iso)
+        self.agent._init(config, log, debug, iso)
 
 
 def main():

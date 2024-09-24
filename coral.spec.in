@@ -9,6 +9,8 @@
 %global debug_package %{nil}
 %bcond_with barrele
 %bcond_with clownf
+%bcond_with creaf
+%bcond_with reaf
 
 Name: @PACKAGE@
 Version: @VERSION@
@@ -57,6 +59,16 @@ file system.
 %systemd_postun_with_restart clownf_agent.service
 %endif  # with clownf
 
+%if %{with reaf}
+%package reaf
+Summary: General Utilities for Coral
+Provides: coral-reaf = %{version}-%{release}
+
+%description reaf
+coral-reaf provides general utitlities for Coral, e.g. tools to download
+Lustre versions.
+%endif  # with reaf
+
 
 %prep
 %setup -q -n @PACKAGE@-%{version}
@@ -76,14 +88,14 @@ rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT%{_bindir}
 mkdir -p $RPM_BUILD_ROOT%{_mandir}/man1
-mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/coral/example_configs
 mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 
 %if %{with barrele}
 cp dist/barrele $RPM_BUILD_ROOT%{_bindir}
-cp example_configs/barreleye.conf.example \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral
+cp example_configs/barreleye.conf \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/example_configs
 install -g 0 -o 0 -m 0644 bash_completion/barrele \
 	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 mkdir -p $RPM_BUILD_ROOT%{_sharedstatedir}/coral/barrele/xmls
@@ -101,8 +113,8 @@ cp \
 	gocoral/clownf_agent/clownf_agent \
 	cclownf/clownf_storage \
 	$RPM_BUILD_ROOT%{_bindir}
-cp example_configs/clownfish.conf.example \
-	$RPM_BUILD_ROOT%{_sysconfdir}/coral/
+cp example_configs/clownfish.conf \
+	$RPM_BUILD_ROOT%{_sysconfdir}/coral/example_configs
 mkdir -p $RPM_BUILD_ROOT/usr/lib/systemd/system/
 install -m 0644 -D systemd/consul.service \
 	$RPM_BUILD_ROOT%{_unitdir}
@@ -112,6 +124,24 @@ install -g 0 -o 0 -m 0644 man/clownf.1 $RPM_BUILD_ROOT%{_mandir}/man1/
 install -g 0 -o 0 -m 0644 bash_completion/clownf \
 	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
 %endif  # with clownf
+
+%if %{with reaf}
+cp \
+	dist/reaf \
+	$RPM_BUILD_ROOT%{_bindir}
+%if %{with creaf}
+cp creaf/reaf_statfs $RPM_BUILD_ROOT%{_bindir}
+%endif  # with creaf
+install -g 0 -o 0 -m 0644 bash_completion/reaf \
+	$RPM_BUILD_ROOT%{_datadir}/bash-completion/completions
+mkdir -p $RPM_BUILD_ROOT%{_sharedstatedir}/coral/reaf/lustre_version_definitions
+cp coral_reaf/lustre_version_definitions/*.yaml \
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/reaf/lustre_version_definitions
+cp -a lustre_releases \
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/reaf
+cp -a e2fsprogs_releases \
+	$RPM_BUILD_ROOT%{_sharedstatedir}/coral/reaf
+%endif  # with reaf
 
 
 %clean
@@ -123,7 +153,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_sharedstatedir}/coral/barrele/xmls
 %{_sharedstatedir}/coral/barrele/influxdb.conf.diff
 %{_sharedstatedir}/coral/barrele/grafana_dashboards
-%{_sysconfdir}/coral/barreleye.conf.example
+%{_sysconfdir}/coral/example_configs/barreleye.conf
 %{_datadir}/bash-completion/completions/barrele
 %endif  # with barrele
 
@@ -132,12 +162,22 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/clownf
 %{_bindir}/clownf_agent
 %{_bindir}/clownf_storage
-%{_sysconfdir}/coral/clownfish.conf.example
+%{_sysconfdir}/coral/example_configs/clownfish.conf
 %{_unitdir}/consul.service
 %{_unitdir}/clownf_agent.service
 %{_mandir}/man1/clownf.1*
 %{_datadir}/bash-completion/completions/clownf
 %endif  # with clownf
+
+%if %{with reaf}
+%files reaf
+%{_bindir}/reaf
+%if %{with creaf}
+%{_bindir}/reaf_statfs
+%endif  # with creaf
+%{_datadir}/bash-completion/completions/reaf
+%{_sharedstatedir}/coral/reaf
+%endif  # with reaf
 
 
 %changelog

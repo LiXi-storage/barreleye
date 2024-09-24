@@ -53,9 +53,9 @@ class WatchingServiceHostStatusCache():
         """
         cluster_status = self.wshsc_cluster_status
         if self.wshsc_is_host:
-            watcher_dict = cluster_status.csc_host_watcher_dict
+            watcher_dict = cluster_status.clsc_host_watcher_dict
         else:
-            watcher_dict = cluster_status.csc_service_watcher_dict
+            watcher_dict = cluster_status.clsc_service_watcher_dict
         if watcher_dict is None:
             log.cl_error("the watcher status of cluster is not inited")
             self.wshsc_watching = -1
@@ -76,7 +76,7 @@ class WatchingServiceHostStatusCache():
         """
         clownfish_instance = self.wshsc_clownfish_instance
         cluster_status = self.wshsc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.wshsc_autostart_status = -1
             return
@@ -212,10 +212,10 @@ def print_host_watching(log, clownfish_instance, host, print_status=False,
     hostname = host.sh_hostname
     ret = 0
     candidate_hosts = \
-        clownfish_instance.ci_host_watching_candidate_hosts(log, hostname)
+        clownfish_instance.ci_host_watching_candidate_hosts(hostname)
 
     candidate_services = \
-        clownfish_instance.ci_host_watching_candidate_services(log, host)
+        clownfish_instance.ci_host_watching_candidate_services(host)
 
     cluster_status = clownf_command_common.ClusterStatusCache(clownfish_instance)
     watching_status_list = []
@@ -236,11 +236,11 @@ def print_host_watching(log, clownfish_instance, host, print_status=False,
         init_service_watchers = True
     if clownf_constant.CLOWNF_FIELD_AUTOSTART in field_names:
         init_consul_hostname = True
-    ret = cluster_status.csc_init_fields(log, init_consul_hostname=init_consul_hostname,
-                                         init_host_watchers=init_host_watchers,
-                                         init_service_watchers=init_service_watchers,
-                                         only_hostnames=candidate_hosts,
-                                         only_service_names=candidate_services)
+    ret = cluster_status.clsc_init_fields(log, init_consul_hostname=init_consul_hostname,
+                                          init_host_watchers=init_host_watchers,
+                                          init_service_watchers=init_service_watchers,
+                                          only_hostnames=candidate_hosts,
+                                          only_service_names=candidate_services)
     if ret:
         log.cl_error("failed to init cluster status")
         return -1
@@ -281,12 +281,12 @@ def print_host_watching(log, clownfish_instance, host, print_status=False,
                                  print_table=print_table,
                                  print_status=print_status,
                                  field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         ret = -1
     return ret
 
 
-class HostCommand():
+class ClownfHostCommand():
     """
     Commands to manage hosts in Clownfish cluster.
     """
@@ -297,6 +297,55 @@ class HostCommand():
         self._hc_logdir = logdir
         self._hc_log_to_file = log_to_file
         self._hc_iso = iso
+
+    def agent_start(self, host):
+        """
+        Start the agent on the host.
+        :param host: Name of the host.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._hc_config_fpath,
+                                           self._hc_logdir,
+                                           self._hc_log_to_file,
+                                           self._hc_iso)
+        host = cmd_general.check_argument_str(log, "host", host)
+        rc = clownfish_instance.ci_host_agent_start(log, host)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+    def agent_stop(self, host):
+        """
+        Stop the agent on the host.
+        :param host: Name of the host.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._hc_config_fpath,
+                                           self._hc_logdir,
+                                           self._hc_log_to_file,
+                                           self._hc_iso)
+        host = cmd_general.check_argument_str(log, "host", host)
+        rc = clownfish_instance.ci_host_agent_stop(log, host)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+    def agent_status(self, host):
+        """
+        Print the agent status on the host.
+        :param host: Name of the host.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._hc_config_fpath,
+                                           self._hc_logdir,
+                                           self._hc_log_to_file,
+                                           self._hc_iso)
+        host = cmd_general.check_argument_str(log, "host", host)
+        if host not in clownfish_instance.ci_host_dict:
+            log.cl_error("host [%s] is not configured", host)
+            clownf_command_common.exit_env(log, clownfish_instance, -1)
+        host_obj = clownfish_instance.ci_host_dict[host]
+        hosts = [host_obj]
+        rc = clownf_command_common.print_agents(log, clownfish_instance,
+                                                hosts=hosts,
+                                                print_table=False)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def ls(self, status=False, fields=None):
         """
@@ -320,7 +369,7 @@ class HostCommand():
                                                field_string=fields)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def prepare(self, hostname, nolazy=False):
+    def prepare(self, host, nolazy=False):
         """
         Prepare the host for providing Lustre service.
 
@@ -329,7 +378,8 @@ class HostCommand():
         their dependencies will be installed if they are not. Reboot of the
         host will be issued if need to run a different kernel.
 
-        :param hostname: The name of the host to prepare.
+        :param host: The name of the host to prepare. Can be a list with the
+            format of "host[01-10],host100".
         :param nolazy: Reinstall the RPMs even they are already installed, default: False.
         """
         log, clownfish_instance = \
@@ -337,11 +387,12 @@ class HostCommand():
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        host = cmd_general.check_argument_list_str(log, "host", host)
+        hostnames = cmd_general.parse_list_string(log, host)
         cmd_general.check_argument_bool(log, "nolay", nolazy)
         rc = clownfish_instance.ci_host_prepare(log,
                                                 clownfish_instance.ci_workspace,
-                                                hostname,
+                                                hostnames,
                                                 not nolazy)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
@@ -385,12 +436,12 @@ class HostCommand():
 
     def services_enable(self, hostname):
         """
-        Enable all Lustre services on the host
+        Enable all Lustre services on the host.
 
         Allow all Lustre services to mount on this host. After running this,
         autostart might start the Lustre services on this host (if auto-start
         is enabled).
-        :param hostname: name of the host
+        :param hostname: name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
@@ -403,12 +454,12 @@ class HostCommand():
 
     def services_disable(self, hostname):
         """
-        Disable all Lustre services on the host
+        Disable all Lustre services on the host.
 
         Do not allow any Lustre service to mount on this host. This will
         make sure that autostart won't start the Lustre services. Useful
         when want to migrate the services out of this host.
-        :param hostname: name of the host
+        :param hostname: name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
@@ -421,10 +472,10 @@ class HostCommand():
 
     def service_status(self, hostname, service_name):
         """
-        Print the status of a service instance on a host
+        Print the status of a service instance on a host.
 
-        :param hostname: name of the host
-        :param service_name: Lustre service name
+        :param hostname: name of the host.
+        :param service_name: Lustre service name.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
@@ -440,10 +491,10 @@ class HostCommand():
 
     def service_disable(self, hostname, service_name):
         """
-        Disable a service instance on a host
+        Disable a service instance on a host.
 
-        :param hostname: name of the host
-        :param service_name: Lustre service name
+        :param hostname: name of the host.
+        :param service_name: Lustre service name.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
@@ -459,10 +510,10 @@ class HostCommand():
 
     def service_enable(self, hostname, service_name):
         """
-        Enable a service instance on a host
+        Enable a service instance on a host.
 
-        :param hostname: name of the host
-        :param service_name: Lustre service name
+        :param hostname: name of the host.
+        :param service_name: Lustre service name.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
@@ -474,6 +525,44 @@ class HostCommand():
                                                       service_name)
         rc = clownf_command_common.instance_enable(log, clownfish_instance,
                                                    hostname, service_name)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+    def service_disprefer(self, hostname, service_name):
+        """
+        Disprefer to mount a service instance on a host.
+
+        :param hostname: name of the host.
+        :param service_name: Lustre service name.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._hc_config_fpath,
+                                           self._hc_logdir,
+                                           self._hc_log_to_file,
+                                           self._hc_iso)
+        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        service_name = cmd_general.check_argument_str(log, "service_name",
+                                                      service_name)
+        rc = clownf_command_common.instance_disprefer(log, clownfish_instance,
+                                                      service_name, hostname)
+        clownf_command_common.exit_env(log, clownfish_instance, rc)
+
+    def service_prefer(self, hostname, service_name):
+        """
+        Prefer to mount a service instance on a host.
+
+        :param hostname: name of the host.
+        :param service_name: Lustre service name.
+        """
+        log, clownfish_instance = \
+            clownf_command_common.init_env(self._hc_config_fpath,
+                                           self._hc_logdir,
+                                           self._hc_log_to_file,
+                                           self._hc_iso)
+        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        service_name = cmd_general.check_argument_str(log, "service_name",
+                                                      service_name)
+        rc = clownf_command_common.instance_prefer(log, clownfish_instance,
+                                                   service_name, hostname)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def operating(self, hostname):
@@ -501,52 +590,52 @@ class HostCommand():
             rc = -1
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def autostart_enable(self, hostname):
+    def autostart_enable(self, host):
         """
-        Enable the autostart of the host
-        :param hostname: name of the host
+        Enable the autostart of the host.
+        :param host: Name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        host = cmd_general.check_argument_str(log, "host", host)
         rc = clownfish_instance.ci_host_autostart_enable(log,
-                                                         hostname)
+                                                         host)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def autostart_disable(self, hostname):
+    def autostart_disable(self, host):
         """
-        Disable the autostart of the host
-        :param hostname: name of the host
+        Disable the autostart of the host.
+        :param host: Name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
+        host = cmd_general.check_argument_str(log, "host", host)
         rc = clownfish_instance.ci_host_autostart_disable(log,
-                                                          hostname)
+                                                          host)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def autostart_status(self, hostname):
+    def autostart_status(self, host):
         """
-        Print the autostart status of the host
-        :param hostname: name of the host
+        Print the autostart status of the host.
+        :param host: Name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
-        if hostname not in clownfish_instance.ci_host_dict:
-            log.cl_error("host [%s] is not configured", hostname)
+        host = cmd_general.check_argument_str(log, "host", host)
+        if host not in clownfish_instance.ci_host_dict:
+            log.cl_error("host [%s] is not configured", host)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        host = clownfish_instance.ci_host_dict[hostname]
-        hosts = [host]
+        host_obj = clownfish_instance.ci_host_dict[host]
+        hosts = [host_obj]
         rc = clownf_command_common.print_autostart(log, clownfish_instance,
                                                    hosts=hosts,
                                                    print_table=False,
@@ -589,45 +678,45 @@ class HostCommand():
                                                  skip_migrate=skip_migrate)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def start(self, hostname):
+    def start(self, host):
         """
         Start the host and wait util SSH can be connected.
 
         This command requires the libvirt/ipmi section configured for the host.
-        :param hostname: The name of the host to start. A list with the
-        format of "host[01-10],host100" can be specified.
+        :param host: The name of the host to start. Can be a list with the
+            format of "host[01-10],host100".
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
-        hostnames = cmd_general.parse_list_string(log, hostname)
+        host = cmd_general.check_argument_list_str(log, "host", host)
+        hostnames = cmd_general.parse_list_string(log, host)
         if hostnames is None:
             log.cl_error("hostname [%s] is an invalid list",
-                         hostname)
+                         host)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
         rc = clownfish_instance.ci_hosts_start(log, hostnames)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def status(self, hostname):
+    def status(self, host):
         """
         Print the status of a host.
 
-        :param hostname: Name of the host.
+        :param host: Name of the host.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        hostname = cmd_general.check_argument_str(log, "hostname", hostname)
-        if hostname not in clownfish_instance.ci_host_dict:
-            log.cl_error("host [%s] is not configured", hostname)
+        host = cmd_general.check_argument_str(log, "host", host)
+        if host not in clownfish_instance.ci_host_dict:
+            log.cl_error("host [%s] is not configured", host)
             clownf_command_common.exit_env(log, clownfish_instance, -1)
-        host = clownfish_instance.ci_host_dict[hostname]
-        hosts = [host]
+        host_obj = clownfish_instance.ci_host_dict[host]
+        hosts = [host_obj]
         rc = clownf_command_common.print_hosts(log, clownfish_instance, hosts,
                                                print_status=True,
                                                print_table=False)
@@ -657,7 +746,7 @@ class HostCommand():
             clownf_command_common.exit_env(log, clownfish_instance, -1)
 
         watcher_candidates = \
-            clownfish_instance.ci_host_watcher_candidates(log, hostname)
+            clownfish_instance.ci_host_watcher_candidates(hostname)
 
         candidate_hosts = []
         for watcher_candidate in watcher_candidates:
@@ -776,25 +865,32 @@ class HostCommand():
         be cleaned up and re-configured in the whole cluster as a requirement
         of adding the host to the Consul cluster. Lustre RPMs not be
         installed. Lustre service will not be affected during this process.
+
+        For Consul-only host, this command will only install packages needed
+        for running Consul client/server. No extra Coral RPMs or Lustre RPMs
+        will be installed.
+
+        :param host: The name of the host to prepare. Can be a list with the
+            format of "host[01-10],host100".
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._hc_config_fpath,
                                            self._hc_logdir,
                                            self._hc_log_to_file,
                                            self._hc_iso)
-        host = cmd_general.check_argument_str(log, "host", host)
+        host = cmd_general.check_argument_list_str(log, "host", host)
         hostnames = cmd_general.parse_list_string(log, host)
         hosts = []
         for hostname in hostnames:
             if hostname not in clownfish_instance.ci_host_dict:
                 log.cl_error("host [%s] is not configured", hostname)
                 clownf_command_common.exit_env(log, clownfish_instance, -1)
-            ssh_host = clownfish_instance.ci_host_dict[hostname]
+            tmp_host = clownfish_instance.ci_host_dict[hostname]
             if host not in hosts:
-                hosts.append(ssh_host)
+                hosts.append(tmp_host)
         iso = self._hc_iso
         if iso is not None:
-            local_host = ssh_host.get_local_host(ssh=False)
+            local_host = clownfish_instance.ci_local_host
             iso = cmd_general.check_argument_fpath(log, local_host, iso)
         rc = clownfish_instance.ci_cluster_install(log, iso=iso,
                                                    hosts=hosts)

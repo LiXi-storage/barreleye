@@ -1,0 +1,21 @@
+#
+# Definition file of Lustre 2.15 version (YAML format)
+#
+priority: 2015001
+lustre_version: '2.15'
+rpm_patterns:
+    kernel: '^(kernel-[34].+\.rpm)$'
+    kernel_core: '^(kernel-core-[4].+\.rpm)$'
+    kernel_modules: '^(kernel-modules-[4].+\.rpm)$'
+    lustre: '^(lustre-2\.15.+\.rpm)$'
+    lustre_iokit: '^(lustre-iokit-2\.15.+\.rpm)$'
+    lustre_kmod: '^(kmod-lustre-2\.15.+\.rpm)$'
+    lustre_osd_ldiskfs: '^(kmod-lustre-osd-ldiskfs-2\.15.+\.rpm)$'
+    lustre_osd_ldiskfs_mount: '^(lustre-osd-ldiskfs-mount-2\.15.+\.rpm)$'
+    lustre_osd_zfs: '^(kmod-lustre-osd-zfs-2\.15.+\.rpm)$'
+    lustre_osd_zfs_mount: '^(lustre-osd-zfs-mount-2\.15.+\.rpm)$'
+    lustre_tests: '^(lustre-tests-2.+\.rpm)$'
+    lustre_tests_kmod: '^(kmod-lustre-tests-2.+\.rpm)$'
+    lustre_devel: '^(lustre-devel-2\.15.+\.rpm)$'
+deb_pattern: ’^(2\.15\..+)$‘
+collectd_definition_file: "lustre-2.15.xml"

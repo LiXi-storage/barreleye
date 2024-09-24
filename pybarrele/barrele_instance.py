@@ -20,7 +20,7 @@ BARRELE_COLLECT_INTERVAL = 60
 BARRELE_CONTINUOUS_QUERY_PERIODS = 4
 # The Lustre version to use, if the Lustre RPMs installed on the agent(s)
 # is not with the supported version.
-BARRELE_LUSTRE_FALLBACK_VERSION = lustre_version.LUSTRE_VERSION_NAME_2_12
+BARRELE_LUSTRE_FALLBACK_VERSION = "2.15"
 # Default dir of Barreleye data
 BARRELE_DATA_DIR = "/var/log/coral/barreleye_data"
 
@@ -34,7 +34,8 @@ class BarreleInstance():
                  logdir_is_default, iso_fpath, local_host, collect_interval,
                  continuous_query_periods, jobstat_pattern, lustre_fallback_version,
                  enable_lustre_exp_mdt, enable_lustre_exp_ost, host_dict,
-                 agent_dict, barreleye_server):
+                 agent_dict, barreleye_server,
+                 lustre_version_db):
         # pylint: disable=too-many-locals
         # Log to file for debugging
         self.bei_log_to_file = log_to_file
@@ -69,10 +70,13 @@ class BarreleInstance():
         self.bei_local_host = local_host
         # The dir of the ISO
         self.bei_iso_dir = constant.CORAL_ISO_DIR
-        # The server of barreleye
+        # The server of barreleye, BarreleServer.
         self.bei_barreleye_server = barreleye_server
         # ISO file path
         self.bei_iso_fpath = iso_fpath
+        # LustreVersionDatabase
+        self.bei_lustre_version_db = lustre_version_db
+
 
     def _bei_get_collectd_package_type_dict(self, log):
         """
@@ -83,91 +87,105 @@ class BarreleInstance():
                                                                self.bei_local_host,
                                                                packages_dir)
 
-    def _bei_cluster_install_rpms(self, log):
+    def _bei_cluster_install_package(self, log, agents, only_agent=False,
+                                     disable_selinux=True,
+                                     disable_firewalld=True,
+                                     change_sshd_max_startups=True,
+                                     config_rsyslog=True):
         """
-        Install RPMs on the cluster
+        Install the packages in the cluster and send the configs.
         """
-
-        rpm_type_dict = self._bei_get_collectd_package_type_dict(log)
-        if rpm_type_dict is None:
-            log.cl_error("failed to get Collectd RPM types")
+        # pylint: disable=too-many-branches,too-many-locals
+        distro_type = self._bei_sync_iso_and_check_packages(log)
+        if distro_type is None:
+            log.cl_info("found invalid packages in ISO")
             return -1
 
-        for rpm_type in (barrele_collectd.LIBCOLLECTDCLIENT_TYPE_NAME,
-                         barrele_collectd.COLLECTD_TYPE_NAME):
-            if rpm_type not in rpm_type_dict:
-                log.cl_error("failed to find Collectd RPM [%s]",
-                             rpm_type)
-                return -1
-
-        for agent in self.bei_agent_dict.values():
-            ret = agent.bea_generate_configs(log, self)
+        for agent in agents:
+            ret = agent.bea_generate_configs(log)
             if ret:
                 log.cl_error("failed to generate Barreleye agent configs on host [%s]",
                              agent.bea_host.sh_hostname)
                 return -1
-
         install_cluster = \
-            install_common.CoralInstallationCluster(self.bei_workspace,
-                                                    self.bei_local_host,
-                                                    self.bei_iso_dir)
-
-        need_backup_fpaths = []
+            install_common.get_cluster(log, self.bei_workspace,
+                                       self.bei_local_host,
+                                       self.bei_iso_dir)
+        if install_cluster is None:
+            log.cl_error("failed to init installation cluster")
+            return -1
         send_fpath_dict = {}
         send_fpath_dict[self.bei_config_fpath] = self.bei_config_fpath
-        agent_rpms = constant.CORAL_DEPENDENT_RPMS[:]
-        agent_rpms += barrele_constant.BARRELE_AGENT_DEPENDENT_RPMS
+        if distro_type == os_distro.DISTRO_TYPE_RHEL:
+            agent_packages = constant.CORAL_DEPENDENT_RPMS[:]
+            agent_packages += barrele_constant.BARRELE_AGENT_DEPENDENT_RPMS
+        elif distro_type == os_distro.DISTRO_TYPE_UBUNTU:
+            agent_packages = ["collectd", "collectd-core", "collectd-utils",
+                              "libcollectdclient1"]
+        else:
+            log.cl_error("unsupported distro type [%s]",
+                         distro_type)
+            return -1
+
         agent_on_server = None
-        for agent in self.bei_agent_dict.values():
+        for agent in agents:
             if agent.bea_host.sh_hostname == self.bei_barreleye_server.bes_server_host.sh_hostname:
+                if only_agent:
+                    log.cl_error("not allowed to reinstall agent on Barreleye server [%s]",
+                                 self.bei_barreleye_server.bes_server_host.sh_hostname)
                 if agent_on_server is not None:
                     log.cl_error("multiple agents for Barreleye server [%s]",
                                  self.bei_barreleye_server.bes_server_host.sh_hostname)
                     return -1
                 agent_on_server = agent
                 continue
-            rpms = agent_rpms + agent.bea_needed_collectd_rpm_types
-            install_cluster.cic_add_hosts([agent.bea_host],
-                                          [],
-                                          rpms,
-                                          send_fpath_dict,
-                                          need_backup_fpaths,
-                                          coral_reinstall=True)
+            package_names = agent_packages
+            if distro_type == os_distro.DISTRO_TYPE_RHEL:
+                package_names += agent.bea_needed_collectd_package_types
+            ret = install_cluster.cic_hosts_add(log,
+                                                [agent.bea_host],
+                                                package_names=package_names,
+                                                send_fpath_dict=send_fpath_dict,
+                                                disable_selinux=disable_selinux,
+                                                disable_firewalld=disable_firewalld,
+                                                change_sshd_max_startups=change_sshd_max_startups,
+                                                config_rsyslog=config_rsyslog)
+            if ret:
+                return -1
 
-        server_rpms = constant.CORAL_DEPENDENT_RPMS[:]
-        server_rpms += barrele_constant.BARRELE_SERVER_DEPENDENT_RPMS
-        if agent_on_server is not None:
-            server_rpms += barrele_constant.BARRELE_AGENT_DEPENDENT_RPMS
-            server_rpms += agent_on_server.bea_needed_collectd_rpm_types
-        install_cluster.cic_add_hosts([self.bei_barreleye_server.bes_server_host],
-                                      [],
-                                      server_rpms,
-                                      send_fpath_dict,
-                                      need_backup_fpaths,
-                                      coral_reinstall=True)
+        if not only_agent:
+            if distro_type == os_distro.DISTRO_TYPE_RHEL:
+                server_packages = constant.CORAL_DEPENDENT_RPMS[:]
+                server_packages += barrele_constant.BARRELE_SERVER_DEPENDENT_RPMS
+                if agent_on_server is not None:
+                    server_packages += barrele_constant.BARRELE_AGENT_DEPENDENT_RPMS
+                    server_packages += agent_on_server.bea_needed_collectd_package_types
+            else:
+                log.cl_error("unsupported distro type [%s] for Barreleye server",
+                             distro_type)
+                return -1
+
+            ret = install_cluster.cic_hosts_add(log,
+                                                [self.bei_barreleye_server.bes_server_host],
+                                                package_names=server_packages,
+                                                send_fpath_dict=send_fpath_dict,
+                                                disable_selinux=disable_selinux,
+                                                disable_firewalld=disable_firewalld,
+                                                change_sshd_max_startups=change_sshd_max_startups,
+                                                config_rsyslog=config_rsyslog)
+            if ret:
+                return -1
         ret = install_cluster.cic_install(log)
         if ret:
-            log.cl_error("failed to install dependent RPMs on all hosts of "
-                         "the cluster")
+            log.cl_error("failed to install cluster")
             return -1
         return 0
 
-    def bei_cluster_install(self, log, erase_influxdb=False,
-                            drop_database=False):
+    def _bei_sync_iso_and_check_packages(self, log):
         """
-        Install Barrele on all host (could include localhost).
+        Sync the ISO to local host and check whether it include necessary packages
         """
-        # Gives a little bit time for canceling the command
         iso = self.bei_iso_fpath
-        if erase_influxdb:
-            log.cl_warning("data and metadata of Influxdb on host [%s] "
-                           "will be all erased",
-                           self.bei_barreleye_server.bes_server_host.sh_hostname)
-        if drop_database:
-            log.cl_warning("database [%s] of Influxdb on host [%s] will be "
-                           "dropped",
-                           barrele_constant.BARRELE_INFLUXDB_DATABASE_NAME,
-                           self.bei_barreleye_server.bes_server_host.sh_hostname)
         if iso is not None:
             ret = install_common.sync_iso_dir(log, self.bei_workspace,
                                               self.bei_local_host, iso,
@@ -177,11 +195,65 @@ class BarreleInstance():
                              "on local host [%s]",
                              iso, self.bei_iso_dir,
                              self.bei_local_host.sh_hostname)
-                return -1
+                return None
 
-        ret = self._bei_cluster_install_rpms(log)
+        package_type_dict = self._bei_get_collectd_package_type_dict(log)
+        if package_type_dict is None:
+            log.cl_error("failed to get Collectd RPM types")
+            return None
+
+        local_host = self.bei_local_host
+        local_distro = local_host.sh_distro(log)
+        if local_distro is None:
+            log.cl_error("failed to get distro of local host [%s]",
+                         local_host.sh_hostname)
+            return None
+
+        distro_type = os_distro.distro2type(log, local_distro)
+        if distro_type is None:
+            log.cl_error("unsupported distro [%s] of host [%s]",
+                         local_distro, local_host.sh_hostname)
+            return None
+
+        if distro_type == os_distro.DISTRO_TYPE_RHEL:
+            package_types = (barrele_collectd.LIBCOLLECTDCLIENT_TYPE_NAME,
+                             barrele_collectd.COLLECTD_TYPE_NAME)
+        elif distro_type == os_distro.DISTRO_TYPE_UBUNTU:
+            package_types = ("collectd-core", "collectd-utils",
+                             "collectd", "libcollectdclient1")
+        else:
+            log.cl_error("unsupported distro [%s] of host [%s]",
+                         local_distro, local_host.sh_hostname)
+            return None
+
+        for package_type in package_types:
+            if package_type not in package_type_dict:
+                log.cl_error("failed to find Collectd package [%s]",
+                             package_type)
+                return None
+        return distro_type
+
+    def bei_cluster_install(self, log, erase_influxdb=False,
+                            drop_database=False):
+        """
+        Install Barrele on all host (could include localhost).
+        """
+        # Gives a little bit time for canceling the command
+        if erase_influxdb:
+            log.cl_warning("data and metadata of Influxdb on host [%s] "
+                           "will be all erased",
+                           self.bei_barreleye_server.bes_server_host.sh_hostname)
+        if drop_database:
+            log.cl_warning("database [%s] of Influxdb on host [%s] will be "
+                           "dropped",
+                           barrele_constant.BARRELE_INFLUXDB_DATABASE_NAME,
+                           self.bei_barreleye_server.bes_server_host.sh_hostname)
+
+
+        agents = list(self.bei_agent_dict.values())
+        ret = self._bei_cluster_install_package(log, agents)
         if ret:
-            log.cl_error("failed to install RPMs in the cluster")
+            log.cl_error("failed to install packages in the cluster")
             return -1
 
         server = self.bei_barreleye_server
@@ -193,9 +265,10 @@ class BarreleInstance():
             return -1
 
         for agent in self.bei_agent_dict.values():
-            ret = agent.bea_config_agent(log, self)
+            ret = agent.bea_config_agent(log)
             if ret:
-                log.cl_error("failed to configure Barreleye agent")
+                log.cl_error("failed to configure Barreleye agent [%s]",
+                             agent.bea_host.sh_hostname)
                 return -1
 
         log.cl_info("URL of the dashboards is [%s]",
@@ -208,123 +281,127 @@ class BarreleInstance():
                     server.bes_grafana_admin_password)
         return 0
 
-    def bei_stop_agents(self, log, hostnames):
+    def bei_get_agent(self, log, hostname, ssh_identity_file=None):
         """
-        Stop agents
+        Return BarreleAgent.
         """
-        for hostname in hostnames:
-            if hostname not in self.bei_agent_dict:
-                log.cl_error("host [%s] is not configured as Barreleye agent",
-                             hostname)
-                return -1
-            agent = self.bei_agent_dict[hostname]
-            ret = agent.bea_collectd_stop(log)
-            if ret:
-                log.cl_error("failed to stop Barreleye agent on host [%s]",
-                             hostname)
-                return -1
-        return 0
+        # pylint: disable=unused-argument
+        if hostname in self.bei_agent_dict:
+            return self.bei_agent_dict[hostname]
 
-    def bei_start_agents(self, log, hostnames):
-        """
-        Start agents
-        """
-        for hostname in hostnames:
-            if hostname not in self.bei_agent_dict:
-                log.cl_error("host [%s] is not configured as Barreleye agent",
-                             hostname)
-                return -1
-            agent = self.bei_agent_dict[hostname]
-            ret = agent.bea_collectd_start(log)
-            if ret:
-                log.cl_error("failed to start Barreleye agent on host [%s]",
-                             hostname)
-                return -1
-        return 0
+        log.cl_warning("agent [%s] is standalone out of Barreleye.conf",
+                       hostname)
+        if hostname in self.bei_host_dict:
+            host = self.bei_host_dict[hostname]
+        else:
+            host = ssh_host.SSHHost(hostname,
+                                    identity_file=ssh_identity_file)
 
-    def bei_install_agent_locally(self, log):
-        """
-        Install Barreleye agent on local host.
-        """
-        distro = self.bei_local_host.sh_distro(log)
-        if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
-            log.cl_error("please install agent on host [%s] by using [barrele cluster install] "
-                         "command",
-                         self.bei_local_host.sh_hostname)
-            return -1
-        if distro not in (os_distro.DISTRO_UBUNTU2004,
-                          os_distro.DISTRO_UBUNTU2204):
-            log.cl_error("distro [%s] of host [%s] is not supported",
-                         distro, self.bei_local_host.sh_hostname)
-            return -1
-
-        iso = self.bei_iso_fpath
-        if iso is not None:
-            ret = install_common.sync_iso_dir(log, self.bei_workspace,
-                                              self.bei_local_host, iso,
-                                              self.bei_iso_dir)
-            if ret:
-                log.cl_error("failed to sync ISO files from [%s] to dir [%s] "
-                             "on local host [%s]",
-                             iso, self.bei_iso_dir,
-                             self.bei_local_host.sh_hostname)
-                return -1
-
-        # Install Barreleye deb file.
-        package_dir = self.bei_iso_dir + "/" + constant.BUILD_PACKAGES
-        command = ("dpkg -i %s/coral-*.deb" % (package_dir))
-        retval = self.bei_local_host.sh_run(log, command, timeout=None)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         self.bei_local_host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-        package_type_dict = self._bei_get_collectd_package_type_dict(log)
-        if package_type_dict is None:
-            log.cl_error("failed to get Collectd package types")
-            return -1
-
-        for deb_type in ("collectd-core", "collectd-utils",
-                         "collectd", "libcollectdclient1"):
-            if deb_type not in package_type_dict:
-                log.cl_error("failed to find Collectd deb [%s]",
-                             deb_type)
-                return -1
-
-        packages_dir = self.bei_iso_dir + "/" + constant.BUILD_PACKAGES
-        ret = barrele_collectd.collectd_debs_install(log, self.bei_local_host,
-                                                     packages_dir)
-        if ret:
-            log.cl_error("failed to install Collectd debs on local host [%s]",
-                         self.bei_local_host.sh_hostname)
-            return -1
-
-        agent = barrele_agent.BarreleAgent(self.bei_local_host,
+        agent = barrele_agent.BarreleAgent(host,
                                            self.bei_barreleye_server,
                                            enable_disk=False,
                                            enable_lustre_oss=False,
                                            enable_lustre_mds=False,
                                            enable_lustre_client=True,
                                            enable_infiniband=False)
-        ret = agent.bea_generate_configs(log, self)
-        if ret:
-            log.cl_error("failed to generate configs for Barreleye agent [%s]",
-                         agent.bea_host.sh_hostname)
+        agent.bea_instance = self
+        return agent
+
+    def bei_get_agents(self, log, hostnames, ssh_identity_file=None):
+        """
+        Return a list of agents.
+        """
+        agents = []
+        for hostname in hostnames:
+            agent = self.bei_get_agent(log, hostname, ssh_identity_file=ssh_identity_file)
+            if agent is None:
+                return None
+            agents.append(agent)
+        return agents
+
+    def bei_agents_start(self, log, hostnames, ssh_identity_file=None):
+        """
+        Start agents.
+        """
+        agents = self.bei_get_agents(log, hostnames, ssh_identity_file=ssh_identity_file)
+        if agents is None:
             return -1
 
-        ret = agent.bea_config_agent(log, self)
-        if ret:
-            log.cl_error("failed to configure Barreleye agent [%s]",
-                         agent.bea_host.sh_hostname)
+        for agent in agents:
+            ret = agent.bea_collectd_start(log)
+            if ret:
+                log.cl_error("failed to start Barreleye agent on host [%s]",
+                             agent.bea_host.sh_hostname)
+                return -1
+        return 0
+
+    def bei_agents_stop(self, log, hostnames, ssh_identity_file=None):
+        """
+        Stop agents.
+        """
+        agents = self.bei_get_agents(log, hostnames, ssh_identity_file=ssh_identity_file)
+        if agents is None:
             return -1
 
-        log.cl_info("Barreleye agent has been installed successfully on host [%s]",
-                    agent.bea_host.sh_hostname)
+        for agent in agents:
+            ret = agent.bea_collectd_stop(log)
+            if ret:
+                log.cl_error("failed to stop Barreleye agent on host [%s]",
+                             agent.bea_host.sh_hostname)
+                return -1
+        return 0
+
+    def bei_agents_install(self, log, hostnames, ssh_identity_file=None):
+        """
+        Install Barreleye agent on hosts.
+        """
+        local_host = self.bei_local_host
+        local_distro = local_host.sh_distro(log)
+        if local_distro is None:
+            log.cl_error("failed to get distro of local host [%s]",
+                         local_host.sh_hostname)
+            return -1
+        agents = self.bei_get_agents(log, hostnames, ssh_identity_file=ssh_identity_file)
+        if agents is None:
+            return -1
+        for agent in agents:
+            host = agent.bea_host
+            hostname = host.sh_hostname
+            if hostname == self.bei_barreleye_server.bes_server_host.sh_hostname:
+                log.cl_error("not allowed to reinstall agent on Barreleye server [%s]",
+                             hostname)
+                return -1
+
+            distro = host.sh_distro(log)
+            if distro is None:
+                log.cl_error("failed to get distro of host [%s]",
+                             host.sh_hostname)
+                return -1
+            if distro != local_distro:
+                log.cl_error("distro of host [%s] is different with local "
+                             "host [%s], [%s] v.s. [%s]",
+                             host.sh_hostname,
+                             local_host.sh_hostname,
+                             distro,
+                             local_distro)
+                return -1
+
+        ret = self._bei_cluster_install_package(log, agents, only_agent=True,
+                                                disable_selinux=False,
+                                                disable_firewalld=False,
+                                                change_sshd_max_startups=False,
+                                                config_rsyslog=False)
+        if ret:
+            log.cl_error("failed to install packages on the agents")
+            return -1
+
+        for agent in agents:
+            ret = agent.bea_config_agent(log)
+            if ret:
+                log.cl_error("failed to configure Barreleye agent [%s]",
+                             agent.bea_host.sh_hostname)
+                return -1
+        log.cl_info("installed agents on [%s]", utils.list2string(hostnames))
         return 0
 
 
@@ -401,6 +478,14 @@ def barrele_init_instance(log, local_host, workspace, config, config_fpath,
                      jobstat_pattern, barrele_constant.BARRELE_JOBSTAT_PATTERNS)
         return None
 
+    definition_dir = constant.LUSTRE_VERSION_DEFINITION_DIR
+    version_db = lustre_version.load_lustre_version_database(log, local_host,
+                                                             definition_dir)
+    if version_db is None:
+        log.cl_error("failed to load version database [%s]",
+                     definition_dir)
+        return None
+
     lustre_fallback_version_name = \
         utils.config_value(config,
                            barrele_constant.BRL_LUSTRE_FALLBACK_VERSION)
@@ -411,14 +496,16 @@ def barrele_init_instance(log, local_host, workspace, config, config_fpath,
                      config_fpath, BARRELE_LUSTRE_FALLBACK_VERSION)
         lustre_fallback_version_name = BARRELE_LUSTRE_FALLBACK_VERSION
 
-    if lustre_fallback_version_name not in lustre_version.LUSTRE_VERSION_DICT:
-        log.cl_error("unsupported Lustre version [%s] is configured in the "
-                     "config file [%s]", lustre_fallback_version_name,
+    if lustre_fallback_version_name not in version_db.lvd_version_dict:
+        log.cl_error("Lustre version [%s] unsupported in [%s] is configured in the "
+                     "config file [%s]",
+                     lustre_fallback_version_name,
+                     definition_dir,
                      config_fpath)
         return None
 
     lustre_fallback_version = \
-        lustre_version.LUSTRE_VERSION_DICT[lustre_fallback_version_name]
+        version_db.lvd_version_dict[lustre_fallback_version_name]
 
     enable_lustre_exp_mdt = utils.config_value(config,
                                                barrele_constant.BRL_ENABLE_LUSTRE_EXP_MDT)
@@ -537,10 +624,16 @@ def barrele_init_instance(log, local_host, workspace, config, config_fpath,
                                                enable_infiniband=enable_infiniband)
             agent_dict[hostname] = agent
 
+    if local_host.sh_hostname not in host_dict:
+        host_dict[local_host.sh_hostname] = local_host
+
     instance = BarreleInstance(workspace, config, config_fpath, log_to_file,
                                logdir_is_default, iso_fpath, local_host, collect_interval,
                                continuous_query_periods, jobstat_pattern,
                                lustre_fallback_version, enable_lustre_exp_mdt,
                                enable_lustre_exp_ost, host_dict,
-                               agent_dict, barreleye_server)
+                               agent_dict, barreleye_server,
+                               version_db)
+    for agent in agent_dict.values():
+        agent.bea_instance = instance
     return instance

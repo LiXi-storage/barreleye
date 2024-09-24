@@ -1,6 +1,6 @@
 #!/usr/bin/python3 -u
 """
-Coral commands
+Coral build commands
 """
 from pybuild import coral
 

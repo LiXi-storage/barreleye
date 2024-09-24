@@ -3,8 +3,8 @@ Cluster commands of Clownf
 """
 from pycoral import ssh_host
 from pycoral import clog
+from pycoral import constant
 from pycoral import cmd_general
-from pycoral import lustre as lustre_lib
 from pyclownf import clownf_command_common
 from pyclownf import clownf_constant
 
@@ -76,13 +76,14 @@ class ClusterCommand():
                                                    not skip_umount)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
-    def format(self, yes=False):
+    def format(self, yes=False, dryrun=False):
         """
-        format all Lustre devices in the cluster.
+        Format all Lustre devices in the cluster.
 
         BE CAREFUL that this command will cleanup all data on Lustre! All
         Lustre services will be umounted before formating.
         :param yes: Do not ask for confirmation, just format. Default: False.
+        :param dryrun: Do not format anyone of the services. Default: False.
         """
         log, clownfish_instance = \
             clownf_command_common.init_env(self._cc_config_fpath,
@@ -90,7 +91,10 @@ class ClusterCommand():
                                            self._cc_log_to_file,
                                            self._cc_iso)
         cmd_general.check_argument_bool(log, "yes", yes)
-        if not yes:
+        cmd_general.check_argument_bool(log, "dryrun", dryrun)
+        if dryrun:
+            log.cl_info("[Dry Run] no service will be modified or formatted")
+        elif not yes:
             message = "Be careful! Data on the following services will be completely erased: "
             service_str = ""
             for service in clownfish_instance.ci_service_dict.values():
@@ -102,7 +106,7 @@ class ClusterCommand():
             if not input_result.startswith("y") and not input_result.startswith("Y"):
                 log.cl_info("quiting without touching anything")
                 clownf_command_common.exit_env(log, clownfish_instance, 1)
-        rc = clownfish_instance.ci_cluster_format(log)
+        rc = clownfish_instance.ci_cluster_format(log, dryrun=dryrun)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def install(self):
@@ -255,9 +259,9 @@ class ClusterCommand():
                                            self._cc_log_to_file,
                                            self._cc_iso)
         cmd_general.check_argument_bool(log, "status", status)
-        lustres = list(clownfish_instance.ci_lustre_dict.values())
-        rc = clownf_command_common.print_lustres(log, clownfish_instance,
-                                                 lustres, status=status)
+        filesystems = list(clownfish_instance.ci_fs_dict.values())
+        rc = clownf_command_common.print_filesystems(log, clownfish_instance,
+                                                     filesystems, status=status)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def clients(self, status=False):
@@ -308,14 +312,14 @@ class ClusterCommand():
                                 balanced)
 
         healty = clog.colorful_message(clog.COLOR_GREEN,
-                                       lustre_lib.LustreHost.LSH_HEALTHY)
+                                       constant.LUSTRE_STR_HEALTHY)
         for host in clownfish_instance.ci_host_dict.values():
             healty_result = host.lsh_healty_check(log)
-            if healty_result == lustre_lib.LustreHost.LSH_ERROR:
+            if healty_result == constant.LUSTRE_STR_ERROR:
                 healty = clog.ERROR_MSG
                 rc = -1
                 break
-            if healty_result != lustre_lib.LustreHost.LSH_HEALTHY:
+            if healty_result != constant.LUSTRE_STR_HEALTHY:
                 healty = clog.colorful_message(clog.COLOR_RED,
                                                healty_result)
                 break

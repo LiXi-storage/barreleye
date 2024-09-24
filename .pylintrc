@@ -1,5 +1,17 @@
 [TYPECHECK]
-disable=line-too-long,anomalous-backslash-in-string,invalid-name,superfluous-parens,bare-except,too-many-return-statements,too-many-arguments,consider-using-f-string,unsupported-membership-test,unsubscriptable-object,abstract-class-instantiated
+disable=abstract-class-instantiated,
+        anomalous-backslash-in-string,
+        bare-except,
+        consider-using-f-string,
+        invalid-name,
+        line-too-long,
+        not-an-iterable,
+        superfluous-parens,
+        too-many-return-statements,
+        too-many-arguments,
+        too-many-ancestors,
+        unsubscriptable-object,
+        unsupported-membership-test
 # zmq.{LINGER,REQ,ROUTER,NOBLOCK} are dynamically generated and so pylint
 # doesn't see them, causing false positives.
 generated-members=LINGER,REQ,ROUTER,NOBLOCK,RCVTIMEO

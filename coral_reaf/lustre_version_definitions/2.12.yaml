@@ -1,0 +1,17 @@
+#
+# Definition file of Lustre 2.12 version (YAML format)
+#
+priority: 2012000
+lustre_version: '2.12'
+rpm_patterns:
+    kernel: '^(kernel-3.+\.rpm)$'
+    lustre: '^(lustre-2\.12.+\.rpm)$'
+    lustre_iokit: '^(lustre-iokit-2.+\.rpm)$'
+    lustre_kmod: '^(kmod-lustre-2\.12.+\.rpm)$'
+    lustre_osd_ldiskfs: '^(kmod-lustre-osd-ldiskfs-2\.12.+\.rpm)$'
+    lustre_osd_ldiskfs_mount: '^(lustre-osd-ldiskfs-mount-2\.12.+\.rpm)$'
+    lustre_osd_zfs: '^(kmod-lustre-osd-zfs-2\.12.+\.rpm)$'
+    lustre_osd_zfs_mount: '^(lustre-osd-zfs-mount-2\.12.+\.rpm)$'
+    lustre_tests: '^(lustre-tests-2.+\.rpm)$'
+    lustre_tests_kmod: '^(kmod-lustre-tests-2.+\.rpm)$'
+collectd_definition_file: lustre-2.12.xml

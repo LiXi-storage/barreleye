@@ -11,7 +11,7 @@
 #include <sys/zfs_context.h>
 #endif
 #include <sys/param.h>
-#include "clf_constant.h"
+#include "clownf_constant.h"
 
 #ifdef HAVE_ZFS
 libzfs_handle_t *g_zfs;
@@ -127,18 +127,18 @@ ldiskfs_check_mountable_openfs(const char *dev)
 	return retval;
 }
 
-enum clf_device_type {
+enum clownf_device_type {
 	CDT_UNKNOWN,
 	CDT_EXT4,
 	CDT_ZPOOL,
 	CDT_LAST
 };
 
-static enum clf_device_type detect_device_type(char *dev)
+static enum clownf_device_type detect_device_type(char *dev)
 {
 	ext2_filsys fs;
 	int rc;
-	enum clf_device_type fs_type = CDT_UNKNOWN;
+	enum clownf_device_type fs_type = CDT_UNKNOWN;
 
 	rc = ext2fs_open(dev, LDISKFS_OPENFS_FLAGS,
 			 0, 0, unix_io_manager, &fs);
@@ -367,7 +367,7 @@ int main(int argc, char **argv)
 {
 	int mountable;
 	char *dev;
-	enum clf_device_type device_type;
+	enum clownf_device_type device_type;
 
 	if (argc != 3) {
 		usage(argv[0]);

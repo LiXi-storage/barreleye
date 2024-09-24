@@ -4,7 +4,6 @@ Library for generating collectd config
 # pylint: disable=too-many-lines
 import re
 import collections
-from pycoral import lustre_version
 from pybarrele import barrele_constant
 
 LIBCOLLECTDCLIENT_TYPE_NAME = "libcollectdclient"
@@ -27,36 +26,18 @@ XML_FNAME_ES5_1 = "lustre-b_es5_1.xml"
 XML_FNAME_ES5_2 = "lustre-b_es5_2.xml"
 XML_FNAME_ES6_0 = "lustre-b_es6_0.xml"
 XML_FNAME_ES6_1 = "lustre-b_es6_1.xml"
+XML_FNAME_ES6_2 = "lustre-b_es6_2.xml"
 XML_FNAME_2_13 = "lustre-2.13.xml"
 XML_FNAME_IME_1_1 = "ime-1.1.xml"
 XML_FNAME_IME_1_2 = "ime-1.2.xml"
+XML_FNAME_2_15 = "lustre-2.15.xml"
 # The Lustre XML files that supports ZFS.
 SUPPORTED_ZFS_XML_FNAMES = [XML_FNAME_ES3, XML_FNAME_ES4,
                             XML_FNAME_2_12, XML_FNAME_ES5_1,
                             XML_FNAME_ES5_2, XML_FNAME_2_13,
-                            XML_FNAME_ES6_0, XML_FNAME_ES6_1]
-
-
-def lustre_version_xml_fname(log, version, quiet=False):
-    """
-    Return the XML file of this Lustre version
-    """
-    if version.lv_name == lustre_version.LUSTRE_VERSION_NAME_2_12:
-        xml_fname = XML_FNAME_2_12
-    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_1:
-        xml_fname = XML_FNAME_ES5_1
-    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES5_2:
-        xml_fname = XML_FNAME_ES5_2
-    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES6_0:
-        xml_fname = XML_FNAME_ES6_0
-    elif version.lv_name == lustre_version.LUSTRE_VERSION_NAME_ES6_1:
-        xml_fname = XML_FNAME_ES6_1
-    else:
-        if not quiet:
-            log.cl_error("unsupported Lustre version of [%s]",
-                         version.lv_name)
-        return None
-    return xml_fname
+                            XML_FNAME_ES6_0, XML_FNAME_ES6_1,
+                            XML_FNAME_ES6_2,
+                            XML_FNAME_2_15]
 
 
 def support_zfs(xml_fname):
@@ -72,7 +53,7 @@ def support_acctgroup_acctproject(version):
     """
     Whether this Lustre version supports acctgroup and acctproject
     """
-    if version.lv_name == "es2":
+    if version.lv_version_name == "es2":
         return False
     return True
 
@@ -81,7 +62,7 @@ def support_lustre_client(version):
     """
     Whether this Lustre version supports client_stats_*
     """
-    if version.lv_name in ["es2", lustre_version.LUSTRE_VERSION_NAME_2_12]:
+    if version.lv_version_name in ["es2", "2.12"]:
         return False
     return True
 
@@ -125,7 +106,7 @@ class CollectdConfig():
         """
         # pylint: disable=too-many-statements,too-many-locals,too-many-branches
         with open(fpath, "wt", encoding='utf-8') as fout:
-            fout.write("# Collectd config file generated automatcially by "
+            fout.write("# Collectd config file generated automatically by "
                        "Barreleye\n\n")
             for config_name, config in self.cdc_configs.items():
                 text = '%s %s\n' % (config_name, config)
@@ -287,7 +268,7 @@ PostCacheChain "PostCache"
         """
         Check the memory plugin
         """
-        name = "memory.buffered.memory"
+        name = barrele_constant.MEASUREMENT_MEMORY_BUFFERED
         return self.cdc_barreleye_agent.bea_influxdb_measurement_check(log, name)
 
     def cdc_plugin_memory(self):
@@ -320,7 +301,7 @@ PostCacheChain "PostCache"
         Check the CPU plugin
         """
         barreleye_agent = self.cdc_barreleye_agent
-        measurement = "aggregation.cpu-average.cpu.system"
+        measurement = barrele_constant.MEASUREMENT_AGREGATED_CPU_SYSTEM
         return barreleye_agent.bea_influxdb_measurement_check(log, measurement)
 
     def cdc_plugin_cpu(self):
@@ -358,9 +339,7 @@ PostCacheChain "PostCache"
         """
         Config the Lustre plugin
         """
-        xml_fname = lustre_version_xml_fname(log, version)
-        if xml_fname is None:
-            return -1
+        xml_fname = version.lv_collectd_definition_file
         xml_fpath = barrele_constant.BARRELE_XML_DIR + "/" + xml_fname
 
         enable_zfs = support_zfs(xml_fname)
@@ -1093,8 +1072,8 @@ PostCacheChain "PostCache"
         self.cdc_filedatas["lustre"] = config
         barreleye_agent = self.cdc_barreleye_agent
         rpm_name = "collectd-filedata"
-        if rpm_name not in barreleye_agent.bea_needed_collectd_rpm_types:
-            barreleye_agent.bea_needed_collectd_rpm_types.append(rpm_name)
+        if rpm_name not in barreleye_agent.bea_needed_collectd_package_types:
+            barreleye_agent.bea_needed_collectd_package_types.append(rpm_name)
         return 0
 
     def cdc_plugin_df_check(self, log):
@@ -1102,7 +1081,7 @@ PostCacheChain "PostCache"
         Check the df plugin
         """
         barreleye_agent = self.cdc_barreleye_agent
-        measurement = "df.root.df_complex.free"
+        measurement = barrele_constant.MEASUREMENT_DF_FREE
         return barreleye_agent.bea_influxdb_measurement_check(log, measurement)
 
     def cdc_plugin_df(self):
@@ -1123,7 +1102,7 @@ PostCacheChain "PostCache"
         Check the load plugin
         """
         barreleye_agent = self.cdc_barreleye_agent
-        measurement = "load.load.shortterm"
+        measurement = barrele_constant.MEASUREMENT_LOAD_SHORTERM
         return barreleye_agent.bea_influxdb_measurement_check(log, measurement)
 
     def cdc_plugin_load(self):
@@ -1141,7 +1120,7 @@ PostCacheChain "PostCache"
         """
         barreleye_agent = self.cdc_barreleye_agent
         host = barreleye_agent.bea_host
-        measurement = "aggregation.sensors-max.temperature"
+        measurement = barrele_constant.MEASUREMENT_AGREGATED_MAX_TEMPERATURE
 
         command = "sensors | grep temp"
         retval = host.sh_run(log, command)
@@ -1182,8 +1161,8 @@ PostCacheChain "PostCache"
 
         barreleye_agent = self.cdc_barreleye_agent
         rpm_name = "collectd-sensors"
-        if rpm_name not in barreleye_agent.bea_needed_collectd_rpm_types:
-            barreleye_agent.bea_needed_collectd_rpm_types.append(rpm_name)
+        if rpm_name not in barreleye_agent.bea_needed_collectd_package_types:
+            barreleye_agent.bea_needed_collectd_package_types.append(rpm_name)
         return 0
 
     def cdc_plugin_disk(self):
@@ -1194,8 +1173,8 @@ PostCacheChain "PostCache"
 
         barreleye_agent = self.cdc_barreleye_agent
         rpm_name = "collectd-disk"
-        if rpm_name not in barreleye_agent.bea_needed_collectd_rpm_types:
-            barreleye_agent.bea_needed_collectd_rpm_types.append(rpm_name)
+        if rpm_name not in barreleye_agent.bea_needed_collectd_package_types:
+            barreleye_agent.bea_needed_collectd_package_types.append(rpm_name)
         return 0
 
     def cdc_plugin_uptime_check(self, log):
@@ -1203,7 +1182,7 @@ PostCacheChain "PostCache"
         Check the uptime plugin
         """
         barreleye_agent = self.cdc_barreleye_agent
-        measurement = "uptime.uptime"
+        measurement = barrele_constant.MEASUREMENT_UPTIME
         return barreleye_agent.bea_influxdb_measurement_check(log, measurement)
 
     def cdc_plugin_uptime(self):
@@ -1220,7 +1199,7 @@ PostCacheChain "PostCache"
         Check the users plugin
         """
         barreleye_agent = self.cdc_barreleye_agent
-        measurement = "users.users"
+        measurement = barrele_constant.MEASUREMENT_USERS
         return barreleye_agent.bea_influxdb_measurement_check(log, measurement)
 
     def cdc_plugin_users(self):
@@ -1294,8 +1273,8 @@ PostCacheChain "PostCache"
         self.cdc_filedatas["infiniband"] = config
         barreleye_agent = self.cdc_barreleye_agent
         rpm_name = "collectd-filedata"
-        if rpm_name not in barreleye_agent.bea_needed_collectd_rpm_types:
-            barreleye_agent.bea_needed_collectd_rpm_types.append(rpm_name)
+        if rpm_name not in barreleye_agent.bea_needed_collectd_package_types:
+            barreleye_agent.bea_needed_collectd_package_types.append(rpm_name)
 
 
 def collectd_package_type_from_name(log, name):
@@ -1368,36 +1347,3 @@ def get_collectd_package_type_dict(log, host, packages_dir):
                      "host [%s]", package_type, packages_dir,
                      host.sh_hostname)
     return collectd_package_type_dict
-
-
-def collectd_debs_install(log, host, packages_dir):
-    """
-    Install all the Collectd debs under the package dir
-    """
-    # Remove the existing collectd configuration to avoid failure of starting
-    # collectd service when installing Collectd deb file.
-    command = ("rm -f /etc/collectd/collectd.conf")
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
-    command = ("dpkg -i %s/collectd*.deb %s/libcollectdclient*.deb" %
-               (packages_dir, packages_dir))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-    return 0

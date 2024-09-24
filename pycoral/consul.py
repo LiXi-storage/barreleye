@@ -2,85 +2,423 @@
 Consul library
 """
 # pylint: disable=too-many-lines
+import socket
+import base64
 import time
 import traceback
 import json
+from http import HTTPStatus
 import yaml
-from pycoral import cmd_general
+import requests
 
 CONSUL_BIN_NAME = "consul"
 CONSUL_BIN_DIR = "/usr/bin"
 CONSUL_CONFIG_DIR = "/etc/consul"
 CONSUL_DATA_DIR = "/var/lib/consul"
 CONSUL_NO_KEY_STRING = "Error! No key exists at:"
+CONSUL_KV = "kv"
+
+CONSUL_KV_STR_LOCK_INDEX = "LockIndex"
+CONSUL_KV_STR_KEY = "Key"
+CONSUL_KV_STR_FLAGS = "Flags"
+CONSUL_KV_STR_VALUE = "Value"
+CONSUL_KV_STR_SESSION = "Session"
+CONSUL_KV_STR_CREATE_INDEX = "CreateIndex"
+CONSUL_KV_STR_MODIFY_INDEX = "ModifyIndex"
+CONSUL_KV_FIELDS = [CONSUL_KV_STR_LOCK_INDEX,
+                    CONSUL_KV_STR_KEY,
+                    CONSUL_KV_STR_FLAGS,
+                    CONSUL_KV_STR_VALUE,
+                    CONSUL_KV_STR_CREATE_INDEX,
+                    CONSUL_KV_STR_MODIFY_INDEX]
 
 
-class ConsulHost():
+CONSUL_SESSION_INFO_ID = "ID"
+CONSUL_SESSION_INFO_NAME = "Name"
+CONSUL_SESSION_INFO_NODE = "Node"
+CONSUL_SESSION_INFO_LOCKDELAY = "LockDelay"
+CONSUL_SESSION_INFO_BEHAVIOR = "Behavior"
+CONSUL_SESSION_INFO_TTL = "TTL"
+CONSUL_SESSION_INFO_NODECHECKS = "NodeChecks"
+CONSUL_SESSION_INFO_SERVICECHECKS = "ServiceChecks"
+CONSUL_SESSION_INFO_CREATEINDEX = "CreateIndex"
+CONSUL_SESSION_INFO_MODIFYINDEX = "ModifyIndex"
+CONSUL_SESSION_INFO_FIELDS = [CONSUL_SESSION_INFO_ID,
+                              CONSUL_SESSION_INFO_NAME,
+                              CONSUL_SESSION_INFO_NODE,
+                              CONSUL_SESSION_INFO_LOCKDELAY,
+                              CONSUL_SESSION_INFO_BEHAVIOR,
+                              CONSUL_SESSION_INFO_TTL,
+                              CONSUL_SESSION_INFO_NODECHECKS,
+                              CONSUL_SESSION_INFO_SERVICECHECKS,
+                              CONSUL_SESSION_INFO_CREATEINDEX,
+                              CONSUL_SESSION_INFO_MODIFYINDEX]
+
+def consul_kv_path(key):
+    """
+    Return the relative path of a KV from the key.
+    """
+    return CONSUL_KV + "/" + key
+
+
+def consul_session_info_path(session_uuid):
+    """
+    Return the relative path of a KV from the key.
+    """
+    return "session/info/" + session_uuid
+
+
+class ConsulAgent():
     """
     Each Consul server/client has an object of this type
     """
     # pylint: disable=too-few-public-methods
     def __init__(self, host, bind_addr, is_server=True):
-        self.cs_host = host
-        self.cs_bind_addr = bind_addr
-        self.cs_is_server = is_server
+        # The SSHHost
+        self.csa_host = host
+        # IP like "10.0.0.1"
+        self.csa_bind_addr = bind_addr
+        # The port, usually 8500
+        self.csa_port = "8500"
+        # Whether this agent is Consul server.
+        self.csa_is_server = is_server
         if is_server:
             self.cs_service_name = "server"
         else:
             self.cs_service_name = "client"
+        # Example: "http://10.0.0.1:8500/v1/"
+        self.csa_url_v1 = "http://" + bind_addr + ":" + self.csa_port + "/v1/"
+        # Example: "http://10.0.0.1:8500/v1/kv/"
+        self.csa_url_kv = self.csa_url_v1 + CONSUL_KV + "/"
 
-    def ch_cleanup(self, log):
+    def _csa_url(self, path):
+        """
+        Return the full Consul URL from a relatvie path.
+        """
+        return self.csa_url_v1 + path
+
+    def _csa_get_raw(self, log, path, quiet=False):
+        """
+        Key is something like "status/leader".
+        Return the response, including the status.
+        """
+        url = self._csa_url(path)
+        try:
+            response = requests.get(url)
+        except:
+            if not quiet:
+                log.cl_error("failed to get reply from URL [%s]: %s",
+                             url, traceback.format_exc())
+            return None
+        return response
+
+    def _csa_get(self, log, path, quiet=False):
+        """
+        Key is something like "status/leader".
+        Return the json result
+        """
+        response = self._csa_get_raw(log, path, quiet=quiet)
+        if response is None:
+            return None
+        if response.status_code != HTTPStatus.OK:
+            if not quiet:
+                log.cl_error("got status [%s] of Consul path [%s]",
+                             response.status_code, path)
+            return None
+        return response.json()
+
+    def csa_put_kv(self, log, key, value):
+        """
+        Key is something like "kv/path2key".
+        Return the json result.
+        """
+        url = self._csa_url(consul_kv_path(key))
+        try:
+            response = requests.put(url, data=value)
+        except:
+            log.cl_error("failed to put data to URL [%s]: %s",
+                         url, traceback.format_exc())
+            return -1
+        if response.status_code != HTTPStatus.OK:
+            log.cl_error("failed to put data to URL [%s], status [%s]",
+                         url, response.status_code)
+            return -1
+        result = response.json()
+        if not isinstance(result, bool):
+            log.cl_error("unexpected type for response of putting key [%s]", key)
+            return -1
+        if not result:
+            log.cl_error("failure reply of putting key [%s]", key)
+            return -1
+        return 0
+
+    def _csa_get_kv_dict(self, log, key):
+        """
+        The response of the request is something like:
+        [{
+            "LockIndex": 5,
+            "Key": "clownf_host/server0/lock",
+            "Flags": 3304740253564472344,
+            "Value": "NTQ3Nj2kNDMtN2RjNS1jN2NlLTRjM2QtNjdlMTc4ZjJmNmEz",
+            "Session": "ac9d8c70-b8ff-504c-d33f-8e4177e3200d"
+            "CreateIndex": 87,
+            "ModifyIndex": 305188
+        }]
+        "Session" can be missing if no lock is held on the lock.
+
+        If the key does not exist, return (0, None)
+        """
+        response = self._csa_get_raw(log, consul_kv_path(key))
+        if response is None:
+            return -1, None
+
+        if response.status_code == HTTPStatus.NOT_FOUND:
+            return 0, None
+
+        if response.status_code != HTTPStatus.OK:
+            log.cl_error("got status [%s] from Consul key [%s]",
+                         response.status_code, key)
+            return -1, None
+
+        result = response.json()
+        if not isinstance(result, list):
+            log.cl_error("unexpected type for response of key [%s]", key)
+            return -1, None
+        if len(result) != 1:
+            log.cl_error("unexpected length for response of key [%s]", key)
+            return -1, None
+        reply_dict = result[0]
+        for field in CONSUL_KV_FIELDS:
+            if field not in reply_dict:
+                log.cl_error("missing [%s] in response of key [%s]",
+                             field, key)
+                return -1, reply_dict
+
+        return 0, reply_dict
+
+    def csa_get_kv_value(self, log, key):
+        """
+        Get the key of a KV. The key will be decoded out of base64-encoded
+        blob. If the key does not exist, return (0, None)
+        """
+        ret, reply_dict = self._csa_get_kv_dict(log, key)
+        if ret:
+            return -1, None
+        if reply_dict is None:
+            return 0, None
+        encoded_value = reply_dict[CONSUL_KV_STR_VALUE]
+        try:
+            value_bytes = base64.b64decode(encoded_value)
+            value_string = value_bytes.decode('ascii')
+        except:
+            log.cl_error("failed to decode value of key [%s]: %s",
+                         key, traceback.format_exc())
+            return -1, None
+        return 0, value_string
+
+    def csa_get_agent_self_status(self, log, quiet=False):
+        """
+        Returns configuration of the local agent and member information
+        got from "status/self" path.
+        Example:
+        {
+            "Config": {
+                "Datacenter": "dc1",
+                "NodeName": "foobar",
+                "NodeID": "9d754d17-d864-b1d3-e758-f3fe25a9874f",
+                "Server": true,
+                "Revision": "deadbeef",
+                "Version": "1.0.0"
+            },
+            "DebugConfig": {
+                ... full runtime configuration ...
+                ... format subject to change ...
+            },
+            "Coord": {
+                "Adjustment": 0,
+                "Error": 1.5,
+                "Vec": [0,0,0,0,0,0,0,0]
+            },
+            "Member": {
+                "Name": "foobar",
+                "Addr": "10.1.10.12",
+                "Port": 8301,
+                "Tags": {
+                "bootstrap": "1",
+                "dc": "dc1",
+                "id": "40e4a748-2192-161a-0510-9bf59fe950b5",
+                "port": "8300",
+                "role": "consul",
+                "vsn": "1",
+                "vsn_max": "1",
+                "vsn_min": "1"
+                },
+                "Status": 1,
+                "ProtocolMin": 1,
+                "ProtocolMax": 2,
+                "ProtocolCur": 2,
+                "DelegateMin": 2,
+                "DelegateMax": 4,
+                "DelegateCur": 4
+            },
+            "Meta": {
+                "instance_type": "i2.xlarge",
+                "os_version": "ubuntu_16.04"
+            }
+        }
+        """
+        path = "agent/self"
+        result = self._csa_get(log, path, quiet=quiet)
+        if result is None:
+            if not quiet:
+                log.cl_error("failed to get the Consul value of path [%s]", path)
+            return None
+        if not isinstance(result, dict):
+            if not quiet:
+                log.cl_error("unexpected type for Consul value of path [%s]", path)
+            return None
+        return result
+
+    def csa_check_connectable(self, log):
+        """
+        Check the agent is connectable through HTTP API.
+        """
+        self_status = self.csa_get_agent_self_status(log, quiet=True)
+        if self_status is None:
+            return -1
+        return 0
+
+    def csa_get_leader(self, log):
+        """
+        Get the lead from "status/leader" key.
+        Result is a string like "10.0.0.1:8300"
+        """
+        path = "status/leader"
+        result = self._csa_get(log, path)
+        if result is None:
+            log.cl_error("failed to get the value of path [%s]", path)
+            return None
+        if not isinstance(result, str):
+            log.cl_error("unexpected type for value of path [%s]", path)
+            return None
+        return result
+
+    def csa_get_lock_session(self, log, lock_key):
+        """
+        Get the session name from the lock key.
+        If no lock is held on the key, return (0, None)
+        """
+        ret, reply_dict = self._csa_get_kv_dict(log, lock_key)
+        if ret:
+            return -1, None
+        if reply_dict is None:
+            return 0, None
+        if CONSUL_KV_STR_SESSION not in reply_dict:
+            return 0, None
+        session_uuid = reply_dict[CONSUL_KV_STR_SESSION]
+        return 0, session_uuid
+
+    def _csa_get_session_info(self, log, session_uuid):
+        """
+        Get the session info.
+
+        The response of the request is something like:
+        [{
+            "ID": "adf4238a-882b-9ddc-4a9d-5b6758e4159e",
+            "Name": "test-session",
+            "Node": "raja-laptop-02",
+            "LockDelay": 15000000000,
+            "Behavior": "release",
+            "TTL": "30s",
+            "NodeChecks": [
+            "serfHealth"
+            ],
+            "ServiceChecks": null,
+            "CreateIndex": 1086449,
+            "ModifyIndex": 1086449
+        }]
+        """
+        result = self._csa_get(log, consul_session_info_path(session_uuid))
+        if result is None:
+            log.cl_error("failed to get the info of session [%s]", session_uuid)
+            return -1, None
+        if not isinstance(result, list):
+            log.cl_error("unexpected type for info of session [%s]", session_uuid)
+            return -1, None
+        if len(result) != 1:
+            log.cl_error("unexpected length for info of session [%s]", session_uuid)
+            return -1, None
+        reply_dict = result[0]
+        for field in CONSUL_SESSION_INFO_FIELDS:
+            if field not in reply_dict:
+                log.cl_error("missing [%s] in info of session [%s]",
+                             field, session_uuid)
+                return -1, None
+
+        return 0, reply_dict
+
+    def csa_get_session_node(self, log, session_uuid):
+        """
+        Get the session node.
+        """
+        ret, reply_dict = self._csa_get_session_info(log, session_uuid)
+        if ret or reply_dict is None:
+            log.cl_info("failed to get info of session [%s]", session_uuid)
+            return None
+        return reply_dict[CONSUL_SESSION_INFO_NODE]
+
+    def csa_cleanup(self, log):
         """
         Stop the service and cleanup the datadir
         """
-        # Stop the current service if any
-        ret = self.cs_host.sh_service_stop(log, "consul")
+        # Stop the current service if any.
+        ret = self.csa_host.sh_service_stop(log, "consul")
         if ret:
             log.cl_info("failed to stop Consul service on host [%s]",
-                        self.cs_host.sh_hostname)
+                        self.csa_host.sh_hostname)
             return -1
 
         # Cleanup the data if any
         command = ("rm -fr %s" % CONSUL_DATA_DIR)
-        retval = self.cs_host.sh_run(log, command)
+        retval = self.csa_host.sh_run(log, command)
         if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
-                         self.cs_host.sh_hostname,
+                         self.csa_host.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
         return 0
 
-    def ch_install(self, log, workspace, datacenter, sever_ips,
-                   encrypt_key):
+    def csa_install(self, log, workspace, datacenter, sever_ips,
+                    encrypt_key):
         """
         Install and config
         """
-        ret = self.ch_cleanup(log)
+        ret = self.csa_cleanup(log)
         if ret:
             log.cl_error("failed to cleanup Consul datadir on host [%s]",
-                         self.cs_host.sh_hostname)
+                         self.csa_host.sh_hostname)
             return -1
 
         fpath = workspace + "/" + CONSUL_BIN_NAME
-        ret = self.cs_host.sh_send_file(log, fpath, CONSUL_BIN_DIR)
+        ret = self.csa_host.sh_send_file(log, fpath, CONSUL_BIN_DIR)
         if ret:
-            log.cl_error("failed to send file [%s] on local host to "
+            log.cl_error("failed to send file [%s] on local host [%s] to "
                          "directory [%s] on host [%s]",
-                         fpath, CONSUL_BIN_DIR,
-                         self.cs_host.sh_hostname)
+                         fpath, socket.gethostname(), CONSUL_BIN_DIR,
+                         self.csa_host.sh_hostname)
             return -1
 
         consul_config = {}
         consul_config["datacenter"] = datacenter
         consul_config["data_dir"] = CONSUL_DATA_DIR
-        consul_config["node_name"] = self.cs_host.sh_hostname
-        consul_config["server"] = self.cs_is_server
+        consul_config["node_name"] = self.csa_host.sh_hostname
+        consul_config["server"] = self.csa_is_server
         consul_config["ui"] = True
-        consul_config["bind_addr"] = self.cs_bind_addr
+        consul_config["bind_addr"] = self.csa_bind_addr
         consul_config["client_addr"] = "0.0.0.0"
         consul_config["retry_join"] = sever_ips
         consul_config["rejoin_after_leave"] = True
@@ -91,87 +429,97 @@ class ConsulHost():
         # affected by nodes from another datacenter
         consul_config["encrypt"] = encrypt_key
 
-        if self.cs_is_server:
+        if self.csa_is_server:
             consul_config["bootstrap_expect"] = len(sever_ips)
 
         json_fname = workspace + "/" + "config.json"
         with open(json_fname, 'w', encoding='utf-8') as json_file:
             json.dump(consul_config, json_file, indent=4, sort_keys=True)
 
-        ret = self.cs_host.sh_mkdir(log, CONSUL_CONFIG_DIR)
-        if ret:
-            log.cl_error("failed to mkdir [%s] on host [%s]",
-                         CONSUL_CONFIG_DIR,
-                         self.cs_host.sh_hostname)
-            return -1
-
-        ret = self.cs_host.sh_send_file(log, json_fname, CONSUL_CONFIG_DIR)
-        if ret:
-            log.cl_error("failed to send file [%s] on local host to "
-                         "directory [%s] on host [%s]",
-                         json_fname, CONSUL_CONFIG_DIR,
-                         self.cs_host.sh_hostname)
-            return -1
-
-        log.cl_info("installed Consul %s on host [%s]",
-                    self.cs_service_name, self.cs_host.sh_hostname)
-        return 0
-
-    def ch_restart(self, log, restart=True):
-        """
-        Restart the service
-        """
-        if restart:
-            ret = self.cs_host.sh_service_stop(log, "consul")
-            if ret:
-                log.cl_error("failed to stop service [%s] on host [%s]",
-                             "consul",
-                             self.cs_host.sh_hostname)
-                return -1
-
-        command = ("systemctl daemon-reload")
-        retval = self.cs_host.sh_run(log, command)
+        command = "mkdir -p " + CONSUL_CONFIG_DIR
+        retval = self.csa_host.sh_run(log, command)
         if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
-                         self.cs_host.sh_hostname,
+                         self.csa_host.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
 
-        ret = self.cs_host.sh_service_start(log, "consul")
+        ret = self.csa_host.sh_send_file(log, json_fname, CONSUL_CONFIG_DIR)
+        if ret:
+            log.cl_error("failed to send file [%s] on local host [%s] to "
+                         "directory [%s] on host [%s]",
+                         json_fname, socket.gethostname(), CONSUL_CONFIG_DIR,
+                         self.csa_host.sh_hostname)
+            return -1
+
+        log.cl_info("installed Consul %s on host [%s]",
+                    self.cs_service_name, self.csa_host.sh_hostname)
+        return 0
+
+    def csa_restart(self, log, restart=True):
+        """
+        Restart the service
+        """
+        if restart:
+            ret = self.csa_host.sh_service_stop(log, "consul")
+            if ret:
+                log.cl_error("failed to stop service [%s] on host [%s]",
+                             "consul",
+                             self.csa_host.sh_hostname)
+                return -1
+
+        command = ("systemctl daemon-reload")
+        retval = self.csa_host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         self.csa_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        ret = self.csa_host.sh_service_start(log, "consul")
         if ret:
             log.cl_info("failed to start Consul service on host [%s]",
-                        self.cs_host.sh_hostname)
+                        self.csa_host.sh_hostname)
             return -1
 
         log.cl_debug("configuring autostart of Consul on host [%s]",
-                     self.cs_host.sh_hostname)
+                     self.csa_host.sh_hostname)
         command = "systemctl enable consul"
-        retval = self.cs_host.sh_run(log, command)
+        retval = self.csa_host.sh_run(log, command)
         if retval.cr_exit_status != 0:
             log.cl_error("failed to run command [%s] on host [%s], "
                          "ret = [%d], stdout = [%s], stderr = [%s]",
                          command,
-                         self.cs_host.sh_hostname,
+                         self.csa_host.sh_hostname,
                          retval.cr_exit_status,
                          retval.cr_stdout,
                          retval.cr_stderr)
             return -1
         log.cl_debug("started Consul %s on host [%s]",
-                     self.cs_service_name, self.cs_host.sh_hostname)
+                     self.cs_service_name, self.csa_host.sh_hostname)
         return 0
 
     def ch_service_is_active(self, log):
         """
         If is active, return 1. If inactive, return 0. Return -1 on error.
         """
-        return self.cs_host.sh_service_is_active(log, "consul")
+        host = self.csa_host
+        if not host.sh_is_up(log):
+            log.cl_error("host [%s] is down", host.sh_hostname)
+            return -1
+        return host.sh_service_is_active(log, "consul")
 
 
-class ConsulServer(ConsulHost):
+
+class ConsulServer(ConsulAgent):
     """
     Each Consul server has an object of this type
     """
@@ -180,7 +528,7 @@ class ConsulServer(ConsulHost):
         super().__init__(host, bind_addr, is_server=True)
 
 
-class ConsulClient(ConsulHost):
+class ConsulClient(ConsulAgent):
     """
     Each Consul client has an object of this type
     """
@@ -218,9 +566,11 @@ class ConsulCluster():
     """
     Console cluster with all servers and clients
     """
-    # pylint: disable=too-few-public-methods
-    def __init__(self, datacenter, server_dict, client_dict,
+    # pylint: disable=too-many-instance-attributes
+    def __init__(self, local_hostname, datacenter, server_dict, client_dict,
                  encrypt_key=None):
+        # Local hostname
+        self.cclr_local_hostname = local_hostname
         # Datacenter name
         self.cclr_datacenter = datacenter
         # Key is hostname, value is either ConsulServer or ConsulClient
@@ -235,7 +585,7 @@ class ConsulCluster():
         self.cclr_client_dict = client_dict
         self.cclr_server_ips = []
         for server in self.cclr_server_dict.values():
-            self.cclr_server_ips.append(server.cs_bind_addr)
+            self.cclr_server_ips.append(server.csa_bind_addr)
         # Whether only have client
         self.cclr_client_only = (len(server_dict) == 0)
         # The encrypt key
@@ -248,88 +598,51 @@ class ConsulCluster():
         If no leader, return "". If failure return None.
         """
         # pylint: disable=too-many-branches
-        server = self.cclr_alive_agent(log)
-        if server is None:
+        agent = self.cclr_alive_agent(log)
+        if agent is None:
             log.cl_error("no Consul agent is up in the system")
             return None
-        host = server.cs_host
+        host = agent.csa_host
 
-        command = "curl http://127.0.0.1:8500/v1/status/leader"
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            if not quiet:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-            return None
-        leader_url = retval.cr_stdout
-        if not leader_url.startswith("\"") or not leader_url.endswith("\""):
-            if not quiet:
-                log.cl_error("unexpected output of command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+        leader = agent.csa_get_leader(log)
+        if leader is None:
+            log.cl_error("failed to get leader from agent [%s]",
+                         host.sh_hostname)
             return None
 
-        leader_url = leader_url[1:-1]
-        if leader_url == "":
+        if not leader.endswith(":8300"):
             if not quiet:
-                log.cl_error("empty output of command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+                log.cl_error("unexpected port of Consul leader [%s]",
+                             leader)
             return None
-        if not leader_url.endswith(":8300"):
-            if not quiet:
-                log.cl_error("unexpected port in the output of command [%s] "
-                             "on host [%s], ret = [%d], stdout = [%s], "
-                             "stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
-            return None
-        ip = leader_url[:-5]
+        leader_ip = leader[:-5]
         for server in self.cclr_server_dict.values():
-            if server.cs_bind_addr == ip:
-                return server.cs_host.sh_hostname
+            if server.csa_bind_addr == leader_ip:
+                return server.csa_host.sh_hostname
         if not quiet:
-            log.cl_error("IP [%s] does not belong to a Consul server in the output of "
-                         "command [%s] on host [%s], ret = [%d], stdout = [%s], "
-                         "stderr = [%s]",
-                         ip,
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
+            log.cl_error("IP of Consul leader [%s] does not belong to a Consul server",
+                         leader)
         return None
 
     def cclr_alive_agent(self, log):
         """
         Return alive agent, either Consul server or client
         """
-        servers = list(self.cclr_agent_dict.values())
-        for server in servers:
-            if not server.cs_host.sh_is_up(log):
+        agents = []
+        # Connect through local agent if possible.
+        if self.cclr_local_hostname in self.cclr_agent_dict:
+            agent = self.cclr_agent_dict[self.cclr_local_hostname]
+            agents.append(agent)
+        for agent in self.cclr_agent_dict.values():
+            if agent in agents:
                 continue
+            agents.append(agent)
 
-            command = "consul members"
-            retval = server.cs_host.sh_run(log, command)
-            if retval.cr_exit_status:
+        for agent in agents:
+            ret = agent.csa_check_connectable(log)
+            if ret:
                 continue
-            return server
+            return agent
         return None
 
     def cclr_install(self, log, workspace, local_host, iso_dir):
@@ -381,19 +694,19 @@ class ConsulCluster():
             encrypt_key = retval.cr_stdout.strip()
 
         for server in self.cclr_server_dict.values():
-            ret = server.ch_install(log, workspace, self.cclr_datacenter,
-                                    self.cclr_server_ips, encrypt_key)
+            ret = server.csa_install(log, workspace, self.cclr_datacenter,
+                                     self.cclr_server_ips, encrypt_key)
             if ret:
                 log.cl_error("failed to install Consul server on host [%s]",
-                             server.cs_host.sh_hostname)
+                             server.csa_host.sh_hostname)
                 return ret
 
         for client in self.cclr_client_dict.values():
-            ret = client.ch_install(log, workspace, self.cclr_datacenter,
-                                    self.cclr_server_ips, encrypt_key)
+            ret = client.csa_install(log, workspace, self.cclr_datacenter,
+                                     self.cclr_server_ips, encrypt_key)
             if ret:
                 log.cl_error("failed to install Consul client on host [%s]",
-                             client.cs_host.sh_hostname)
+                             client.csa_host.sh_hostname)
                 return ret
 
         return 0
@@ -404,20 +717,20 @@ class ConsulCluster():
         """
         rc = 0
         for client in self.cclr_client_dict.values():
-            ret = client.ch_cleanup(log)
+            ret = client.csa_cleanup(log)
             if ret:
                 rc = ret
                 log.cl_error("failed to cleanup Consul client on host [%s]",
-                             client.cs_host.sh_hostname)
+                             client.csa_host.sh_hostname)
                 if not force:
                     return ret
 
         for server in self.cclr_server_dict.values():
-            ret = server.ch_cleanup(log)
+            ret = server.csa_cleanup(log)
             if ret:
                 rc = ret
                 log.cl_error("failed to cleanup Consul server on host [%s]",
-                             server.cs_host.sh_hostname)
+                             server.csa_host.sh_hostname)
                 if not force:
                     return ret
         return rc
@@ -433,11 +746,11 @@ class ConsulCluster():
 
         rc = 0
         for server in self.cclr_server_dict.values():
-            ret = server.ch_restart(log, restart=restart)
+            ret = server.csa_restart(log, restart=restart)
             if ret:
                 rc = ret
                 log.cl_error("failed to start Consul server on host [%s]",
-                             server.cs_host.sh_hostname)
+                             server.csa_host.sh_hostname)
                 if not force:
                     return ret
 
@@ -477,11 +790,11 @@ class ConsulCluster():
         else:
             log.cl_info("starting Consul clients")
         for client in self.cclr_client_dict.values():
-            ret = client.ch_restart(log, restart=restart)
+            ret = client.csa_restart(log, restart=restart)
             if ret:
                 rc = ret
                 log.cl_error("failed to start Consul client on host [%s]",
-                             client.cs_host.sh_hostname)
+                             client.csa_host.sh_hostname)
                 if not force:
                     return ret
         if rc:
@@ -504,55 +817,11 @@ class ConsulCluster():
         if agent is None:
             log.cl_error("no Consul agent is up in the system")
             return -1
-        host = agent.cs_host
 
-        tmpdir = "/tmp"
-        fpath = tmpdir + "/" + cmd_general.get_identity() + ".yaml"
-        with open(fpath, "w", encoding='utf-8') as local_file:
-            local_file.write(config_string)
-
-        if not host.sh_is_localhost():
-            ret = host.sh_send_file(log, fpath, tmpdir)
-            if ret:
-                log.cl_error("failed to send dir [%s] on local host to "
-                             "directory [%s] on host [%s]",
-                             fpath, tmpdir,
-                             host.sh_hostname)
-                return -1
-
-        command = ("consul kv put %s @%s" %
-                   (key,
-                    fpath))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
+        ret = agent.csa_put_kv(log, key, config_string)
+        if ret:
+            log.cl_error("failed to put value of key [%s]", key)
             return -1
-
-        if not host.sh_is_localhost():
-            command = "rm -f %s" % fpath
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command, host.sh_hostname,
-                             retval.cr_exit_status, retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1
-
-        command = "rm -f %s" % fpath
-        retval = local_host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, local_host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
         return 0
 
     def cclr_get_config(self, log, key_path, consul_hostname=None):
@@ -571,26 +840,19 @@ class ConsulCluster():
                              consul_hostname)
                 return -1, None
             agent = self.cclr_agent_dict[consul_hostname]
-        host = agent.cs_host
 
-        command = ("consul kv get %s" % (key_path))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            if CONSUL_NO_KEY_STRING in retval.cr_stderr:
-                return 0, None
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
+        ret, value = agent.csa_get_kv_value(log, key_path)
+        if ret:
+            log.cl_error("failed to get value of key [%s]", key_path)
             return -1, None
+        if value is None:
+            return 0, None
 
         try:
-            config = yaml.load(retval.cr_stdout, Loader=yaml.FullLoader)
+            config = yaml.load(value, Loader=yaml.FullLoader)
         except:
-            log.cl_error("not able to load [%s] outputed by command [%s] on "
-                         "host [%s] as yaml file: %s",
-                         retval.cr_stdout, command, host.sh_hostname,
+            log.cl_error("failed to load [%s] of key [%s] on as yaml file: %s",
+                         value, key_path,
                          traceback.format_exc())
             return -1, None
 
@@ -614,93 +876,21 @@ class ConsulCluster():
                              consul_hostname)
                 return -1, None
             agent = self.cclr_agent_dict[consul_hostname]
-        host = agent.cs_host
 
-        command = ("consul kv get -detailed %s" % (lock_key_path))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            if CONSUL_NO_KEY_STRING in retval.cr_stderr:
-                return 0, None
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
+        ret, session = agent.csa_get_lock_session(log, lock_key_path)
+        if ret is None:
+            log.cl_error("failed to get session of lock [%s]",
+                         lock_key_path)
             return -1, None
-
-        kv_dict = {}
-        lines = retval.cr_stdout.splitlines()
-        for line in lines:
-            fields = line.split()
-            if len(fields) != 2:
-                log.cl_error("unexpected field number of command output [%s] on host [%s], "
-                             "ret = %d, stdout = [%s], stderr = [%s]",
-                             command, host.sh_hostname,
-                             retval.cr_exit_status, retval.cr_stdout,
-                             retval.cr_stderr)
-                return -1, None
-            key = fields[0]
-            value = fields[1]
-            kv_dict[key] = value
-
-        if "Session" not in kv_dict:
+        if session is None:
             return 0, None
 
-        session = kv_dict["Session"]
-        if session == "-":
-            return 0, None
-
-        command = ("curl http://127.0.0.1:8500/v1/session/info/%s" %
-                   (session))
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status != 0:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
+        node = agent.csa_get_session_node(log, session)
+        if node is None:
+            log.cl_error("failed to get node of session [%s] for lock",
+                         session, lock_key_path)
             return -1, None
-
-        try:
-            json_output = json.loads(retval.cr_stdout)
-        except:
-            log.cl_error("failed to parse json output of command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s], exception: %s",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr,
-                         traceback.format_exc())
-            return -1, None
-
-        if not isinstance(json_output, list):
-            log.cl_error("json output is not a list for command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s], exception: %s",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1, None
-
-        if len(json_output) == 0:
-            return 0, None
-
-        if len(json_output) != 1:
-            log.cl_error("unexpect list size for output of command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s], exception: %s",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1, None
-
-        json_dict = json_output[0]
-        if "Node" not in json_dict:
-            log.cl_error("cannot find [Node] in json output of command [%s] on host [%s], "
-                         "ret = %d, stdout = [%s], stderr = [%s]",
-                         command, host.sh_hostname,
-                         retval.cr_exit_status, retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1, None
-
-        return 0, json_dict["Node"]
+        return 0, node
 
 
 # Consul is alive

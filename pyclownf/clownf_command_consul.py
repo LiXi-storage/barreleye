@@ -13,28 +13,28 @@ class ConsulStatusCache():
     This object saves temporary status of a Lustre file system.
     """
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, clownfish_instance, leader_hostname, consul_host):
-        # ConsulHost
-        self.csc_consul_host = consul_host
-        self.csc_clownfish_instance = clownfish_instance
+    def __init__(self, clownfish_instance, leader_hostname, consul_agent):
+        # ConsulAgent
+        self.cssc_consul_agent = consul_agent
+        self.cssc_clownfish_instance = clownfish_instance
         # Any failure when getting this cached status
-        self.csc_failed = False
+        self.cssc_failed = False
         # Whether the consul service is running on the host.
         # If is active, 1. If inactive, 0. -1 on error.
-        self.csc_active = None
+        self.cssc_active = None
         # Hostname of leader
-        self.csc_leader_hostname = leader_hostname
+        self.cssc_leader_hostname = leader_hostname
 
-    def _csc_init_active(self, log):
+    def _cssc_init_active(self, log):
         """
         Init active status
         """
-        consul_host = self.csc_consul_host
-        self.csc_active = consul_host.ch_service_is_active(log)
-        if self.csc_active < 0:
-            self.csc_failed = True
+        consul_agent = self.cssc_consul_agent
+        self.cssc_active = consul_agent.ch_service_is_active(log)
+        if self.cssc_active < 0:
+            self.cssc_failed = True
 
-    def csc_init_fields(self, log, field_names):
+    def cssc_init_fields(self, log, field_names):
         """
         Init this status cache according to required field names
         """
@@ -47,32 +47,34 @@ class ConsulStatusCache():
             if field == clownf_constant.CLOWNF_FIELD_LEADER:
                 continue
             if field == clownf_constant.CLOWNF_FIELD_ACTIVE:
-                self._csc_init_active(log)
+                self._cssc_init_active(log)
             else:
                 log.cl_error("unknown field [%s]", field)
                 return -1
         return 0
 
-    def csc_field_result(self, log, field_name):
+    def cssc_field_result(self, log, field_name):
         """
         Return (0, result) to print for a field
         """
         # pylint: disable=too-many-branches,too-many-statements
-        consul_host = self.csc_consul_host
-        hostname = consul_host.cs_host.sh_hostname
+        consul_agent = self.cssc_consul_agent
+        hostname = consul_agent.csa_host.sh_hostname
         ret = 0
         if field_name == clownf_constant.CLOWNF_FIELD_HOST:
             result = hostname
         elif field_name == clownf_constant.CLOWNF_FIELD_SERVER:
-            result = consul_host.cs_service_name
+            result = consul_agent.cs_service_name
         elif field_name == clownf_constant.CLOWNF_FIELD_ACTIVE:
-            if self.csc_active is None:
+            if self.cssc_active is None:
                 log.cl_error("the active status of Consul on host [%s] is "
                              "not inited", hostname)
                 ret = -1
                 result = clog.ERROR_MSG
             else:
-                if self.csc_active:
+                if self.cssc_active < 0:
+                    result = clog.ERROR_MSG
+                elif self.cssc_active:
                     color = clog.COLOR_GREEN
                     result = clog.colorful_message(color,
                                                    clownf_constant.CLOWNF_VALUE_ACTIVE)
@@ -81,7 +83,7 @@ class ConsulStatusCache():
                     result = clog.colorful_message(color,
                                                    clownf_constant.CLOWNF_VALUE_INACTIVE)
         elif field_name == clownf_constant.CLOWNF_FIELD_LEADER:
-            if self.csc_leader_hostname == hostname:
+            if self.cssc_leader_hostname == hostname:
                 color = clog.COLOR_GREEN
                 result = clog.colorful_message(color,
                                                clownf_constant.CLOWNF_VALUE_LEADER)
@@ -93,11 +95,11 @@ class ConsulStatusCache():
             result = clog.ERROR_MSG
             ret = -1
 
-        if self.csc_failed:
+        if self.cssc_failed:
             ret = -1
         return ret, result
 
-    def csc_can_skip_init_fields(self, field_names):
+    def cssc_can_skip_init_fields(self, field_names):
         """
         Whether lfsc_init_fields can be skipped
         """
@@ -119,7 +121,7 @@ def consul_status_init(log, workspace, consul_status, field_names):
     Init status of a consul host
     """
     # pylint: disable=unused-argument
-    return consul_status.csc_init_fields(log, field_names)
+    return consul_status.cssc_init_fields(log, field_names)
 
 
 def consul_status_field(log, consul_status, field_name):
@@ -127,16 +129,16 @@ def consul_status_field(log, consul_status, field_name):
     Return (0, result) for a field of ConsulStatusCache
     """
     # pylint: disable=unused-argument
-    return consul_status.csc_field_result(log, field_name)
+    return consul_status.cssc_field_result(log, field_name)
 
 
-def print_consul_hosts(log, clownfish_instance, consul_hosts, status=False,
+def print_consul_agents(log, clownfish_instance, consul_agents, status=False,
                        print_table=True, field_string=None):
     """
-    Print table of ConsulHost
+    Print table of ConsulAgent
     """
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-    if not print_table and len(consul_hosts) > 1:
+    if not print_table and len(consul_agents) > 1:
         log.cl_error("failed to print non-table output with multiple "
                      "Consul hosts")
         return -1
@@ -169,20 +171,20 @@ def print_consul_hosts(log, clownfish_instance, consul_hosts, status=False,
         leader_hostname = consul_cluster.cclr_leader(log)
 
     consul_status_list = []
-    for consul_host in consul_hosts:
+    for consul_agent in consul_agents:
         consul_status = ConsulStatusCache(clownfish_instance, leader_hostname,
-                                          consul_host)
+                                          consul_agent)
         consul_status_list.append(consul_status)
 
     if (len(consul_status_list) > 0 and
-            not consul_status_list[0].csc_can_skip_init_fields(field_names)):
+            not consul_status_list[0].cssc_can_skip_init_fields(field_names)):
         args_array = []
         thread_ids = []
         for consul_status in consul_status_list:
             args = (consul_status, field_names)
             args_array.append(args)
-            consul_host = consul_status.csc_consul_host
-            hostname = consul_host.cs_host.sh_hostname
+            consul_agent = consul_status.cssc_consul_agent
+            hostname = consul_agent.csa_host.sh_hostname
             thread_id = "consul_status_%s" % hostname
             thread_ids.append(thread_id)
 
@@ -229,10 +231,10 @@ class ConsulCommand():
                                            self._cc_log_to_file,
                                            self._cc_iso)
         consul_cluster = clownfish_instance.ci_consul_cluster
-        consul_hosts = list(consul_cluster.cclr_server_dict.values())
-        consul_hosts += list(consul_cluster.cclr_client_dict.values())
-        rc = print_consul_hosts(log, clownfish_instance,
-                                consul_hosts, status=True)
+        consul_agents = list(consul_cluster.cclr_server_dict.values())
+        consul_agents += list(consul_cluster.cclr_client_dict.values())
+        rc = print_consul_agents(log, clownfish_instance,
+                                consul_agents, status=True)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def members(self, status=False):
@@ -247,10 +249,10 @@ class ConsulCommand():
                                            self._cc_iso)
         cmd_general.check_argument_bool(log, "status", status)
         consul_cluster = clownfish_instance.ci_consul_cluster
-        consul_hosts = list(consul_cluster.cclr_server_dict.values())
-        consul_hosts += list(consul_cluster.cclr_client_dict.values())
-        rc = print_consul_hosts(log, clownfish_instance,
-                                consul_hosts, status=status)
+        consul_agents = list(consul_cluster.cclr_server_dict.values())
+        consul_agents += list(consul_cluster.cclr_client_dict.values())
+        rc = print_consul_agents(log, clownfish_instance,
+                                consul_agents, status=status)
         clownf_command_common.exit_env(log, clownfish_instance, rc)
 
     def start(self, force=False):

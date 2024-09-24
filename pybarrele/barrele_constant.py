@@ -107,3 +107,20 @@ BARRELE_FIELD_GRAFANA_VERSION = "Grafana Version"
 BARRELE_FIELD_INFLUXDB = "Influxdb"
 # The version of Influxdb
 BARRELE_FIELD_INFLUXDB_VERSION = "Influxdb Version"
+
+# results in Influx query output
+INFLUX_RESULTS = "results"
+# series in Influx query output
+INFLUX_SERIES = "series"
+# columns in Influx query output
+INFLUX_COLUMNS = "columns"
+# values in Influx query output
+INFLUX_VALUES = "values"
+
+MEASUREMENT_MEMORY_BUFFERED = "memory.buffered.memory"
+MEASUREMENT_AGREGATED_CPU_SYSTEM = "aggregation.cpu-average.cpu.system"
+MEASUREMENT_DF_FREE = "df.root.df_complex.free"
+MEASUREMENT_LOAD_SHORTERM = "load.load.shortterm"
+MEASUREMENT_AGREGATED_MAX_TEMPERATURE = "aggregation.sensors-max.temperature"
+MEASUREMENT_UPTIME = "uptime.uptime"
+MEASUREMENT_USERS = "users.users"

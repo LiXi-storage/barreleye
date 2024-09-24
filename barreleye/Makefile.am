@@ -13,10 +13,13 @@ M4_DESTINE_FILES = ime-1.1.m4 \
 	lustre-b_es5_2.m4 \
 	lustre-b_es6_0.m4 \
 	lustre-b_es6_1.m4 \
+	lustre-b_es6_2.m4 \
 	lustre-2.13.m4 \
+	lustre-2.15.m4
 	sfa-3.0.m4 \
 	sfa-11.0.m4 \
 	sfa-11.6.m4
+
 
 M4_FILES = general.m4 lustre.m4 sfa.m4 sfa-11-general.m4 $(M4_DESTINE_FILES)
 
@@ -33,7 +36,7 @@ $(XML_DESTINE_FILES): $(M4_FILES)
 	m4 $(@:.xml=.m4) > $@
 
 %.xml_checked: %
-	xmllint --valid --noout $< > /dev/null; \
+	xmllint --valid --noout $< > /dev/null && \
 	touch $@
 
 CHECKS = $(XML_DESTINE_FILES:%=%.xml_checked)

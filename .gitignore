@@ -14,7 +14,7 @@ aclocal.m4
 autom4te.cache
 barrele.spec
 clownf.spec
-clownfish_simplified.tmp.toml
+clownfish_simplified.tmp.conf
 compile
 config.guess
 config.h
@@ -37,6 +37,7 @@ Makefile.in
 nohup.out
 stamp-h1
 .deps
+*.conf_checked
 *.python_checked
 *.checked
 *.pyc
@@ -51,3 +52,4 @@ stamp-h1
 /ISO
 /build
 /coral-*
+/reaf.spec

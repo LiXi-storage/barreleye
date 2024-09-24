@@ -130,6 +130,8 @@ class CommandJob():
         self.cj_timeout = timeout
         self.cj_stdout_tee = stdout_tee
         self.cj_stderr_tee = stderr_tee
+        # If this function is not None, then it will be called from time to time.
+        # Any time it returns True, the job will quit.
         self.cj_quit_func = quit_func
         self.cj_silent = silent
         # allow for easy stdin input by string, we'll let subprocess create
@@ -420,7 +422,7 @@ WAIT_CONDITION_QUIT = 8192
 
 
 def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1,
-                   quit_func=None):
+                   quit_func=None, expect_timeout=False):
     """
     Wait until the condition_func returns 0
 
@@ -460,7 +462,10 @@ def wait_condition(log, condition_func, args, timeout=90, sleep_interval=1,
             if sleep_interval > 0:
                 time.sleep(sleep_interval)
             continue
-        log.cl_error("waiting times out after [%d] seconds", elapsed)
+        if expect_timeout:
+            log.cl_info("waiting times out after [%d] seconds", elapsed)
+        else:
+            log.cl_error("waiting times out after [%d] seconds", elapsed)
         break
     return retval
 
@@ -847,3 +852,15 @@ def isascii(check_string):
     Python 3.8.5+ has str.isascii()
     """
     return all(ord(char) < 128 for char in check_string)
+
+
+def list2string(string_list):
+    """
+    Return a list of string seperated by comma.
+    """
+    result = ""
+    for tmp in string_list:
+        if result != "":
+            result += ","
+        result += str(tmp)
+    return result

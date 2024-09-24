@@ -5,6 +5,7 @@ import re
 import filelock
 # pylint: disable=unused-import,too-many-lines
 # Local libs
+from pycoral import utils
 from pycoral import os_distro
 from pycoral import ssh_host
 from pycoral import constant
@@ -12,12 +13,19 @@ from pycoral import lustre_version
 from pycoral import lustre as lustre_lib
 from pycoral import cmd_general
 from pycoral import install_common
+from pybuild import cache_command
+from pybuild import e2fsprogs_command
+from pybuild import lustre_command
+from pybuild import apt_command
+from pybuild import yum_command
+from pybuild import pip_command
 from pybuild import build_barrele
 from pybuild import build_clownf
 from pybuild import build_common
 from pybuild import build_constant
 from pybuild import build_doc
 from pybuild import build_release_info
+from pybuild import build_reaf
 from pybuild import build_version
 
 # The url of pyinstaller tarball. Need to update together with
@@ -67,16 +75,18 @@ def download_dependent_rpms_rhel7(log, host, target_cpu, packages_dir,
     for rpm_name in dependent_rpms:
         command += " " + rpm_name
 
-    log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
-    retval = host.sh_watched_run(log, command, None, None,
-                                 return_stdout=True,
-                                 return_stderr=False)
+    log.cl_info("downloading RPMs [%s]", utils.list2string(dependent_rpms))
+    retval = host.sh_run(log, command, timeout=None)
     if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], ret = [%d]",
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
                      command,
                      host.sh_hostname,
-                     retval.cr_exit_status)
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
+
 
     exist_pattern = (r"^%s/(?P<rpm_fname>\S+) already exists and appears to be "
                      "complete$" % (packages_dir))
@@ -93,11 +103,15 @@ def download_dependent_rpms_rhel7(log, host, target_cpu, packages_dir,
             if match:
                 rpm_fname = match.group("rpm_fname")
             else:
-                log.cl_error("unknown stdout line [%s] of command [%s] on host "
+                log.cl_debug("unknown stdout line [%s] of command [%s] on host "
                              "[%s], stdout = [%s]",
                              line, host.sh_hostname, command,
                              retval.cr_stdout)
-                return -1
+                continue
+        # We don't care about i686 RPMs
+        if rpm_fname.endswith(".i686.rpm"):
+            continue
+
         extra_package_fnames.append(rpm_fname)
     return 0
 
@@ -108,21 +122,23 @@ def download_dependent_rpms_rhel8(log, host, packages_dir,
     Download dependent RPMs for RHEL8
     """
     # pylint: disable=too-many-locals
+    if len(dependent_rpms) == 0:
+        return 0
     command = ("dnf download --resolve --alldeps --destdir %s" %
                (packages_dir))
-
     for rpm_name in dependent_rpms:
         command += " " + rpm_name
 
-    log.cl_info("running command [%s] on host [%s]", command, host.sh_hostname)
-    retval = host.sh_watched_run(log, command, None, None,
-                                 return_stdout=False,
-                                 return_stderr=False)
+    log.cl_info("downloading RPMs [%s]", utils.list2string(dependent_rpms))
+    retval = host.sh_run(log, command, timeout=None)
     if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], ret = [%d]",
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
                      command,
                      host.sh_hostname,
-                     retval.cr_exit_status)
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
 
     # Run twice. The first time might download some RPMs, and the
@@ -160,16 +176,21 @@ def download_dependent_rpms_rhel8(log, host, packages_dir,
     # The first line either starts with "Last metadata expiration check:"
     # for RHEL7 or "Copr repo for modulemd-tools-epel owned by fros" for
     # RHEL8. Skip it.
-    for line in lines[1:]:
+    for line in lines:
         match = exist_regular.match(line)
         if match:
             rpm_fname = match.group("rpm_fname")
         else:
-            log.cl_error("unknown stdout line [%s] of command [%s] on host "
+            log.cl_debug("unknown stdout line [%s] of command [%s] on host "
                          "[%s], stdout = [%s]",
                          line, host.sh_hostname, command,
                          retval.cr_stdout)
-            return -1
+            continue
+
+        # We don't care about i686 RPMs
+        if rpm_fname.endswith(".i686.rpm"):
+            continue
+
         extra_package_fnames.append(rpm_fname)
     return 0
 
@@ -194,12 +215,14 @@ def check_package_rpms(log, host, packages_dir, dependent_rpms,
 
     for fname in useless_rpm_fnames:
         fpath = packages_dir + "/" + fname
-        log.cl_info("found unnecessary file [%s] under directory [%s], "
-                    "removing it", fname, packages_dir)
-        ret = host.sh_remove_file(log, fpath)
-        if ret:
-            log.cl_error("failed to remove useless file [%s] on host [%s]",
-                         fpath, host.sh_hostname)
+        log.cl_debug("removing unnecessary file [%s/%s]", packages_dir, fname)
+        ret = host.sh_run(log, "rm -f %s" % (fpath))
+        if ret.cr_exit_status:
+            log.cl_error("failed to remove file [%s] on host [%s], "
+                         "ret = %d, stdout = [%s], stderr = [%s]",
+                         fpath, host.sh_hostname,
+                         ret.cr_exit_status, ret.cr_stdout,
+                         ret.cr_stderr)
             return -1
 
     for rpm_name in dependent_rpms:
@@ -231,7 +254,6 @@ def download_dependent_rpms(log, host, distro, target_cpu,
     Download dependent RPMs
     """
     # The yumdb might be broken, so sync
-    log.cl_info("downloading dependency RPMs")
     # yumdb has been removed for RHEL8
     if distro == os_distro.DISTRO_RHEL7:
         command = "yumdb sync"
@@ -258,7 +280,8 @@ def download_dependent_rpms(log, host, distro, target_cpu,
                                             dependent_rpms,
                                             extra_package_fnames)
     else:
-        log.cl_error("unsupported distro [%s]", distro)
+        log.cl_error("unsupported OS distro [%s] when downloading dependent RPMs",
+                     distro)
         return -1
     if ret:
         log.cl_error("failed to download dependent RPMs on host [%s]",
@@ -274,15 +297,163 @@ def download_dependent_rpms(log, host, distro, target_cpu,
     return 0
 
 
-def download_dependent_debs(log, host, packages_dir, extra_package_fnames,
-                            extra_package_names):
+def apt_read_passphrase(log, host, passphrase_fpath):
+    """
+    Read passphrase
+    """
+    command = "cat " + passphrase_fpath
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return None
+    lines = retval.cr_stdout.strip().splitlines()
+    if len(lines) != 1:
+        log.cl_info("unexpected line number of passphrase")
+        return None
+    return lines[0]
+
+
+def apt_private_key_import(log, host, gpg_dir, passphrase):
+    """
+    Import the private key.
+    """
+    command = ("gpg --import --pinentry-mode loopback --batch "
+               "--passphrase %s %s/private_key.asc" %
+               (passphrase, gpg_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def apt_repositry_signate(log, host, source_dir, packages_dir,
+                          extra_package_fnames):
+    """
+    Signate the Release.
+    """
+    gpg_dir = source_dir + "/gpg"
+    passphrase_fpath = gpg_dir + "/passphrase"
+    passphrase = apt_read_passphrase(log, host, passphrase_fpath)
+    if passphrase is None:
+        log.cl_error("failed to read passphrase")
+        return -1
+
+    ret = apt_private_key_import(log, host, gpg_dir, passphrase)
+    if ret:
+        log.cl_error("failed to import the private key")
+        return -1
+
+    extra_package_fnames.append("InRelease")
+    command = ("cd %s && rm -f InRelease && "
+               "gpg --pinentry-mode loopback --batch "
+               "--passphrase %s --clearsign -o InRelease Release" %
+               (packages_dir, passphrase))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    extra_package_fnames.append(constant.CORAL_PUBLIC_KEY_FNAME)
+    command = ("cp %s/%s %s" %
+               (gpg_dir, constant.CORAL_PUBLIC_KEY_FNAME, packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def apt_repository_generate(log, host, source_dir, packages_dir,
+                            extra_package_fnames):
+    """
+    Pack the source of Coral
+    """
+    extra_package_fnames.append("Packages")
+    command = ("cd %s && apt-ftparchive packages . > Packages" %
+               (packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    extra_package_fnames.append("Release")
+    command = ("cd %s && apt-ftparchive release . > Release" %
+               (packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+
+    ret = apt_repositry_signate(log, host, source_dir, packages_dir,
+                                extra_package_fnames)
+    if ret:
+        log.cl_error("failed to signate repository")
+        return -1
+
+    extra_package_fnames.append("Release.gpg")
+    command = ("cd %s && rm -f Release.gpg && "
+               "gpg --pinentry-mode loopback --batch "
+               "-abs -o Release.gpg Release" %
+               (packages_dir))
+    retval = host.sh_run(log, command)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
+        return -1
+    return 0
+
+
+def download_dependent_debs(log, host, source_dir, packages_dir,
+                            extra_package_fnames, extra_package_names):
     """
     Download dependent debs
     """
     # pylint: disable=consider-using-get
     if len(extra_package_names) == 0:
         return 0
-    log.cl_info("downloading dependency debs")
+    log.cl_info("downloading dependency debs [%s]", utils.list2string(extra_package_names))
     command = 'apt-rdepends'
     for extra_package_name in extra_package_names:
         command += " " + extra_package_name
@@ -349,10 +520,17 @@ def download_dependent_debs(log, host, packages_dir, extra_package_fnames,
                      retval.cr_stdout,
                      retval.cr_stderr)
         return -1
+
+    ret = apt_repository_generate(log, host, source_dir, packages_dir,
+                                  extra_package_fnames)
+    if ret:
+        log.cl_error("failed to generate apt repository")
+        return -1
+
     return 0
 
 
-def download_dependent_packages(log, host, distro, target_cpu,
+def download_dependent_packages(log, host, source_dir, distro, target_cpu,
                                 packages_dir, extra_package_fnames,
                                 extra_package_names):
     """
@@ -364,31 +542,33 @@ def download_dependent_packages(log, host, distro, target_cpu,
                                        extra_package_names)
     if distro in (os_distro.DISTRO_UBUNTU2004,
                   os_distro.DISTRO_UBUNTU2204):
-        return download_dependent_debs(log, host,
+        return download_dependent_debs(log, host, source_dir,
                                        packages_dir, extra_package_fnames,
                                        extra_package_names)
-    log.cl_error("unsupported distro [%s]", distro)
+    log.cl_error("unsupported distro [%s] when downloading dependent packages",
+                 distro)
     return -1
 
 
-def install_pyinstaller(log, host, type_cache, tsinghua_mirror=False):
+def install_pyinstaller(log, host, type_cache):
     """
     Install pyinstaller
     """
-    log.cl_info("installing pyinstaller")
     if host.sh_has_command(log, "pyinstaller"):
+        log.cl_info("pyinstaller already installed")
         return 0
 
+    log.cl_info("installing pyinstaller")
     tarball_url = PYINSTALLER_TARBALL_URL
     tarball_fname = PYINSTALLER_TABALL_FNAME
     expected_sha1sum = PYINSTALLER_TARBALL_SHA1SUM
     ret = build_common.install_pip3_package_from_file(log, host, type_cache,
                                                       tarball_url,
                                                       expected_sha1sum,
-                                                      tarball_fname=tarball_fname,
-                                                      tsinghua_mirror=tsinghua_mirror)
+                                                      tarball_fname=tarball_fname)
     if ret:
-        log.cl_error("failed to install pip package of pyinstaller")
+        log.cl_error("failed to install pyinstaller from pip tarball [%s]",
+                     tarball_fname)
         return -1
     return 0
 
@@ -413,14 +593,20 @@ def prepare_install_modulemd_tools(log, host):
     return ["modulemd-tools"]
 
 
-def get_build_dependent_packages(log, distro, plugins, package_dict):
+def get_build_dependent_packages(log, host, distro, plugins, package_dict):
     """
     Return a list of dependent packages (RPMs/debs) and pips
     """
+    ret = install_common.check_yum_repo_epel(log, host, distro)
+    if ret:
+        log.cl_error("EPEL repo is not configured properly on host [%s]",
+                     host.sh_hostname)
+        return None, None
+
     dependent_packages = []
     dependent_pips = []
     for plugin in plugins:
-        packages = plugin.cpt_build_dependent_packages(distro)
+        packages = plugin.cpt_build_dependent_packages(log, distro)
         if packages is None:
             log.cl_error("failed to get the dependet packages for building [%s]",
                          plugin.cpt_plugin_name)
@@ -429,34 +615,38 @@ def get_build_dependent_packages(log, distro, plugins, package_dict):
         dependent_pips += plugin.cpt_build_dependent_pips
 
     for package in package_dict.values():
-        packages, pips = package.cpb_build_dependent_packages(distro)
+        packages, pips = package.cpb_build_dependent_packages(log, host, distro)
+        if packages is None or pips is None:
+            log.cl_error("failed to get the dependet packages for building [%s]",
+                         package.cpb_package_name)
+            return None, None
         dependent_packages += packages
         dependent_pips += pips
     return dependent_packages, dependent_pips
 
 
-def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
-                                  type_cache, plugins, package_dict, pip_dir,
-                                  tsinghua_mirror=False):
+def _install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
+                                   type_cache, plugins, package_dict):
     """
     Install the dependency of building Coral
     """
     # pylint: disable=too-many-locals,too-many-branches
-    if tsinghua_mirror:
-        ret = install_common.yum_replace_to_tsinghua(log, host)
-        if ret:
-            log.cl_error("failed to replace YUM mirrors to Tsinghua University")
-            return -1
-
-    command = 'yum -y groupinstall "Development Tools"'
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
-    retval = host.sh_watched_run(log, command, None, None,
-                                 return_stdout=False,
-                                 return_stderr=False)
-    if retval.cr_exit_status != 0:
-        log.cl_error("failed to run command [%s] on host [%s]",
-                     command, host.sh_hostname)
+    log.cl_info("installing RPM group of Development Tools")
+    if distro == os_distro.DISTRO_RHEL7:
+        command = 'yum -y groupinstall "Development Tools"'
+    elif distro == os_distro.DISTRO_RHEL8:
+        command = 'dnf groupinstall -y --nobest "Development Tools"'
+    else:
+        return -1
+    retval = host.sh_run(log, command, timeout=None)
+    if retval.cr_exit_status:
+        log.cl_error("failed to run command [%s] on host [%s], "
+                     "ret = [%d], stdout = [%s], stderr = [%s]",
+                     command,
+                     host.sh_hostname,
+                     retval.cr_exit_status,
+                     retval.cr_stdout,
+                     retval.cr_stderr)
         return -1
 
     dependent_pips = ["wheel"]  # Needed for pyinstaller
@@ -466,20 +656,26 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
                       "json-c-devel",  # Needed by json C functions
                       "libtool-ltdl-devel",  # Otherwise, `COPYING.LIB' not found
                       "json-c-devel",  # Needed by json C functions
-                      "python3-devel",  # Needed by building Python libraries
                       "redhat-lsb-core",  # Needed by detect-distro.sh for lsb_release
                       "wget",  # Needed by downloading from web
-                      "yum-utils"]  # Commnad like "yumdb sync"
+                      "yum-utils",  # Commnad like "yumdb sync"
+                      "p7zip",  # 7z command for extracting ISO
+                      "p7zip-plugins",  # 7z command for extracting ISO
+                      ]
 
     if distro == os_distro.DISTRO_RHEL7:
         dependent_pips += ["pylint"]  # Needed for Python codes check
         dependent_rpms += ["createrepo",  # To create the repo in ISO
-                           "python36-psutil"]  # Used by Python codes
+                           "python36-psutil",  # Used by Python codes
+                           "python3-devel",  # Needed by building Python libraries
+                           ]
     else:
         assert distro == os_distro.DISTRO_RHEL8
+        dependent_pips += ["pylint"]  # Needed for Python codes check
         dependent_rpms += ["createrepo_c",  # To create the repo in ISO
-                           "python3-pylint",  # Needed for Python codes check
-                           "python3-psutil"]  # Used by Python codes
+                           "python3-psutil",  # Used by Python codes
+                           "python36-devel",  # Needed by building Python libraries
+                           ]
 
         rpms = prepare_install_modulemd_tools(log, host)
         if rpms is None:
@@ -489,9 +685,8 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
         dependent_rpms += rpms
 
     # Upgrade pip3 first since python packages might need new pip3 to install
+    log.cl_info("upgrading pip")
     command = "pip3 install --upgrade pip"
-    if tsinghua_mirror:
-        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -503,19 +698,17 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
                      retval.cr_stderr)
         return -1
 
-    rpms, pips = get_build_dependent_packages(log, distro, plugins, package_dict)
+    rpms, pips = get_build_dependent_packages(log, host, distro, plugins, package_dict)
     if rpms is None or pips is None:
         return -1
     dependent_rpms += rpms
     dependent_pips += pips
 
-    ret = install_common.bootstrap_from_internet(log, host, dependent_rpms,
-                                                 dependent_pips,
-                                                 pip_dir,
-                                                 tsinghua_mirror=tsinghua_mirror)
+    ret = install_common.install_package_and_pip(log, host, dependent_rpms,
+                                                 dependent_pips)
     if ret:
-        log.cl_error("failed to install missing packages on host [%s] "
-                     "from Internet", host.sh_hostname)
+        log.cl_error("failed to install missing packages on host [%s]",
+                     host.sh_hostname)
         return -1
 
     for plugin in plugins:
@@ -526,8 +719,7 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
                          plugin.cpt_plugin_name)
             return -1
 
-    ret = install_pyinstaller(log, host, type_cache,
-                              tsinghua_mirror=tsinghua_mirror)
+    ret = install_pyinstaller(log, host, type_cache)
     if ret:
         log.cl_error("failed to install pyinstaller on host [%s]",
                      host.sh_hostname)
@@ -535,72 +727,57 @@ def install_build_dependency_rhel(log, workspace, host, distro, target_cpu,
     return 0
 
 
-def install_build_dependency_ubuntu(log, workspace, host, distro,
-                                    target_cpu, type_cache, plugins,
-                                    package_dict, pip_dir,
-                                    tsinghua_mirror=False):
+def _install_build_dependency_ubuntu(log, workspace, host, distro,
+                                     target_cpu, type_cache, plugins,
+                                     package_dict):
     """
     Install the dependency of building Coral for Ubuntu
     """
     # pylint: disable=unused-argument,too-many-locals
-    if tsinghua_mirror:
-        ret = install_common.ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro)
-        if ret:
-            log.cl_error("failed to replace apt mirrors to Tsinghua University")
-            return -1
-
-    command = 'apt update'
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
-    retval = host.sh_watched_run(log, command, None, None,
-                                 return_stdout=False,
-                                 return_stderr=False)
-    if retval.cr_exit_status != 0:
-        log.cl_error("failed to run command [%s] on host [%s]",
-                     command, host.sh_hostname)
-        return -1
-
     dependent_debs = BUILD_DEPENDENT_DEBS_UBUNTU
     dependent_pips = BUILD_DEPENDENT_PIPS_UBUNTU
 
-    debs, pips = get_build_dependent_packages(log, distro, plugins,
+    debs, pips = get_build_dependent_packages(log, host, distro, plugins,
                                               package_dict)
     if debs is None or pips is None:
         return -1
     dependent_pips += pips
     dependent_debs += debs
 
-    ret = install_common.bootstrap_from_internet(log, host,
+    ret = install_common.install_package_and_pip(log, host,
                                                  dependent_debs,
-                                                 dependent_pips,
-                                                 pip_dir,
-                                                 tsinghua_mirror=tsinghua_mirror)
+                                                 dependent_pips)
     if ret:
-        log.cl_error("failed to install missing packages on host [%s] "
-                     "from Internet", host.sh_hostname)
+        log.cl_error("failed to install missing packages on host [%s]",
+                     host.sh_hostname)
         return -1
     return 0
 
 
-def install_build_dependency(log, workspace, host, distro, target_cpu,
-                             type_cache, plugins, package_dict, pip_dir,
-                             tsinghua_mirror=False):
+def _install_build_dependency(log, workspace, host, distro, target_cpu,
+                              type_cache, plugins, package_dict,
+                              china=False):
     """
     Install the dependency of building Coral
     """
-    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
-        return install_build_dependency_rhel(log, workspace, host, distro,
-                                             target_cpu, type_cache, plugins,
-                                             package_dict, pip_dir,
-                                             tsinghua_mirror=tsinghua_mirror)
+    if china:
+        ret = install_common.china_mirrors_configure(log, host, workspace)
+        if ret:
+            log.cl_error("failed to configure mirrors on host [%s]",
+                         host.sh_hostname)
+            return -1
+    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8, os_distro.DISTRO_RHEL9):
+        return _install_build_dependency_rhel(log, workspace, host, distro,
+                                              target_cpu, type_cache, plugins,
+                                              package_dict)
 
     if distro in (os_distro.DISTRO_UBUNTU2004,
                   os_distro.DISTRO_UBUNTU2204):
-        return install_build_dependency_ubuntu(log, workspace, host, distro,
-                                               target_cpu, type_cache, plugins,
-                                               package_dict, pip_dir,
-                                               tsinghua_mirror=tsinghua_mirror)
-    log.cl_error("unsupported distro [%s]", distro)
+        return _install_build_dependency_ubuntu(log, workspace, host, distro,
+                                                target_cpu, type_cache, plugins,
+                                                package_dict)
+    log.cl_error("unsupported OS distro [%s] when installing build dependency",
+                 distro)
     return -1
 
 
@@ -626,163 +803,90 @@ def sync_shared_build_cache(log, host, private_cache, shared_parent):
     return ret
 
 
-def install_lustre_util_rpm(log, local_host, lustre_dist):
-    """
-    Install Lustre until on local host
-    """
-    command = "rpm -qi %s" % lustre_version.RPM_LUSTRE
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status == 0:
-        log.cl_info("the needed Lustre util RPM has already been installed on "
-                    "build host [%s]", local_host.sh_hostname)
-        return 0
-
-    log.cl_info("installing the Lustre util RPM on build host [%s]",
-                local_host.sh_hostname)
-    rpm_name = lustre_dist.ldis_lustre_rpm_dict[lustre_version.RPM_LUSTRE]
-    rpm_fpath = "%s/%s" % (lustre_dist.ldis_lustre_rpm_dir, rpm_name)
-    command = "rpm -ivh %s --nodeps" % rpm_fpath
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     local_host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-    return 0
-
-
-def install_e2fsprogs_rpm(log, local_host, lustre_dist):
-    """
-    Install E2fsprogs until on local host
-    """
-    need_install = False
-    retval = local_host.sh_run(log,
-                               "rpm -q e2fsprogs --queryformat '%{version}-%{release}'")
-    if retval.cr_exit_status:
-        log.cl_info("e2fsprogs missing, installing [%s] on build host [%s]",
-                    lustre_dist.ldis_e2fsprogs_version,
-                    local_host.sh_hostname)
-        need_install = True
-    else:
-        current_version = retval.cr_stdout
-        if lustre_dist.ldis_e2fsprogs_version != current_version:
-            log.cl_info("need e2fsprogs [%s], only have [%s], upgrading on "
-                        "build host [%s]",
-                        lustre_dist.ldis_e2fsprogs_version, current_version,
-                        local_host.sh_hostname)
-            need_install = True
-
-    if not need_install:
-        log.cl_info("the needed e2fsprogs [%s] have already been installed "
-                    "on build host [%s]",
-                    lustre_dist.ldis_e2fsprogs_version,
-                    local_host.sh_hostname)
-        return 0
-
-    command = "rpm -Uvh %s/*.rpm" % lustre_dist.ldis_e2fsprogs_rpm_dir
-    retval = local_host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     local_host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-    return 0
-
-
-def handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
-                                 plugins_need_lustre_rpms,
-                                 plugins_need_install_lustre,
-                                 lustre_rpms_dir, e2fsprogs_rpms_dir,
-                                 extra_iso_fnames):
+def _handle_lustre_e2fsprogs_rpms(log, local_host, workspace,
+                                  source_dir, iso_cache,
+                                  plugins_need_pack_lustre,
+                                  plugins_need_install_lustre,
+                                  lustre_dir, e2fsprogs_dir,
+                                  extra_iso_fnames):
     """
     Handling Lustre/E2fsprogs RPMs
     """
     # pylint: disable=too-many-locals,too-many-branches,unused-argument
-    default_lustre_rpms_dir = (iso_cache + "/" +
-                               constant.CORAL_LUSTRE_RELEASE_BASENAME)
-    default_e2fsprogs_rpms_dir = (iso_cache + "/" +
-                                  constant.E2FSPROGS_RPM_DIR_BASENAME)
-    if (len(plugins_need_lustre_rpms) == 0 and
+    iso_lustre_dir = iso_cache + "/" + constant.CORAL_LUSTRE_RELEASE_BASENAME
+    iso_e2fsprogs_dir = iso_cache + "/" + constant.CORAL_E2FSPROGS_RELEASE_BASENAME
+    if (len(plugins_need_pack_lustre) == 0 and
             len(plugins_need_install_lustre) == 0):
-        if lustre_rpms_dir is not None:
+        if lustre_dir is not None:
             log.cl_warning("option [--lustre %s] has been ignored since "
                            "no need to have Lustre RPMs",
-                           lustre_rpms_dir)
-        if e2fsprogs_rpms_dir is not None:
+                           lustre_dir)
+        if e2fsprogs_dir is not None:
             log.cl_warning("option [--e2fsprogs %s] has been ignored since "
                            "no need to have Lustre RPMs",
-                           e2fsprogs_rpms_dir)
+                           e2fsprogs_dir)
     else:
-        if lustre_rpms_dir is None:
-            lustre_rpms_dir = default_lustre_rpms_dir
-        if e2fsprogs_rpms_dir is None:
-            e2fsprogs_rpms_dir = default_e2fsprogs_rpms_dir
+        if lustre_dir is None:
+            lustre_dir = iso_lustre_dir
+        if e2fsprogs_dir is None:
+            e2fsprogs_dir = iso_e2fsprogs_dir
 
     lustre_distribution = None
-    if (len(plugins_need_lustre_rpms) != 0 or
+    if (len(plugins_need_pack_lustre) != 0 or
             len(plugins_need_install_lustre) != 0):
+        definition_dir = source_dir + "/" + constant.LUSTRE_VERSION_DEFINITION_SOURCE_PATH
         lustre_distribution = lustre_lib.get_lustre_dist(log, local_host,
-                                                         lustre_rpms_dir,
-                                                         e2fsprogs_rpms_dir)
+                                                         workspace,
+                                                         lustre_dir,
+                                                         e2fsprogs_dir,
+                                                         definition_dir=definition_dir)
         if lustre_distribution is None:
             log.cl_error("invalid Lustre RPMs [%s] or e2fsprogs RPMs [%s]",
-                         lustre_rpms_dir, e2fsprogs_rpms_dir)
+                         lustre_dir, e2fsprogs_dir)
             log.cl_error("Lustre RPMs are needed by plugins [%s]",
-                         get_plugin_str(plugins_need_lustre_rpms +
+                         get_plugin_str(plugins_need_pack_lustre +
                                         plugins_need_install_lustre))
             return -1
 
-        if len(plugins_need_lustre_rpms) != 0:
-            iso_lustre_dir = iso_cache + "/" + constant.CORAL_LUSTRE_RELEASE_BASENAME
-            iso_e2fsprogs_dir = iso_cache + "/" + constant.E2FSPROGS_RPM_DIR_BASENAME
+        if len(plugins_need_pack_lustre) != 0:
+            if lustre_dir != iso_lustre_dir:
+                rinfo = lustre_distribution.ldis_lustre_rinfo
+                log.cl_info("syncing Lustre release from [%s] to [%s]",
+                            lustre_dir, iso_lustre_dir)
+                ret = rinfo.rli_files_send(log, local_host,
+                                           lustre_dir,
+                                           local_host, iso_lustre_dir)
+                if ret:
+                    log.cl_error("failed to sync Lustre release from [%s] "
+                                 "to [%s] on local host [%s]",
+                                 lustre_dir, iso_e2fsprogs_dir,
+                                 local_host.sh_hostname)
+                    return -1
 
-            if lustre_rpms_dir != default_lustre_rpms_dir:
-                for basename in constant.LUSTRE_DIR_BASENAMES:
-                    dir_fpath = lustre_rpms_dir + "/" + basename
-                    log.cl_info("syncing [%s] to [%s] on host [%s]",
-                                dir_fpath, iso_lustre_dir,
-                                local_host.sh_hostname)
-                    ret = local_host.sh_sync_two_dirs(log, dir_fpath,
-                                                      iso_lustre_dir)
-                    if ret:
-                        log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
-                                     "on host [%s]", dir_fpath, iso_lustre_dir,
-                                     local_host.sh_hostname)
-                        return -1
-
-            if e2fsprogs_rpms_dir != default_e2fsprogs_rpms_dir:
-                for basename in constant.E2FSPROGS_DIR_BASENAMES:
-                    dir_fpath = e2fsprogs_rpms_dir + "/" + basename
-                    log.cl_info("syncing [%s] to [%s] on host [%s]",
-                                dir_fpath, iso_e2fsprogs_dir,
-                                local_host.sh_hostname)
-                    ret = local_host.sh_sync_two_dirs(log, dir_fpath,
-                                                      iso_e2fsprogs_dir)
-                    if ret:
-                        log.cl_error("failed to sync [%s] to a subdir under dir [%s] "
-                                     "on host [%s]", dir_fpath,
-                                     iso_e2fsprogs_dir,
-                                     local_host.sh_hostname)
-                        return -1
+            if e2fsprogs_dir != iso_e2fsprogs_dir:
+                rinfo = lustre_distribution.ldis_e2fsprogs_rinfo
+                log.cl_info("syncing E2fsprogs release from [%s] to [%s]",
+                            e2fsprogs_dir, iso_e2fsprogs_dir)
+                ret = rinfo.rli_files_send(log, local_host,
+                                           e2fsprogs_dir,
+                                           local_host, iso_e2fsprogs_dir)
+                if ret:
+                    log.cl_error("failed to sync E2fsprogs release from [%s] "
+                                 "to [%s] on local host [%s]",
+                                 lustre_dir, iso_e2fsprogs_dir,
+                                 local_host.sh_hostname)
+                    return -1
 
             extra_iso_fnames.append(constant.CORAL_LUSTRE_RELEASE_BASENAME)
-            extra_iso_fnames.append(constant.E2FSPROGS_RPM_DIR_BASENAME)
+            extra_iso_fnames.append(constant.CORAL_E2FSPROGS_RELEASE_BASENAME)
 
         if len(plugins_need_install_lustre) != 0:
-            ret = install_lustre_util_rpm(log, local_host, lustre_distribution)
+            ret = lustre_distribution.ldis_install_lustre_devel_rpms(log, local_host)
             if ret:
-                log.cl_error("failed to install Lustre util RPM")
+                log.cl_error("failed to install Lustre RPMs for build")
                 return -1
 
-            ret = install_e2fsprogs_rpm(log, local_host, lustre_distribution)
+            ret = lustre_distribution.ldis_install_e2fsprogs_rpms(log)
             if ret:
                 log.cl_error("failed to install E2fsprogs RPMs")
                 return -1
@@ -893,15 +997,13 @@ def build_packages(log, workspace, local_host, source_dir, target_cpu,
     if ordered_packages is None:
         return -1
 
-    package_str = ""
-    for package in ordered_packages:
-        if package_str != "":
-            package_str += ","
-        package_str += package.cpb_package_name
-    log.cl_info("building packages [%s]", package_str)
+    if len(ordered_packages) == 0:
+        log.cl_info("no Coral package needs to be built")
+        return 0
 
     for package in ordered_packages:
         package_name = package.cpb_package_name
+        log.cl_info("building Coral package [%s]", package_name)
         ret = package.cpb_build(log, workspace, local_host, source_dir,
                                 target_cpu, type_cache, iso_cache,
                                 packages_dir, extra_iso_fnames,
@@ -918,29 +1020,69 @@ def get_plugin_str(plugins):
     """
     Return a string of plugins
     """
-    plugin_str = ""
+    plugin_names = []
     for plugin in plugins:
-        if plugin_str == "":
-            plugin_str = plugin.cpt_plugin_name
-        else:
-            plugin_str += "," + plugin.cpt_plugin_name
-    return plugin_str
+        plugin_names.append(plugin.cpt_plugin_name)
+    return utils.list2string(plugin_names)
+
+
+def cleanup_dir_content(log, host, directory, contents):
+    """
+    Cleanup unexpected content under a directory
+    """
+    existing_fnames = host.sh_get_dir_fnames(log, directory)
+    if existing_fnames is None:
+        log.cl_error("failed to get the file names under [%s] of "
+                     "host [%s]",
+                     directory, host.sh_hostname)
+        return -1
+
+    for fname in contents:
+        if fname not in existing_fnames:
+            log.cl_error("failed to find necessary content [%s] under "
+                         "directory [%s] of host [%s]", fname, directory,
+                         host.sh_hostname)
+            return -1
+        existing_fnames.remove(fname)
+
+    for fname in existing_fnames:
+        fpath = directory + "/" + fname
+        log.cl_debug("found unnecessary content [%s] under directory "
+                     "[%s] of host [%s], removing it", fname, directory,
+                     host.sh_hostname)
+        command = "rm -fr %s" % (fpath)
+        ret = host.sh_run(log, command)
+        if ret.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = %d, stdout = [%s], stderr = [%s]",
+                         command, host.sh_hostname,
+                         ret.cr_exit_status, ret.cr_stdout,
+                         ret.cr_stderr)
+            return -1
+    return 0
 
 
 def build(log, source_dir, workspace,
           cache=constant.CORAL_BUILD_CACHE,
-          lustre_rpms_dir=None,
-          e2fsprogs_rpms_dir=None,
+          lustre_dir=None,
+          e2fsprogs_dir=None,
           collectd=None,
           enable_zfs=False,
           enable_devel=False,
+          disable_creaf=False,
           disable_plugin=None,
-          tsinghua_mirror=False):
+          only_plugin=None,
+          china=False):
     """
-    Build the Coral ISO.
+    Build the Coral ISO
     """
     # pylint: disable=too-many-locals,too-many-branches
     # pylint: disable=too-many-statements
+    if disable_plugin is not None and only_plugin is not None:
+        log.cl_error("--disable_plugin and --only_plugin can not be "
+                     "specified together")
+        return -1
+
     if disable_plugin is None:
         disabled_plugins = []
     else:
@@ -954,14 +1096,16 @@ def build(log, source_dir, workspace,
     if enable_devel:
         plugins += list(build_common.CORAL_DEVEL_PLUGIN_DICT.values())
 
+    all_plugin_names = list(build_common.CORAL_PLUGIN_DICT.keys())
+    all_plugin_names_str = utils.list2string(all_plugin_names)
     sync_cache_back = True
     disable_plugins_str = ""
     for plugin_name in disabled_plugins:
         if plugin_name not in build_common.CORAL_PLUGIN_DICT:
             log.cl_error("unknown plugin [%s] of --disable_plugin",
                          plugin_name)
-            log.cl_error("possible plugins are %s",
-                         list(build_common.CORAL_PLUGIN_DICT.keys()))
+            log.cl_error("possible plugins are [%s]",
+                         all_plugin_names_str)
             return -1
 
         if ((not enable_devel) and
@@ -975,6 +1119,34 @@ def build(log, source_dir, workspace,
         if plugin in plugins:
             plugins.remove(plugin)
         disable_plugins_str += " --disable-%s" % plugin_name
+
+    if only_plugin:
+        sync_cache_back = False
+        plugin_names = cmd_general.parse_list_string(log, only_plugin)
+        if plugin_names is None:
+            log.cl_error("invalid option [%s] of --only_plugin",
+                         only_plugin)
+            return -1
+        plugins = []
+        for plugin_name in plugin_names:
+            if plugin_name not in build_common.CORAL_PLUGIN_DICT:
+                log.cl_error("unknown plugin [%s] of --only_plugin",
+                             plugin_name)
+                log.cl_error("possible plugins are [%s]",
+                             all_plugin_names_str)
+                return -1
+            if plugin_name in build_common.CORAL_DEVEL_PLUGIN_DICT:
+                enable_devel = True
+            plugin = build_common.CORAL_PLUGIN_DICT[plugin_name]
+            if plugin in plugins:
+                continue
+            plugins.append(plugin)
+
+        disable_plugins_str = ""
+        for plugin_name in build_common.CORAL_PLUGIN_DICT:
+            if plugin_name in plugin_names:
+                continue
+            disable_plugins_str += " --disable-%s" % plugin_name
 
     if len(plugins) == 0:
         log.cl_error("everything has been disabled, nothing to build")
@@ -991,16 +1163,19 @@ def build(log, source_dir, workspace,
                              plugin.cpt_plugin_name, plugin_name)
                 return -1
 
-    plugins_need_lustre_rpms = []
+    plugins_need_pack_lustre = []
     plugins_need_collectd = []
     plugins_need_install_lustre = []
     enabled_plugin_str = get_plugin_str(plugins)
     for plugin in plugins:
-        if plugin.cpt_need_lustre_rpms:
-            plugins_need_lustre_rpms.append(plugin)
+        if plugin.cpt_need_pack_lustre:
+            plugins_need_pack_lustre.append(plugin)
         if plugin.cpt_need_collectd:
             plugins_need_collectd.append(plugin)
-        if plugin.cpt_install_lustre:
+        if (disable_creaf and
+                plugin.cpt_plugin_name == build_reaf.REAF_PLUGIN_NAME):
+            continue
+        if plugin.cpt_need_lustre_for_build:
             plugins_need_install_lustre.append(plugin)
 
     type_fname = constant.CORAL_BUILD_CACHE_TYPE_OPEN
@@ -1009,10 +1184,12 @@ def build(log, source_dir, workspace,
 
     local_host = ssh_host.get_local_host(ssh=False)
     distro = local_host.sh_distro(log)
-    if distro not in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8,
+    if distro not in (os_distro.DISTRO_RHEL7,
+                      os_distro.DISTRO_RHEL8,
+                      os_distro.DISTRO_RHEL9,
                       os_distro.DISTRO_UBUNTU2004,
                       os_distro.DISTRO_UBUNTU2204):
-        log.cl_error("build on distro [%s] is not supported yet", distro)
+        log.cl_error("unsupported distro [%s] when building Coral", distro)
         return -1
 
     shared_cache = cache.rstrip("/")
@@ -1025,12 +1202,7 @@ def build(log, source_dir, workspace,
     # Extra file names under ISO directory
     extra_iso_fnames = []
 
-    enable_zfs_string = ""
-    if enable_zfs:
-        enable_zfs_string = ", ZFS support disabled"
-
     type_cache = workspace + "/" + type_fname
-    build_pip_dir = type_cache + "/" + constant.BUILD_PIP
     iso_cache = type_cache + "/" + constant.ISO_CACHE_FNAME
     # Directory path of package under ISO cache
     packages_dir = iso_cache + "/" + constant.BUILD_PACKAGES
@@ -1062,12 +1234,13 @@ def build(log, source_dir, workspace,
         return -1
 
     # Do this after copying ISO cache, and before cpt_build when Lustre rpms
-    # should have been installed.
-    ret = handle_lustre_e2fsprogs_rpms(log, local_host, iso_cache,
-                                       plugins_need_lustre_rpms,
-                                       plugins_need_install_lustre,
-                                       lustre_rpms_dir, e2fsprogs_rpms_dir,
-                                       extra_iso_fnames)
+    # should have been installed if necessary.
+    ret = _handle_lustre_e2fsprogs_rpms(log, local_host, workspace,
+                                        source_dir, iso_cache,
+                                        plugins_need_pack_lustre,
+                                        plugins_need_install_lustre,
+                                        lustre_dir, e2fsprogs_dir,
+                                        extra_iso_fnames)
     if ret:
         log.cl_error("failed on Lustre/e2fsprogs RPMs")
         return -1
@@ -1083,10 +1256,10 @@ def build(log, source_dir, workspace,
         log.cl_error("failed to get the needed packages")
         return -1
 
-    ret = install_build_dependency(log, workspace, local_host, distro,
-                                   target_cpu, type_cache, plugins,
-                                   package_dict, build_pip_dir,
-                                   tsinghua_mirror=tsinghua_mirror)
+    ret = _install_build_dependency(log, workspace, local_host, distro,
+                                    target_cpu, type_cache, plugins,
+                                    package_dict,
+                                    china=china)
     if ret:
         log.cl_error("failed to install dependency for building")
         return -1
@@ -1115,17 +1288,19 @@ def build(log, source_dir, workspace,
         return -1
 
     for plugin in plugins:
+        plugin_name = plugin.cpt_plugin_name
         ret = plugin.cpt_build(log, workspace, local_host, source_dir,
                                target_cpu, type_cache, iso_cache,
                                packages_dir, extra_iso_fnames,
                                extra_package_fnames, extra_package_names,
                                option_dict)
         if ret:
-            log.cl_error("failed to build plugin [%s]",
-                         plugin.cpt_plugin_name)
+            log.cl_error("failed to build Coral plugin [%s]",
+                         plugin_name)
             return -1
 
-    ret = download_dependent_packages(log, local_host, distro,
+    ret = download_dependent_packages(log, local_host, source_dir,
+                                      distro,
                                       target_cpu, packages_dir,
                                       extra_package_fnames,
                                       extra_package_names)
@@ -1135,14 +1310,17 @@ def build(log, source_dir, workspace,
 
     contents = ([constant.BUILD_PACKAGES] +
                 extra_iso_fnames)
-    ret = local_host.sh_check_dir_content(log, iso_cache, contents,
-                                          cleanup=True)
+    ret = cleanup_dir_content(log, local_host, iso_cache, contents)
     if ret:
-        log.cl_error("directory [%s] does not have expected content",
-                     iso_cache)
+        log.cl_error("failed to cleanup content under [%s] on host [%s]",
+                     iso_cache, local_host.sh_hostname)
         return -1
 
-    log.cl_info("generating Coral ISO")
+    ret = cleanup_dir_content(log, local_host, packages_dir, extra_package_fnames)
+    if ret:
+        log.cl_error("failed to cleanup content under [%s] on host [%s]",
+                     packages_dir, local_host.sh_hostname)
+        return -1
 
     enable_zfs_string = ""
     if enable_zfs:
@@ -1150,16 +1328,19 @@ def build(log, source_dir, workspace,
     enable_devel_string = ""
     if enable_devel:
         enable_devel_string = " --enable-devel"
+    disable_creaf_string = ""
+    if disable_creaf:
+        sync_cache_back = False
+        disable_creaf_string = " --disable-creaf"
     extra_str = ""
     command = ("cd %s && rm coral-*.tar.bz2 coral-*.tar.gz -f && "
                "sh autogen.sh && "
-               "./configure --with-iso-cache=%s%s%s%s%s && "
+               "./configure --with-iso-cache=%s%s%s%s%s%s && "
                "make -j8 && "
                "make iso" %
                (source_dir, iso_cache, enable_zfs_string, enable_devel_string,
-                disable_plugins_str, extra_str))
-    log.cl_info("running command [%s] on host [%s]", command,
-                local_host.sh_hostname)
+                disable_creaf_string, disable_plugins_str, extra_str))
+    log.cl_info("generating ISO using command [%s]", command)
     retval = local_host.sh_watched_run(log, command, None, None,
                                        return_stdout=False,
                                        return_stderr=False)

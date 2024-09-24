@@ -1,8 +1,11 @@
 """
 Library for access Influxdb through HTTP API
 """
+import http
+import json
 import traceback
 import requests
+from pybarrele import barrele_constant
 
 
 class BarreleInfluxdbClient():
@@ -51,6 +54,64 @@ class BarreleInfluxdbClient():
             return None
 
         return response
+
+    def bic_query_serie(self, log, query, quiet=False):
+        """
+        Query on Influxdb, return a serie dict like:
+        {
+            "columns": [
+                "key"
+            ],
+            "values": [
+                [
+                    "aggregation.cpu-average.cpu.idle,fqdn=autotest-el7-vm311"
+                ],
+        }
+        """
+        response = self.bic_query(log, query, epoch="s")
+        if quiet:
+            log_func = log.cl_debug
+        else:
+            log_func = log.cl_error
+        if response is None:
+            log_func("failed to with query Influxdb with query [%s]",
+                     query)
+            return None
+
+        if response.status_code != http.HTTPStatus.OK:
+            log_func("got InfluxDB status [%d] with query [%s]",
+                     response.status_code, query)
+            return None
+
+        data = response.json()
+        json_string = json.dumps(data, indent=4, separators=(',', ': '))
+        if barrele_constant.INFLUX_RESULTS not in data:
+            log_func("got wrong InfluxDB data [%s], no [%s]",
+                     json_string, barrele_constant.INFLUX_RESULTS)
+            return None
+        results = data[barrele_constant.INFLUX_RESULTS]
+
+        if len(results) != 1:
+            log_func("got wrong InfluxDB data [%s], [%s] is not a "
+                     "array with only one element",
+                     json_string, barrele_constant.INFLUX_RESULTS)
+            return None
+        result = results[0]
+
+        if barrele_constant.INFLUX_SERIES not in result:
+            log_func("got wrong InfluxDB data [%s], no [%s] in result",
+                     json_string, barrele_constant.INFLUX_SERIES)
+            return None
+
+        series = result[barrele_constant.INFLUX_SERIES]
+        if len(series) != 1:
+            log_func("got wrong InfluxDB data [%s], [%s] is not a "
+                     "array with only one element",
+                     json_string, barrele_constant.INFLUX_SERIES)
+            return None
+        serie = series[0]
+
+        return serie
 
 
 class InfluxdbContinuousQuery():

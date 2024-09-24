@@ -15,7 +15,7 @@ endif
 clownf_storage_SOURCES = clownf_storage.c \
 	../ccoral/debug.h \
 	../ccoral/debug.c
-nodist_clownf_storage_SOURCES = clf_constant.h
+nodist_clownf_storage_SOURCES = clownf_constant.h
 clownf_storage_CFLAGS = $(CLF_CFLAGS_)
 clownf_storage_LDFLAGS = $(CLF_LDFLAGS_)
 CHECKS =

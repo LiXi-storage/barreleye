@@ -6,47 +6,20 @@ since this might cause failure of commands that uses this
 library to install python packages.
 """
 # pylint: disable=too-many-lines
-import socket
 import os
 import sys
+import socket
 from pycoral import utils
 from pycoral import ssh_host
 from pycoral import os_distro
 from pycoral import constant
 from pycoral import parallel
+from pycoral import yum_mirror
+from pycoral import apt_mirror
+from pycoral import pip_mirror
 
 
-def find_iso_path_in_cwd(log, host, iso_path_pattern):
-    """
-    Find iso path in current work directory
-    """
-    command = ("ls %s" % (iso_path_pattern))
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return None
-
-    current_dir = os.getcwd()
-    iso_names = retval.cr_stdout.split()
-    if len(iso_names) != 1:
-        log.cl_error("found unexpected ISOs %s under currect directory [%s]",
-                     iso_names, current_dir)
-        return None
-
-    iso_name = iso_names[0]
-
-    if iso_name.startswith("/"):
-        return iso_name
-    return current_dir + "/" + iso_name
-
-
-def generate_repo_file(repo_fpath, packages_dir, package_name):
+def _generate_repo_file(repo_fpath, packages_dir, package_name):
     """
     Prepare the local repo config file
     """
@@ -63,50 +36,23 @@ gpgkey=
         config_fd.write(repo_config)
 
 
-def yum_repo_install(log, host, repo_fpath, rpms):
+def check_fpath_pattern(fpath_pattern):
+    """
+    Do not allow ".."
+    """
+    fields = fpath_pattern.split("/")
+    for field in fields:
+        if field == "..":
+            return -1
+    return 0
+
+
+def _yum_repo_install(log, host, repo_fpath, rpms):
     """
     Install RPMs using YUM
     """
-    if len(rpms) == 0:
-        return 0
-
-    repo_ids = host.sh_yum_repo_ids(log)
-    if repo_ids is None:
-        log.cl_error("failed to get the yum repo IDs on host [%s]",
-                     host.sh_hostname)
-        return -1
-
-    command = "yum -c %s" % repo_fpath
-    for repo_id in repo_ids:
-        command += " --disablerepo %s" % repo_id
-
-    command += " install -y"
-    for rpm in rpms:
-        command += " %s" % rpm
-
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
-    retval = host.sh_run(log, command, timeout=ssh_host.LONGEST_TIME_YUM_INSTALL)
-    if retval.cr_exit_status != 0:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
-    missing_rpms = []
-    for rpm in rpms:
-        ret = host.sh_rpm_query(log, rpm)
-        if ret != 0:
-            missing_rpms.append(rpm)
-    if len(missing_rpms) != 0:
-        log.cl_error("rpms %s are still missing on host [%s] after yum install",
-                     missing_rpms, host.sh_hostname)
-        return -1
-    return 0
+    extra_option = "-c " + repo_fpath
+    return host.sh_yum_install(log, rpms, extra_option=extra_option)
 
 
 def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
@@ -200,20 +146,19 @@ def sync_iso_dir(log, workspace, host, iso_pattern, dest_iso_dir,
     return ret
 
 
-def install_pip3_packages_from_cache(log, local_host, pip_packages,
-                                     pip_dir, quiet=False):
+def _install_pip3_packages(log, local_host, pip_packages,
+                           pip_dir=None, quiet=False):
     """
     Install pip3 packages on local host and make sure it can be imported later.
 
     pip package can have the format like "PyInstaller==5.13.2".
     """
     ret = local_host.sh_install_pip3_packages(log, pip_packages,
-                                              pip_dir, quiet=quiet)
+                                              pip_dir=pip_dir, quiet=quiet)
     if ret:
         if not quiet:
-            log.cl_error("failed to install pip3 packages %s in dir "
-                         "[%s] on localhost [%s]",
-                         pip_packages, pip_dir, local_host.sh_hostname)
+            log.cl_error("failed to install pip3 packages %s on localhost [%s]",
+                         pip_packages, local_host.sh_hostname)
         return -1
 
     pakage_names = []
@@ -262,8 +207,8 @@ def install_rpms_from_iso(log, workspace, local_host, iso_dir,
                      retval.cr_stderr)
         return -1
 
-    generate_repo_file(repo_config_fpath, packages_dir, name)
-    ret = yum_repo_install(log, local_host, repo_config_fpath, missing_rpms)
+    _generate_repo_file(repo_config_fpath, packages_dir, name)
+    ret = _yum_repo_install(log, local_host, repo_config_fpath, missing_rpms)
     if ret:
         log.cl_error("failed to install RPMs %s on local host [%s]",
                      missing_rpms, local_host.sh_hostname)
@@ -295,35 +240,51 @@ def coral_rpm_reinstall(log, host, iso_path):
     return 0
 
 
-class CoralInstallationHost():
+class CoralInstallHost():
     """
     Each host that needs installation has an object of this type
     """
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
-    def __init__(self, workspace, host, is_local, iso_dir, pip_libs,
-                 dependent_rpms, send_fpath_dict, need_backup_fpaths,
-                 coral_reinstall=True, tsinghua_mirror=False,
+    def __init__(self, cluster, host,
+                 pip_names=None, package_names=None,
+                 send_fpath_dict=None, fpaths_need_backup=None,
+                 coral_reinstall=True, china_mirror=False,
                  disable_selinux=True, disable_firewalld=True,
-                 change_sshd_max_startups=True, config_rsyslog=True):
-        self.cih_workspace = workspace
-        # ISO dir that configured in repo file
-        self.cih_iso_dir = iso_dir
-        # pip dir under ISO dir
-        self.cih_pip_dir = iso_dir + "/" + constant.BUILD_PIP
+                 change_sshd_max_startups=True, config_rsyslog=True,
+                 send_iso_dir=True, send_relative_path_patterns=None,
+                 uninstall_package_names=None,
+                 install_iso_package_patterns=None):
+        # pylint: disable=too-many-locals
+        # CoralInstallCluster
+        self.cih_cluster = cluster
+        # Packages dir under ISO dir
+        self.cih_packages_dir = cluster.cic_iso_dir + "/" + constant.BUILD_PACKAGES
         # Host
         self.cih_host = host
         # Whether this host is localhost
-        self.cih_is_local = is_local
+        self.cih_is_local = (host.sh_hostname == cluster.cic_local_host.sh_hostname)
         # The Pip packages to install
-        self.cih_pip_libs = pip_libs
-        # The RPMs to install
-        self.cih_dependent_rpms = dependent_rpms
+        if pip_names is None:
+            self.cih_pip_names = []
+        else:
+            self.cih_pip_names = pip_names
+        # The RPM/deb names to install
+        if package_names is None:
+            self.cih_package_names = []
+        else:
+            self.cih_package_names = package_names
         # Key is the the source path on localhost, value is the target
         # path on this host
-        self.cih_send_fpath_dict = send_fpath_dict
+        if send_fpath_dict is None:
+            self.cih_send_fpath_dict = {}
+        else:
+            self.cih_send_fpath_dict = send_fpath_dict
         # File paths to backup before reinstalling and restore after
         # reinstalling
-        self.cih_need_backup_fpaths = need_backup_fpaths
+        if fpaths_need_backup is None:
+            self.cih_fpaths_need_backup = []
+        else:
+            self.cih_fpaths_need_backup = fpaths_need_backup
         # Reinstall Coral RPMs
         self.cih_coral_reinstall = coral_reinstall
         # A list of Coral service names to preserve. If the service is
@@ -335,8 +296,8 @@ class CoralInstallationHost():
         #
         # Note this list will be shrinked when services are up running.
         self.cih_preserve_services = []
-        # Whether to use YUM and pip mirror from Tsinghua University
-        self.cih_tsinghua_mirror = tsinghua_mirror
+        # Whether to use local yum/apt and pip mirrors
+        self.cih_china_mirror = china_mirror
         # Whether disable SELinux on the host
         self.cih_disable_selinux = disable_selinux
         # Whether disable Firewalld on the host
@@ -345,19 +306,33 @@ class CoralInstallationHost():
         self.cih_change_sshd_max_startups = change_sshd_max_startups
         # Whether to change rsyslog to avoid flood of login
         self.cih_config_rsyslog = config_rsyslog
+        # Whether to send ISO dir from local host
+        self.cih_send_iso_dir = send_iso_dir
+        # The relative file path patterns to send from ISO dir of local host. None if not send.
+        self.cih_send_relative_path_patterns = send_relative_path_patterns
+        # The RPM names to uninstall first. By putting a same RPM in
+        # cih_uninstall_package_names and cih_install_iso_package_patterns, we are able to
+        # reinstall the specific RPM/deb.
+        self.cih_uninstall_package_names = uninstall_package_names
+        # The package patterns to install from ISO dir.
+        self.cih_install_iso_package_patterns = install_iso_package_patterns
 
     def _cih_send_iso_dir(self, log):
         """
         Send the dir of ISO to a host
         """
+        cluster = self.cih_cluster
+        iso_dir = cluster.cic_iso_dir
         host = self.cih_host
+        local_host = self.cih_cluster.cic_local_host
         if self.cih_is_local:
             return 0
 
         log.cl_info("syncing ISO dir from local host [%s] "
-                    "to host [%s]", socket.gethostname(),
+                    "to host [%s]",
+                    local_host.sh_hostname,
                     host.sh_hostname)
-        target_dirname = os.path.dirname(self.cih_iso_dir)
+        target_dirname = os.path.dirname(iso_dir)
         command = ("mkdir -p %s" % (target_dirname))
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
@@ -370,15 +345,125 @@ class CoralInstallationHost():
                          retval.cr_stderr)
             return -1
 
-        ret = host.sh_send_file(log, self.cih_iso_dir, target_dirname,
+        ret = host.sh_send_file(log, iso_dir, target_dirname,
                                 delete_dest=True)
         if ret:
-            log.cl_error("failed to send dir [%s] on local host to "
+            log.cl_error("failed to send dir [%s] on local host [%s] to "
                          "directory [%s] on host [%s]",
-                         self.cih_iso_dir, target_dirname,
+                         iso_dir, socket.gethostname(), target_dirname,
                          host.sh_hostname)
             return -1
 
+        return 0
+
+    def _cih_find_and_remove_pattern(self, log, file_pattern):
+        """
+        Find and remove the file that matches the pattern.
+        """
+        host = host = self.cih_host
+        fpaths = host.sh_resolve_path(log, file_pattern, quiet=True)
+        if fpaths is None:
+            log.cl_error("failed to find file with pattern [%s] on host [%s]",
+                         file_pattern, host.sh_hostname)
+            return -1
+        if len(fpaths) > 1:
+            log.cl_error("multiple files found by pattern [%s] on host [%s]",
+                         file_pattern, host.sh_hostname)
+            return -1
+        if len(fpaths) == 0:
+            return 0
+        fpath = fpaths[0]
+        command = "rm -f %s" % fpath
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def _cih_send_iso_files(self, log, relative_patterns):
+        """
+        Send the dir of ISO to a host
+        """
+        # pylint: disable=too-many-locals
+        host = self.cih_host
+        cluster = self.cih_cluster
+        iso_dir = cluster.cic_iso_dir
+        local_host = cluster.cic_local_host
+        if self.cih_is_local:
+            return 0
+
+        log.cl_info("syncing ISO files from local host [%s] "
+                    "to host [%s]", local_host.sh_hostname,
+                    host.sh_hostname)
+        command = ("mkdir -p %s" % (self.cih_packages_dir))
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        for relative_pattern in relative_patterns:
+            ret = check_fpath_pattern(relative_pattern)
+            if ret:
+                log.cl_error("invalid pattern [%s]", relative_pattern)
+                return -1
+            file_pattern = iso_dir + "/" + relative_pattern
+
+            ret = self._cih_find_and_remove_pattern(log, file_pattern)
+            if ret:
+                return -1
+
+            fpaths = local_host.sh_resolve_path(log, file_pattern, quiet=True)
+            if fpaths is None or len(fpaths) == 0:
+                log.cl_error("failed to find file with pattern [%s] on local host [%s]",
+                             file_pattern, local_host.sh_hostname)
+                return -1
+            if len(fpaths) > 1:
+                log.cl_error("multiple files found by pattern [%s] on local host [%s]",
+                             file_pattern, local_host.sh_hostname)
+                return -1
+            fpath = fpaths[0]
+
+            prefix = iso_dir + "/"
+            if not fpath.startswith(prefix):
+                log.cl_error("file [%s] with pattern [%s] is not under ISO dir [%s]",
+                             fpath, file_pattern, iso_dir)
+                return -1
+
+            relative_fpath = fpath[len(prefix):]
+            relative_dir = os.path.dirname(relative_fpath)
+            target_dir = iso_dir + "/" + relative_dir
+
+            command = ("mkdir -p %s" % (target_dir))
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+
+            ret = host.sh_send_file(log, fpath, target_dir, delete_dest=True)
+            if ret:
+                log.cl_error("failed to send file [%s] on local host [%s] to "
+                             "directory [%s] on host [%s]",
+                             fpath, socket.gethostname(), target_dir,
+                             host.sh_hostname)
+                return -1
         return 0
 
     def _cih_backup_file(self, log, fpath):
@@ -387,7 +472,8 @@ class CoralInstallationHost():
         """
         host = self.cih_host
         dirname = os.path.dirname(fpath)
-        backup_dirname = self.cih_workspace + dirname
+        workspace = self.cih_cluster.cic_workspace
+        backup_dirname = workspace + dirname
         command = ("mkdir -p %s" % (backup_dirname))
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
@@ -419,7 +505,8 @@ class CoralInstallationHost():
         """
         random_words = utils.random_word(8)
         host = self.cih_host
-        backup_fpath = self.cih_workspace + "/" + fpath
+        workspace = self.cih_cluster.cic_workspace
+        backup_fpath = workspace + "/" + fpath
         command = ("mv %s %s_backup_%s" % (fpath, fpath, random_words))
         retval = host.sh_run(log, command)
         if retval.cr_exit_status:
@@ -502,36 +589,17 @@ class CoralInstallationHost():
         """
         Disable the SELinux on the host
         """
-        host = self.cih_host
-        log.cl_info("disabling SELinux on host [%s]",
-                    host.sh_hostname)
-        ret = host.sh_disable_selinux(log)
-        if ret:
-            log.cl_error("failed to disable SELinux on host [%s]",
-                         host.sh_hostname)
-            return -1
-        return 0
+        # pylint: disable=no-self-use
+        log.cl_error("disable selinux not implemented")
+        return -1
 
     def _cih_disable_firewalld(self, log):
         """
         Disable the firewalld on the host
         """
-        host = self.cih_host
-        log.cl_info("disabling firewalld on host [%s]",
-                    host.sh_hostname)
-        service_name = "firewalld"
-        ret = host.sh_service_stop(log, service_name)
-        if ret:
-            log.cl_error("failed to stop service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
-            return -1
-
-        ret = host.sh_service_disable(log, service_name)
-        if ret:
-            log.cl_error("failed to disable service [%s] on host [%s]",
-                         service_name, host.sh_hostname)
-            return -1
-        return 0
+        # pylint: disable=no-self-use
+        log.cl_error("disable firewalld not implemented")
+        return -1
 
     def _cih_services_pre_preserve(self, log):
         """
@@ -684,31 +752,78 @@ class CoralInstallationHost():
 
         return 0
 
-    def cih_install(self, log, repo_config_fpath):
+    def _cih_uninstall_packages(self, log, package_names):
+        """
+        Install packages on the host.
+        """
+        # pylint: disable=unused-argument,no-self-use
+        log.cl_error("package uninstall not implemented")
+        return -1
+
+    def cih_packages_install(self, log, package_names):
+        """
+        Install packages on the host.
+        """
+        # pylint: disable=unused-argument,no-self-use
+        log.cl_error("package install not implemented")
+        return -1
+
+    def _cih_install_package_patterns(self, log, package_patterns):
+        """
+        Install package patterns from the ISO.
+        """
+        # pylint: disable=unused-argument,no-self-use
+        log.cl_error("package pattern install not implemented")
+        return -1
+
+    def cih_coral_packages_reinstall(self, log):
+        """
+        Reinstall Coral RPMs or debs.
+        """
+        # pylint: disable=no-self-use
+        log.cl_error("package packages install not implemented")
+        return -1
+
+    def cih_install(self, log):
         """
         Install the RPMs and pip packages on a host, and send the files
         :param send_fpath_dict: key is the fpath on localhost, value is the
         fpath on remote host.
         """
         # pylint: disable=too-many-statements,too-many-branches,too-many-locals
+        cluster = self.cih_cluster
         disable_selinux = self.cih_disable_selinux
         disable_firewalld = self.cih_disable_firewalld
         change_sshd_max_startups = self.cih_change_sshd_max_startups
-        pip_libs = self.cih_pip_libs
-        dependent_rpms = self.cih_dependent_rpms
+        pip_names = self.cih_pip_names
+        package_names = self.cih_package_names
         send_fpath_dict = self.cih_send_fpath_dict
-        need_backup_fpaths = self.cih_need_backup_fpaths
+        fpaths_need_backup = self.cih_fpaths_need_backup
         coral_reinstall = self.cih_coral_reinstall
         config_rsyslog = self.cih_config_rsyslog
+        send_iso_dir = self.cih_send_iso_dir
+        send_relative_path_patterns = self.cih_send_relative_path_patterns
+        uninstall_package_names = self.cih_uninstall_package_names
+        install_iso_package_patterns = self.cih_install_iso_package_patterns
         host = self.cih_host
         hostname = host.sh_hostname
-        # only support RHEL7 series
+        cluster = self.cih_cluster
+        workspace = cluster.cic_workspace
         distro = host.sh_distro(log)
+        local_host = cluster.cic_local_host
         if distro is None:
             log.cl_error("failed to get distro of host [%s]",
                          hostname)
             return -1
-        if distro not in [os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8]:
+        if distro != cluster.cic_distro:
+            log.cl_error("distro [%s] of host [%s] is different with [%s] "
+                         "of local host [%s]",
+                         distro, hostname, cluster.cic_distro,
+                         local_host.sh_hostname)
+            return -1
+
+        if distro not in [os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8,
+                          os_distro.DISTRO_UBUNTU2004, os_distro.DISTRO_UBUNTU2204]:
             log.cl_error("unsupported distro [%s] of host [%s]",
                          distro, hostname)
             return -1
@@ -741,64 +856,62 @@ class CoralInstallationHost():
                              hostname)
                 return -1
 
-        ret = self._cih_send_iso_dir(log)
-        if ret:
-            log.cl_error("failed to syncing ISO dir from local host [%s] "
-                         "to host [%s]", socket.gethostname(), hostname)
-            return -1
-        log.cl_info("installing dependent RPMs on host [%s]",
-                    hostname)
-        log.cl_debug("installing dependent RPMs %s and pip package %s on "
-                     "host [%s]",
-                     dependent_rpms, pip_libs, hostname)
-        if not self.cih_is_local:
-            command = ("mkdir -p %s" % (self.cih_workspace))
-            retval = host.sh_run(log, command)
-            if retval.cr_exit_status:
-                log.cl_error("failed to run command [%s] on host [%s], "
-                             "ret = [%d], stdout = [%s], stderr = [%s]",
-                             command,
-                             host.sh_hostname,
-                             retval.cr_exit_status,
-                             retval.cr_stdout,
-                             retval.cr_stderr)
+        if send_iso_dir:
+            ret = self._cih_send_iso_dir(log)
+            if ret:
+                log.cl_error("failed to send ISO dir from local host [%s] "
+                             "to host [%s]",
+                             local_host.sh_hostname, hostname)
                 return -1
 
-            ret = host.sh_send_file(log, repo_config_fpath, self.cih_workspace)
+        if send_relative_path_patterns is not None:
+            ret = self._cih_send_iso_files(log, send_relative_path_patterns)
             if ret:
-                log.cl_error("failed to send file [%s] on local host to "
-                             "directory [%s] on host [%s]",
-                             repo_config_fpath, self.cih_workspace,
+                log.cl_error("failed to send ISO files from local host [%s] "
+                             "to host [%s]",
+                             local_host.sh_hostname, hostname)
+                return -1
+
+        if uninstall_package_names is not None:
+            ret = self._cih_uninstall_packages(log, uninstall_package_names)
+            if ret:
+                log.cl_error("failed to uninstall packages on host [%s]",
+                             hostname)
+                return -1
+
+        if install_iso_package_patterns is not None:
+            ret = self._cih_install_package_patterns(log, install_iso_package_patterns)
+            if ret:
+                log.cl_error("failed to install RPMs on host [%s]",
                              hostname)
                 return -1
 
         # If local file, backup the send files in case overwritten by RPMs/pip
         if self.cih_is_local:
-            for fpath in need_backup_fpaths:
+            for fpath in fpaths_need_backup:
                 self._cih_backup_file(log, fpath)
 
-        if self.cih_tsinghua_mirror:
-            ret = yum_replace_to_tsinghua(log, host)
+        if self.cih_china_mirror:
+            ret = china_mirrors_configure(log, host, workspace)
             if ret:
-                log.cl_error("failed to replace YUM mirrors to Tsinghua "
-                             "University on host [%s]",
-                             hostname)
+                log.cl_error("failed to configure local mirrors on host [%s]",
+                             host.sh_hostname)
                 return -1
 
-        ret = yum_repo_install(log, host, repo_config_fpath,
-                               dependent_rpms)
-        if ret:
-            log.cl_error("failed to install dependent RPMs on host "
-                         "[%s]", hostname)
-            return -1
+        if len(package_names) > 0:
+            ret = self.cih_packages_install(log, package_names)
+            if ret:
+                log.cl_error("failed to install packages [%s] on host [%s]",
+                             utils.list2string(package_names), hostname)
+                return -1
 
-        ret = host.sh_install_pip3_packages(log, pip_libs,
-                                            self.cih_pip_dir)
-        if ret:
-            log.cl_error("failed to install missing pip packages %s in "
-                         "dir [%s] on host [%s]",
-                         pip_libs, self.cih_pip_dir, host.sh_hostname)
-            return -1
+        if len(pip_names) > 0:
+            ret = host.sh_install_pip3_packages(log, pip_names)
+            if ret:
+                log.cl_error("failed to install missing pip packages %s "
+                             "on host [%s]",
+                             pip_names, host.sh_hostname)
+                return -1
 
         if coral_reinstall:
             ret = self._cih_services_pre_preserve(log)
@@ -808,9 +921,9 @@ class CoralInstallationHost():
                              hostname)
                 return -1
 
-            ret = coral_rpm_reinstall(log, host, self.cih_iso_dir)
+            ret = self.cih_coral_packages_reinstall(log)
             if ret:
-                log.cl_error("failed to install Coral RPMs on host [%s]",
+                log.cl_error("failed to install Coral packages on host [%s]",
                              hostname)
                 return -1
 
@@ -822,7 +935,7 @@ class CoralInstallationHost():
 
         # If local file, restore the send files in case overwritten by RPMs/pip
         if self.cih_is_local:
-            for fpath in need_backup_fpaths:
+            for fpath in fpaths_need_backup:
                 self._cih_restore_file(log, fpath)
 
         # Send the files
@@ -847,81 +960,472 @@ class CoralInstallationHost():
 
             ret = host.sh_send_file(log, local_fpath, remote_fpath)
             if ret:
-                log.cl_error("failed to send file [%s] on local host to "
+                log.cl_error("failed to send file [%s] on local host [%s] to "
                              "dir [%s] on host [%s]",
-                             local_fpath, parent,
+                             local_fpath, socket.gethostname(), parent,
                              hostname)
                 return -1
         return 0
 
 
-def cluster_host_install(log, workspace, installation_host, repo_config_fpath):
+class CoralInstallHostRPM(CoralInstallHost):
     """
-    Install on a host of CoralInstallationCluster
+    Each host that needs installation has an object of this type.
+    """
+    def cih_coral_packages_reinstall(self, log):
+        """
+        Reinstall Coral packages.
+        """
+        cluster = self.cih_cluster
+        iso_dir = cluster.cic_iso_dir
+        host = self.cih_host
+        ret = coral_rpm_reinstall(log, host, iso_dir)
+        if ret:
+            log.cl_error("failed to install Coral RPMs on host [%s]",
+                         host.sh_hostname)
+            return -1
+        return 0
+
+    def _cih_disable_selinux(self, log):
+        """
+        Disable the SELinux on the host
+        """
+        host = self.cih_host
+        log.cl_info("disabling SELinux on host [%s]",
+                    host.sh_hostname)
+        ret = host.sh_disable_selinux(log)
+        if ret:
+            log.cl_error("failed to disable SELinux on host [%s]",
+                         host.sh_hostname)
+            return -1
+        return 0
+
+    def _cih_disable_firewalld(self, log):
+        """
+        Disable the firewalld on the host
+        """
+        host = self.cih_host
+        log.cl_info("disabling firewalld on host [%s]",
+                    host.sh_hostname)
+        service_name = "firewalld"
+        ret = host.sh_service_stop(log, service_name)
+        if ret:
+            log.cl_error("failed to stop service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+
+        ret = host.sh_service_disable(log, service_name)
+        if ret:
+            log.cl_error("failed to disable service [%s] on host [%s]",
+                         service_name, host.sh_hostname)
+            return -1
+        return 0
+
+    def cih_packages_install(self, log, package_names):
+        """
+        Install packages on the host.
+        """
+        cluster = self.cih_cluster
+        workspace = cluster.cic_workspace
+        repo_config_fpath = cluster.cicr_repo_config_fpath
+        host = self.cih_host
+        hostname = host.sh_hostname
+        if not self.cih_is_local:
+            command = ("mkdir -p %s" % (workspace))
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+
+            ret = host.sh_send_file(log, repo_config_fpath, workspace)
+            if ret:
+                log.cl_error("failed to send file [%s] on local host [%s] to "
+                             "directory [%s] on host [%s]",
+                             repo_config_fpath, socket.gethostname(), workspace,
+                             hostname)
+                return -1
+
+        ret = _yum_repo_install(log, host, repo_config_fpath,
+                                package_names)
+        return ret
+
+    def _cih_uninstall_packages(self, log, package_names):
+        """
+        Uninstall RPMs from the host.
+        """
+        host = self.cih_host
+        uninstall_rpms = []
+        for rpm_name in package_names:
+            if not host.sh_has_rpm(log, rpm_name):
+                continue
+            uninstall_rpms.append(rpm_name)
+        if len(uninstall_rpms) == 0:
+            return 0
+
+        log.cl_info("uninstalling RPMs on host [%s]", host.sh_hostname)
+        command = "rpm -e"
+        for rpm_name in uninstall_rpms:
+            if not host.sh_has_rpm(log, rpm_name):
+                continue
+            command += " " + rpm_name
+
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] host [%s], "
+                         "ret = %d, stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def _cih_install_package_patterns(self, log, package_patterns):
+        """
+        Install package patterns from the ISO.
+        """
+        host = self.cih_host
+        if len(package_patterns) == 0:
+            return 0
+
+        log.cl_info("installing RPMs on host [%s]", host.sh_hostname)
+        command = "rpm -ivh --nodeps"
+        for rpm_pattern in package_patterns:
+            fpath_pattern = self.cih_packages_dir + "/" + rpm_pattern
+            command += " " + fpath_pattern
+
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status != 0:
+            log.cl_error("failed to run command [%s] host [%s], "
+                         "ret = %d, stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+
+
+class CoralInstallHostDeb(CoralInstallHost):
+    """
+    Each host that needs installation has an object of this type.
+    """
+    def _cihd_add_apt_source(self, log):
+        """
+        Add the apt source of ISO.
+        """
+        host = self.cih_host
+        coral_line = "deb file:///var/log/coral/iso/Packages/    /"
+        command = "grep coral /etc/apt/sources.list"
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status == 0:
+            lines = retval.cr_stdout.strip().splitlines()
+            if len(lines) != 1:
+                log.cl_error("unexpected line number of command [%s] on host [%s], "
+                             "stdout = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_stdout)
+                return -1
+            line = lines[0]
+            if line != coral_line:
+                log.cl_error("unexpected line [%s] of command [%s] on host [%s]",
+                             line,
+                             command,
+                             host.sh_hostname)
+                return -1
+            return 0
+
+        if retval.cr_exit_status != 1:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        command = "echo \"%s\" >> /etc/apt/sources.list" % coral_line
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def _cihd_add_apt_key(self, log):
+        """
+        Add the apt key of ISO to trusted.gpg.d
+        """
+        host = self.cih_host
+        coral_gpg_fname = "coral.gpg"
+        trusted_fpath = "/etc/apt/trusted.gpg.d/" + coral_gpg_fname
+        iso_gpg_fpath = self.cih_packages_dir + "/" + constant.CORAL_PUBLIC_KEY_FNAME
+        exists = host.sh_path_exists(log, trusted_fpath)
+        if exists < 0:
+            log.cl_error("failed to check whether file [%s] exists on host [%s]",
+                         trusted_fpath, host.sh_hostname)
+            return -1
+        if exists != 0:
+            command = "diff %s %s" % (iso_gpg_fpath, trusted_fpath)
+            retval = host.sh_run(log, command)
+            if retval.cr_exit_status == 0:
+                return 0
+            if retval.cr_exit_status != 1:
+                log.cl_error("failed to run command [%s] on host [%s], "
+                             "ret = [%d], stdout = [%s], stderr = [%s]",
+                             command,
+                             host.sh_hostname,
+                             retval.cr_exit_status,
+                             retval.cr_stdout,
+                             retval.cr_stderr)
+                return -1
+            log.cl_error("file [%s] exists but different with [%s] on host [%s]",
+                         trusted_fpath, iso_gpg_fpath, host.sh_hostname)
+            return -1
+
+        command = ("cp %s %s" % (iso_gpg_fpath, trusted_fpath))
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def cih_packages_install(self, log, package_names):
+        """
+        Install packages on the host.
+        """
+        # pylint: disable=unused-argument,no-self-use
+        host = self.cih_host
+        ret = self._cihd_add_apt_source(log)
+        if ret:
+            log.cl_error("failed to add apt source of Coral")
+            return -1
+
+        ret = self._cihd_add_apt_key(log)
+        if ret:
+            log.cl_error("failed to add apt key of Coral")
+            return -1
+
+        command = "apt update"
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        command = "apt install -y"
+        for package_name in package_names:
+            command += " " + package_name
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+    def cih_coral_packages_reinstall(self, log):
+        """
+        Reinstall Coral packages.
+        """
+        host = self.cih_host
+        command = "dpkg -i --force-depends %s/coral-*.deb" % self.cih_packages_dir
+        retval = host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+        return 0
+
+
+def cluster_host_install(log, workspace, install_host):
+    """
+    Install on a host of CoralInstallCluster
     """
     # pylint: disable=unused-argument
-    ret = installation_host.cih_install(log, repo_config_fpath)
+    ret = install_host.cih_install(log)
     if ret:
         log.cl_error("failed to install on host [%s]",
-                     installation_host.cih_host.sh_hostname)
+                     install_host.cih_host.sh_hostname)
         return -1
     return 0
 
 
-class CoralInstallationCluster():
-    # pylint: disable=too-few-public-methods,too-many-instance-attributes
+class CoralInstallCluster():
+    # pylint: disable=too-few-public-methods
     """
-    Installation cluster config.
+    Install cluster config.
     :param workspace: The workspace on local and remote host
     :param hosts: Hosts to install
     :param iso_path: ISO file path on localhost
     """
-    def __init__(self, workspace, local_host, iso_dir):
-        # A list of CoralInstallationHost
-        self.cic_installation_hosts = []
+    def __init__(self, host_type, workspace, local_host, iso_dir, distro):
+        # The distro of the cluster. The distro of all hosts in the cluster
+        # need to be the same with the local host.
+        self.cic_distro = distro
+        # Dict of CoralInstallHost. Key is hostname.
+        self.cic_host_dict = {}
+        # A list of CoralInstallHost
+        self.cic_install_hosts = []
         # The workspace on local and remote host
         self.cic_workspace = workspace
-        # The ISO dir. This dir will be sent to remote host to the same
-        # place
+        # The ISO dir. This dir will be sent to remote host to the same path.
         self.cic_iso_dir = iso_dir
-        # The generated repo config file under workspace on local host
-        self.cic_repo_config_fpath = workspace + "/coral.repo"
         # Local host to run command
         self.cic_local_host = local_host
+        # The type of CoralInstallHost
+        self.cic_host_type = host_type
 
-    def cic_add_hosts(self, hosts, pip_libs, dependent_rpms,
-                      send_fpath_dict, need_backup_fpaths,
-                      coral_reinstall=True, tsinghua_mirror=False,
+    def cic_hosts_add(self, log, hosts,
+                      pip_names=None,
+                      package_names=None,
+                      send_fpath_dict=None,
+                      fpaths_need_backup=None,
+                      coral_reinstall=True, china_mirror=False,
                       disable_selinux=True, disable_firewalld=True,
                       change_sshd_max_startups=True,
-                      config_rsyslog=True):
+                      config_rsyslog=True, send_iso_dir=True,
+                      send_relative_path_patterns=None,
+                      uninstall_package_names=None,
+                      install_iso_package_patterns=None):
         """
-        Add installation host.
+        Add hosts.
         """
+        # pylint: disable=too-many-locals
         for host in hosts:
-            is_local = host.sh_hostname == self.cic_local_host.sh_hostname
-            installation_host = CoralInstallationHost(self.cic_workspace,
-                                                      host, is_local,
-                                                      self.cic_iso_dir,
-                                                      pip_libs, dependent_rpms,
-                                                      send_fpath_dict,
-                                                      need_backup_fpaths,
-                                                      coral_reinstall=coral_reinstall,
-                                                      tsinghua_mirror=tsinghua_mirror,
-                                                      disable_selinux=disable_selinux,
-                                                      disable_firewalld=disable_firewalld,
-                                                      change_sshd_max_startups=change_sshd_max_startups,
-                                                      config_rsyslog=config_rsyslog)
-            self.cic_installation_hosts.append(installation_host)
+            install_host = self.cic_host_type(self, host,
+                                              pip_names=pip_names,
+                                              package_names=package_names,
+                                              send_fpath_dict=send_fpath_dict,
+                                              fpaths_need_backup=fpaths_need_backup,
+                                              coral_reinstall=coral_reinstall,
+                                              china_mirror=china_mirror,
+                                              disable_selinux=disable_selinux,
+                                              disable_firewalld=disable_firewalld,
+                                              change_sshd_max_startups=change_sshd_max_startups,
+                                              config_rsyslog=config_rsyslog,
+                                              send_iso_dir=send_iso_dir,
+                                              send_relative_path_patterns=send_relative_path_patterns,
+                                              uninstall_package_names=uninstall_package_names,
+                                              install_iso_package_patterns=install_iso_package_patterns)
+            if host.sh_hostname in self.cic_host_dict:
+                log.cl_erro("host [%s] already exists in cluster",
+                            host.sh_hostname)
+                return -1
+            self.cic_install_hosts.append(install_host)
+        return 0
+
+    def _cic_check_clocks(self, log):
+        """
+        Check the clocks in the cluster.
+        """
+        hosts = []
+        for install_host in self.cic_install_hosts:
+            hosts.append(install_host.cih_host)
+        hosts.append(self.cic_local_host)
+        ret = ssh_host.check_clocks_diff(log, hosts, max_diff=60)
+        if ret:
+            log.cl_error("failed to check clock difference between hosts")
+            return -1
+        return 0
 
     def cic_install(self, log, parallelism=10):
         """
-        Install RPMs, PIP libs and send config files
-        :param send_fpath_dict: key is the fpath on localhost, value is the
-        fpath on remote host.
+        Install packages, PIP libs and send files
         """
         # pylint: disable=too-many-locals
         # Prepare the local repo config file
+        ret = self._cic_check_clocks(log)
+        if ret:
+            log.cl_error("failed to check locks in the installation cluster")
+            return -1
+
+        local_host = self.cic_local_host
+        command = ("mkdir -p %s" % (self.cic_workspace))
+        retval = local_host.sh_run(log, command)
+        if retval.cr_exit_status:
+            log.cl_error("failed to run command [%s] on host [%s], "
+                         "ret = [%d], stdout = [%s], stderr = [%s]",
+                         command,
+                         local_host.sh_hostname,
+                         retval.cr_exit_status,
+                         retval.cr_stdout,
+                         retval.cr_stderr)
+            return -1
+
+        args_array = []
+        thread_ids = []
+        for install_host in self.cic_install_hosts:
+            args = (install_host,)
+            args_array.append(args)
+            thread_id = "host_install_%s" % install_host.cih_host.sh_hostname
+            thread_ids.append(thread_id)
+
+        parallel_execute = parallel.ParallelExecute(self.cic_workspace,
+                                                    "install",
+                                                    cluster_host_install,
+                                                    args_array,
+                                                    thread_ids=thread_ids)
+        ret = parallel_execute.pe_run(log, parallelism=parallelism)
+        if ret:
+            log.cl_error("failed to install hosts in parallel")
+            return -1
+        return 0
+
+
+class CoralInstallClusterRPM(CoralInstallCluster):
+    # pylint: disable=too-few-public-methods
+    """
+    The installation cluster that uses RPM as package mangement.
+    """
+    def __init__(self, workspace, local_host, iso_dir, distro):
+        super().__init__(CoralInstallHostRPM, workspace, local_host, iso_dir,
+                         distro)
+
+        # The generated repo config file under workspace on local host
+        self.cicr_repo_config_fpath = workspace + "/coral.repo"
+
+    def cic_install(self, log, parallelism=10):
+        """
+        Install packages, PIP libs and send files
+        """
+        # pylint: disable=too-many-locals
         local_host = self.cic_local_host
         command = ("mkdir -p %s" % (self.cic_workspace))
         retval = local_host.sh_run(log, command)
@@ -936,539 +1440,184 @@ class CoralInstallationCluster():
             return -1
 
         packages_dir = self.cic_iso_dir + "/" + constant.BUILD_PACKAGES
-        generate_repo_file(self.cic_repo_config_fpath, packages_dir,
-                           "Coral")
+        _generate_repo_file(self.cicr_repo_config_fpath, packages_dir,
+                            "Coral")
 
-        args_array = []
-        thread_ids = []
-        hosts = []
-        for installation_host in self.cic_installation_hosts:
-            args = (installation_host, self.cic_repo_config_fpath)
-            args_array.append(args)
-            thread_id = "host_install_%s" % installation_host.cih_host.sh_hostname
-            thread_ids.append(thread_id)
-            hosts.append(installation_host.cih_host)
-
-        ret = ssh_host.check_clocks_diff(log, hosts, max_diff=60)
-        if ret:
-            log.cl_error("failed to check clock difference between hosts")
-            return -1
-
-        parallel_execute = parallel.ParallelExecute(self.cic_workspace,
-                                                    "install",
-                                                    cluster_host_install,
-                                                    args_array,
-                                                    thread_ids=thread_ids)
-        ret = parallel_execute.pe_run(log, parallelism=parallelism)
-        if ret:
-            log.cl_error("failed to install hosts in parallel")
-            return -1
-        return 0
+        ret = super().cic_install(log, parallelism=parallelism)
+        return ret
 
 
-def yum_install_rpm_from_internet(log, host, rpms, tsinghua_mirror=False):
+class CoralInstallClusterDeb(CoralInstallCluster):
     """
-    Install RPMs by downloading it from Internet.
+    The installation cluster that uses RPM as package mangement.
     """
-    # pylint: disable=too-many-branches
-    if tsinghua_mirror:
-        ret = yum_replace_to_tsinghua(log, host)
-        if ret:
-            log.cl_error("failed to replace YUM mirrors to Tsinghua "
-                         "University on host [%s]", host.sh_hostname)
-            return -1
-
-    missing_rpms = []
-    for rpm in rpms:
-        ret = host.sh_rpm_query(log, rpm)
-        if ret != 0:
-            missing_rpms.append(rpm)
-
-    if len(missing_rpms) == 0:
-        return 0
-
-    # Cleanup, otherwise, might hit problem like:
-    #
-    # https://mirrors.xxx/epel/7/x86_64/repodata/xxx-filelists.sqlite.bz2:
-    # [Errno 14] HTTPS Error 404 - Not Found
-    # Trying other mirror.
-    #
-    cmds = ["yum clean all",
-            "rpm --rebuilddb"]
-    for command in cmds:
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-    command = "yum install -y"
-    for rpm in rpms:
-        command += " %s" % rpm
-
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
-    retval = host.sh_watched_run(log, command, None, None,
-                                 return_stdout=False,
-                                 return_stderr=False)
-    if retval.cr_exit_status != 0:
-        log.cl_error("failed to run command [%s] on host [%s]",
-                     command, host.sh_hostname)
-        return -1
-
-    new_missing_rpms = []
-    for rpm in rpms:
-        ret = host.sh_rpm_query(log, rpm)
-        if ret != 0:
-            new_missing_rpms.append(rpm)
-    if len(new_missing_rpms) != 0:
-        if "epel-release" in new_missing_rpms:
-            log.cl_error("rpms %s are missing after yum install",
-                         new_missing_rpms)
-            return -1
-        if "epel-release" in missing_rpms:
-            # Replace the yum too if installed epel-release. So pass down
-            # tsinghua_yum.
-            ret = yum_install_rpm_from_internet(log, host, new_missing_rpms,
-                                                tsinghua_mirror=tsinghua_mirror)
-            if ret:
-                log.cl_error("failed to install RPMs after installing epel-release")
-                return -1
-
-            new_missing_rpms = []
-            for rpm in rpms:
-                ret = host.sh_rpm_query(log, rpm)
-                if ret != 0:
-                    new_missing_rpms.append(rpm)
-            if len(new_missing_rpms) != 0:
-                log.cl_error("rpms %s are still missing after yum install "
-                             "with new EPEL",
-                             new_missing_rpms)
-                return -1
-        else:
-            log.cl_error("rpms %s are still missing after yum install with EPEL",
-                         new_missing_rpms)
-            return -1
-    return 0
+    # pylint: disable=too-few-public-methods
+    def __init__(self, workspace, local_host, iso_dir, distro):
+        # pylint: disable=useless-super-delegation
+        super().__init__(CoralInstallHostDeb, workspace, local_host, iso_dir,
+                         distro)
 
 
-def yum_replace_to_tsinghua(log, host):
+def get_cluster(log, workspace, local_host, iso_dir):
     """
-    Replace the YUM to Tsinghua University
+    Return CoralInstallCluster
     """
-    log.cl_info("replacing CentOS and epel YUM to use mirrors from "
-                "Tsinghua University")
-    config_fpath = "/etc/yum.repos.d/epel.repo"
-    ret = host.sh_path_exists(log, config_fpath)
-    if ret < 0:
-        log.cl_error("failed to check whether file [%s] exists on host [%s]",
-                     config_fpath, host.sh_hostname)
-        return -1
+    distro = local_host.sh_distro(log)
+    if distro is None:
+        log.cl_error("failed to get distro of host [%s]",
+                     local_host.sh_hostname)
+        return None
+    distro_type = os_distro.distro2type(log, distro)
+    if distro_type is None:
+        log.cl_error("unsupported distro [%s] of host [%s]",
+                     distro, local_host.sh_hostname)
+        return None
 
+    if distro_type == os_distro.DISTRO_TYPE_RHEL:
+        return CoralInstallClusterRPM(workspace, local_host, iso_dir, distro)
+    if distro_type == os_distro.DISTRO_TYPE_UBUNTU:
+        return CoralInstallClusterDeb(workspace, local_host, iso_dir, distro)
+    log.cl_error("unsupported distro [%s] of host [%s]",
+                 distro, local_host.sh_hostname)
+    return None
+
+
+
+def install_package_and_pip(log, host, packages, pip_packages):
+    """
+    Install the dependent RPMs and pip packages
+    """
+    pip_package = "python3-pip"
+    if len(pip_packages) != 0 and pip_package not in packages:
+        packages.append(pip_package)
+
+    ret = host.sh_install_packages(log, packages)
     if ret:
-        # New version of epel-release changes all download.fedoraproject.org to
-        # download.example
-        command = """sed -e 's!^metalink=!#metalink=!g' \
-    -e 's!^#baseurl=!baseurl=!g' \
-    -e 's!//download\.fedoraproject\.org/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
-    -e 's!//download\.example/pub!//mirrors.tuna.tsinghua.edu.cn!g' \
-    -e 's!http://mirrors\.tuna!https://mirrors.tuna!g' \
-    -i /etc/yum.repos.d/epel*.repo"""
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-
-    # Centos-base might be using different name, skip if so.
-    path_pattern = "/etc/yum.repos.d/CentOS-*.repo"
-    fnames = host.sh_resolve_path(log, path_pattern, quiet=True)
-    if fnames is None:
-        log.cl_error("failed to get fnames of pattern [%s] of host [%s]",
-                     path_pattern, host.sh_hostname)
+        log.cl_error("failed to install packages [%s]",
+                     utils.list2string(packages))
         return -1
 
-    if len(fnames) > 0:
-        command = """sed -e 's|^mirrorlist=|#mirrorlist=|g' \
-    -e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' \
-    -i.bak \
-    /etc/yum.repos.d/CentOS-*.repo
-    """
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-    return 0
-
-
-def ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro):
-    """
-    Replace apt mirror.
-    """
-    # See https://mirror.tuna.tsinghua.edu.cn/help/ubuntu/ for more information.
-    source_list = "/etc/apt/sources.list"
-    command = "grep tsinghua %s" % source_list
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status == 0:
+    if len(pip_packages) == 0:
         return 0
 
-    if retval.cr_exit_status != 1 or retval.cr_stdout != "":
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
-    command = "echo '# Configured by Coral' > %s" % source_list
-    retval = host.sh_run(log, command)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
-        return -1
-
-    if distro == os_distro.DISTRO_UBUNTU2004:
-        lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal main restricted universe multiverse",
-                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-updates main restricted universe multiverse",
-                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-backports main restricted universe multiverse",
-                 "deb http://security.ubuntu.com/ubuntu/ focal-security main restricted universe multiverse"]
-    elif distro == os_distro.DISTRO_UBUNTU2204:
-        lines = ["deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse",
-                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse",
-                 "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse",
-                 "deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse"]
-    else:
-        log.cl_error("unsupported OS distro [%s]", distro)
-        return -1
-    for line in lines:
-        command = "sed -i '$a\%s' %s" % (line, source_list)
-        retval = host.sh_run(log, command)
-        if retval.cr_exit_status:
-            log.cl_error("failed to run command [%s] on host [%s], "
-                         "ret = [%d], stdout = [%s], stderr = [%s]",
-                         command,
-                         host.sh_hostname,
-                         retval.cr_exit_status,
-                         retval.cr_stdout,
-                         retval.cr_stderr)
-            return -1
-    return 0
-
-
-def ubuntu_install_deb_from_internet(log, host, distro, debs,
-                                     tsinghua_mirror=False):
-    """
-    Install debs by downloading it from Internet.
-    """
-    # pylint: disable=too-many-branches
-    if tsinghua_mirror:
-        ret = ubuntu_apt_mirror_replace_to_tsinghua(log, host, distro)
-        if ret:
-            log.cl_error("failed to replace apt mirror to Tsinghua "
-                         "University on host [%s]", host.sh_hostname)
-            return -1
-
-    if len(debs) == 0:
-        return 0
-
-    command = "apt install -y"
-    for deb in debs:
-        command += " " + deb
-
-    retval = host.sh_run(log, command, timeout=None)
-    if retval.cr_exit_status:
-        log.cl_error("failed to run command [%s] on host [%s], "
-                     "ret = [%d], stdout = [%s], stderr = [%s]",
-                     command,
-                     host.sh_hostname,
-                     retval.cr_exit_status,
-                     retval.cr_stdout,
-                     retval.cr_stderr)
+    ret = _install_pip3_packages(log, host, pip_packages)
+    if ret:
+        log.cl_error("failed to install pip packages [%s]",
+                     utils.list2string(pip_packages))
         return -1
     return 0
 
 
-def bootstrap_from_internet(log, host, packages, pip_packages, pip_dir,
-                            tsinghua_mirror=False):
+def china_mirrors_configure(log, host, workspace):
     """
-    Install the dependent RPMs and pip packages from Internet
+    Configure yum/apt/pip mirrors.
     """
     distro = host.sh_distro(log)
     if distro is None:
-        log.cl_error("failed to get distro of host [%s]",
+        log.cl_error("failed to get OS distro on host [%s]",
                      host.sh_hostname)
         return -1
 
-    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
-        ret = yum_install_rpm_from_internet(log, host, packages,
-                                            tsinghua_mirror=tsinghua_mirror)
-    elif distro in (os_distro.DISTRO_UBUNTU2204,
-                    os_distro.DISTRO_UBUNTU2004):
-        ret = ubuntu_install_deb_from_internet(log, host, distro, packages,
-                                               tsinghua_mirror=tsinghua_mirror)
-    else:
-        log.cl_error("unsupported distro [%s] of host [%s]",
+    if distro not in (os_distro.DISTRO_RHEL7,
+                      os_distro.DISTRO_RHEL8,
+                      os_distro.DISTRO_UBUNTU2004,
+                      os_distro.DISTRO_SHORT_UBUNTU2204):
+        log.cl_error("unsupported OS distro [%s] on host [%s]",
                      distro, host.sh_hostname)
         return -1
-    if ret:
-        log.cl_error("failed to install missing packages on host [%s]",
-                     host.sh_hostname)
+
+    os_distributor = host.sh_os_distributor(log)
+    if os_distributor is None:
+        log.cl_error("failed to get OS distributor")
         return -1
 
-    if pip_dir is not None:
-        ret = install_pip3_packages_from_cache(log, host, pip_packages,
-                                               pip_dir, quiet=True)
-        if ret == 0:
-            return 0
-
-        # Download if failed to install from cache
-        ret = download_pip3_packages(log, host, pip_dir, pip_packages,
-                                     tsinghua_mirror=tsinghua_mirror)
+    if distro in (os_distro.DISTRO_RHEL7,
+                  os_distro.DISTRO_RHEL8):
+        ret = yum_mirror.yum_mirror_configure(log, host)
         if ret:
-            log.cl_error("failed to download pip packages on host [%s]",
+            log.cl_error("failed to configure local mirror of yum on "
+                         "host [%s]",
                          host.sh_hostname)
             return -1
 
-    ret = install_pip3_packages_from_cache(log, host, pip_packages,
-                                           pip_dir)
+    if distro in (os_distro.DISTRO_UBUNTU2004,
+                  os_distro.DISTRO_SHORT_UBUNTU2204):
+        ret = apt_mirror.apt_mirror_configure(log, host)
+        if ret:
+            log.cl_error("failed to configure local mirror of apt on host [%s]",
+                         host.sh_hostname)
+            return -1
+
+    if distro == os_distro.DISTRO_RHEL8:
+        ret = enable_yum_repo_powertools(log, host)
+        if ret:
+            log.cl_error("failed to enable yum repo of powertools on host [%s]",
+                         host.sh_hostname)
+            return -1
+
+    ret = pip_mirror.pip_mirror_configure(log, host, workspace)
     if ret:
-        log.cl_error("failed to install pip3 packages %s on "
-                     "host [%s]",
-                     pip_packages, host.sh_hostname)
+        log.cl_error("failed to configure local mirror of pip on host [%s]",
+                     host.sh_hostname)
         return -1
     return 0
 
 
-def command_missing_packages_rhel8():
+def check_yum_repo_powertools(log, host, distro):
     """
-    Add the missing RPMs and pip packages for RHEL9
+    Check whether the host has powertools repo.
+    Only OS distro rhel8 needs this.
     """
-    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
-    # pylint: disable=unused-variable
-    missing_rpms = []
-    missing_pips = []
-    # This RPM will improve the interactivity
-    list_add(missing_rpms, "bash-completion")
-    try:
-        import yaml
-    except ImportError:
-        list_add(missing_rpms, "python3-pyyaml")
-
-    try:
-        import dateutil
-    except ImportError:
-        list_add(missing_rpms, "python3-dateutil")
-        list_add(missing_rpms, "epel-release")
-
-    try:
-        import prettytable
-    except ImportError:
-        list_add(missing_rpms, "python3-prettytable")
-
-    try:
-        import toml
-    except ImportError:
-        list_add(missing_rpms, "python3-toml")
-        list_add(missing_rpms, "epel-release")
-
-    try:
-        import psutil
-    except ImportError:
-        list_add(missing_rpms, "python3-psutil")
-
-    try:
-        import fire
-    except ImportError:
-        list_add(missing_rpms, "python3-pip")
-        list_add(missing_pips, "fire")
-
-    try:
-        import filelock
-    except ImportError:
-        list_add(missing_rpms, "python3-filelock")
-    return missing_rpms, missing_pips
-
-
-def list_add(alist, name):
-    """
-    If not exist, append.
-    """
-    if name not in alist:
-        alist.append(name)
-
-
-def command_missing_packages_rhel7():
-    """
-    Add the missing RPMs and pip packages for RHEL7
-    """
-    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
-    # pylint: disable=unused-variable
-    missing_rpms = []
-    missing_pips = []
-    # This RPM will improve the interactivity
-    list_add(missing_rpms, "bash-completion")
-    try:
-        import yaml
-    except ImportError:
-        list_add(missing_pips, "PyYAML")
-
-    try:
-        import dateutil
-    except ImportError:
-        list_add(missing_rpms, "python36-dateutil")
-        list_add(missing_rpms, "epel-release")
-
-    try:
-        import prettytable
-    except ImportError:
-        list_add(missing_rpms, "python36-prettytable")
-        list_add(missing_rpms, "epel-release")
-
-    try:
-        import toml
-    except ImportError:
-        list_add(missing_rpms, "epel-release")
-        list_add(missing_pips, "toml")
-
-    try:
-        import psutil
-    except ImportError:
-        list_add(missing_rpms, "python36-psutil")
-        list_add(missing_rpms, "epel-release")
-
-    try:
-        import fire
-    except ImportError:
-        list_add(missing_rpms, "python3-pip")
-        list_add(missing_pips, "fire")
-
-    try:
-        import filelock
-    except ImportError:
-        list_add(missing_pips, "filelock")
-    return missing_rpms, missing_pips
-
-
-def command_missing_packages_ubuntu():
-    """
-    Add the missing debs and pip packages for Ubuntu (20.04/22.04)
-    """
-    # pylint: disable=unused-import,bad-option-value,import-outside-toplevel
-    # pylint: disable=unused-variable
-    missing_debs = []
-    try:
-        import fire
-    except ImportError:
-        missing_debs.append("python3-fire")
-
-    try:
-        import prettytable
-    except ImportError:
-        missing_debs.append("python3-prettytable")
-
-    try:
-        import toml
-    except ImportError:
-        missing_debs.append("python3-toml")
-
-    try:
-        import dateutil
-    except ImportError:
-        missing_debs.append("python3-dateutil")
-
-    try:
-        import filelock
-    except ImportError:
-        missing_debs.append("python3-filelock")
-
-    try:
-        import psutil
-    except ImportError:
-        missing_debs.append("python3-psutil")
-
-    missing_pips = []
-    return missing_debs, missing_pips
-
-
-def command_missing_packages(distro):
-    """
-    Add the missing RPMs/debs and pip packages
-    """
-    if distro == os_distro.DISTRO_RHEL7:
-        return command_missing_packages_rhel7()
-    if distro == os_distro.DISTRO_RHEL8:
-        return command_missing_packages_rhel8()
-    if distro in (os_distro.DISTRO_UBUNTU2004,
-                  os_distro.DISTRO_UBUNTU2204):
-        return command_missing_packages_ubuntu()
-    return None, None
-
-
-def install_packages_from_internet(log, host, packages, tsinghua_mirror=False):
-    """
-    Install packages from Internet.
-    """
-    distro = host.sh_distro(log)
-    if distro in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
-        return yum_install_rpm_from_internet(log, host, packages,
-                                             tsinghua_mirror=tsinghua_mirror)
-    if distro in (os_distro.DISTRO_UBUNTU2004, os_distro.DISTRO_UBUNTU2204):
-        return ubuntu_install_deb_from_internet(log, host, distro, packages,
-                                                tsinghua_mirror=tsinghua_mirror)
-    log.cl_error("unsupported distro [%s] of host [%s]",
-                 distro, host.sh_hostname)
-    return -1
-
-
-def download_pip3_packages(log, host, pip_dir, pip_packages,
-                           tsinghua_mirror=False):
-    """
-    Download pip3 packages
-    """
-    if len(pip_packages) == 0:
+    if distro != os_distro.DISTRO_RHEL8:
         return 0
-    if tsinghua_mirror:
-        message = " from Tsinghua University mirror"
-    else:
-        message = ""
-    log.cl_info("downloading pip3 packages %s to dir [%s] on host [%s]%s",
-                pip_packages, pip_dir, host.sh_hostname, message)
-
-    ret = install_packages_from_internet(log, host, ["python3-pip"],
-                                         tsinghua_mirror=tsinghua_mirror)
-    if ret:
-        log.cl_error("failed to install [python3-pip] package")
+    repo_ids = host.sh_yum_repo_ids(log)
+    if repo_ids is None:
+        log.cl_error("failed to get the yum repo IDs on host [%s]",
+                     host.sh_hostname)
+        return -1
+    if "powertools" not in repo_ids:
+        log.cl_error("yum repo [PowerTool] is not enabled on host [%s]",
+                     host.sh_hostname)
+        # you might want to have line [enabled=1] in file
+        # [/etc/yum.repos.d/*-PowerTools.repo]
         return -1
 
-    command = ("mkdir -p %s && cd %s && pip3 download" % (pip_dir, pip_dir))
-    if tsinghua_mirror:
-        command += " -i https://pypi.tuna.tsinghua.edu.cn/simple"
-    for pip_package in pip_packages:
-        command += " " + pip_package
-    retval = host.sh_run(log, command, timeout=None)
+    return 0
+
+def enable_yum_repo_powertools(log, host):
+    """
+    Enable the powertools repo.
+    """
+    distro = host.sh_distro(log)
+    if distro is None:
+        log.cl_error("failed to detect OS distro on host [%s]",
+                     host.sh_hostname)
+        return -1
+
+    if distro != os_distro.DISTRO_RHEL8:
+        log.cl_error("repo powertools is not supported on distro [%s]")
+        return -1
+
+    repo_pattern = "/etc/yum.repos.d/*-PowerTools.repo"
+    fpaths = host.sh_resolve_path(log, repo_pattern)
+    if fpaths is None:
+        log.cl_error("failed to find repo [%s] on host [%s]",
+                     repo_pattern, host.sh_hostname)
+        return -1
+    if len(fpaths) == 0:
+        log.cl_error("no file found with pattern [%s] on host [%s]",
+                     repo_pattern, host.sh_hostname)
+        return -1
+
+    if len(fpaths) > 1:
+        log.cl_error("multiple files found with pattern [%s] on host [%s]",
+                     repo_pattern, host.sh_hostname)
+        return -1
+
+    repo_fpath = fpaths[0]
+
+    command = ("sed -i 's|^enabled=0|enabled=1|' %s" % repo_fpath)
+    retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
                      "ret = [%d], stdout = [%s], stderr = [%s]",
@@ -1478,36 +1627,50 @@ def download_pip3_packages(log, host, pip_dir, pip_packages,
                      retval.cr_stdout,
                      retval.cr_stderr)
         return -1
+
+    return check_yum_repo_powertools(log, host, distro)
+
+
+def check_yum_repo_base(log, host, distro):
+    """
+    Check whether the host has base repo.
+    Only OS distro rhel8 needs this.
+    """
+    if distro not in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
+        return 0
+    if distro == os_distro.DISTRO_RHEL7:
+        repo_name = "baseos"
+    else:
+        repo_name = "base"
+    repo_ids = host.sh_yum_repo_ids(log)
+    if repo_ids is None:
+        log.cl_error("failed to get the yum repo IDs on host [%s]",
+                     host.sh_hostname)
+        return -1
+    if repo_name not in repo_ids:
+        log.cl_error("yum repo [%s] is not enabled on host [%s]",
+                     repo_name, host.sh_hostname)
+        return -1
+
     return 0
 
 
-def install_lustre_and_coral(log, workspace, local_host, iso_dir, host,
-                             extra_rpms, lazy_prepare=True,
-                             tsinghua_mirror=False):
+def check_yum_repo_epel(log, host, distro):
     """
-    Install Lustre and Coral packages on a host
+    Check whether the host has epel repo.
+    Only OS distro rhel8 needs this.
     """
-    install_cluster = CoralInstallationCluster(workspace, local_host,
-                                               iso_dir)
-    send_fpath_dict = {}
-    need_backup_fpaths = []
-    pip_libs = []
-    rpms = extra_rpms + constant.CORAL_DEPENDENT_RPMS
-    install_cluster.cic_add_hosts([host], pip_libs, rpms,
-                                  send_fpath_dict,
-                                  need_backup_fpaths,
-                                  coral_reinstall=True,
-                                  tsinghua_mirror=tsinghua_mirror)
-    ret = install_cluster.cic_install(log)
-    if ret:
-        log.cl_error("failed to install dependent RPMs of Coral on host [%s]",
+    if distro not in (os_distro.DISTRO_RHEL7, os_distro.DISTRO_RHEL8):
+        return 0
+    repo_ids = host.sh_yum_repo_ids(log)
+    if repo_ids is None:
+        log.cl_error("failed to get the yum repo IDs on host [%s]",
                      host.sh_hostname)
+        return -1
+    if "epel" not in repo_ids:
+        log.cl_error("yum repo [epel] is not enabled on host [%s]",
+                     host.sh_hostname)
+        log.cl_error("you might want to run command [dnf install -y epel-release]")
         return -1
 
-    ret = host.lsh_lustre_prepare(log, workspace,
-                                  lazy_prepare=lazy_prepare)
-    if ret:
-        log.cl_error("failed to prepare host [%s] to run Lustre service",
-                     host.sh_hostname)
-        return -1
     return 0

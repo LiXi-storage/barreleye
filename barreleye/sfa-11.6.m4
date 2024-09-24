@@ -47,7 +47,7 @@ FIELD($1 + 1, 3, controller0_Unmap_Blocks, number, ${extra_tag:extrahost}, $2_un
 FIELD($1 + 1, 4, controller1_Unmap_Count, number, ${extra_tag:extrahost}, $2_unmap_${content:disk_index}, controller1, derive, count, $2_unmap, type=count controller=1 disk_index=${content:disk_index}, 0)
 FIELD($1 + 1, 5, controller1_Unmap_Blocks, number, ${extra_tag:extrahost}, $2_unmap_${content:disk_index}, controller1, derive, blocks, $2_unmap, type=blocks controller=1 disk_index=${content:disk_index}, 0)', $3)')dnl
 dnl
-HEAD(SFA-0.1)
+HEAD(SFA-11.6)
 <definition>
 	<version>11.0</version>
 	<entry>

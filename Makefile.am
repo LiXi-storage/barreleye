@@ -1,9 +1,13 @@
 SUBDIRS = pybuild \
+	example_configs \
 	@CCLOWNF_SUBDIR@ \
+	@CREAF_SUBDIR@ \
 	@GOCORAL_SUBDIR@
 DIST_SUBDIRS = pybuild \
 	cclownf \
 	ccoral \
+	creaf \
+	example_configs \
 	gocoral
 
 if ENABLE_BARRELE
@@ -27,28 +31,33 @@ ACLOCAL_AMFLAGS = ${ALOCAL_FLAGS}
 
 PYTHON_COMMANDS = \
 	barrele \
+	cbuild \
 	clownf \
-	coral
+	reaf
 
 EXTRA_DIST = \
 	$(PYTHON_COMMANDS) \
 	.pylintrc \
 	coral.spec \
+	coral_reaf/lustre_version_definitions \
 	detect-distro.sh \
 	doc \
-	example_configs/barreleye.conf.example \
-	example_configs/clownfish.conf.example \
+	example_configs/barreleye.conf \
+	example_configs/clownfish.conf \
 	gocoral/* \
+	lustre_releases/*/lustre_release_info.yaml \
+	e2fsprogs_releases/*/e2fsprogs_release_info.yaml \
 	man/* \
 	pybarrele/*.py \
 	pybuild/*.py \
 	pyclownf/*.py \
 	pycoral/*.py \
+	pyreaf/*.py \
 	systemd/* \
 	version
 
 doc.checked: pybuild/build_doc.py
-	PYTHONPATH=$(PIP3_PACKAGE_PATH) ./coral doc check || exit 1; \
+	PYTHONPATH=$(PIP3_PACKAGE_PATH) ./cbuild doc check || exit 1; \
 	touch $@
 
 CHECKS = doc.checked
@@ -57,7 +66,6 @@ clean-local:
 	rm -f $(CHECKS)
 	rm -fr ISO
 	rm -f coral-*.iso
-	rm -f coral-*_SHA256SUM
 	rm -fr dist
 	rm -fr build
 	rm -f coral-*.tar.bz2
@@ -92,6 +100,19 @@ else
 rpmbuild_opt += --without clownf
 endif
 
+if ENABLE_REAF
+rpmbuild_opt += --with reaf
+CORAL_PACKAGES += reaf
+else
+rpmbuild_opt += --without reaf
+endif
+
+if ENABLE_CREAF
+rpmbuild_opt += --with creaf
+else
+rpmbuild_opt += --without creaf
+endif
+
 
 EXES =
 PYINSTALLER_CMD=PYTHONPATH=$(PIP3_PACKAGE_PATH) pyinstaller -F --clean
@@ -109,6 +130,13 @@ EXES += clownf
 dist/clownf:
 	mkdir -p dist
 	$(PYINSTALLER_CMD) clownf
+endif
+
+if ENABLE_REAF
+EXES += reaf
+dist/reaf:
+	mkdir -p dist
+	$(PYINSTALLER_CMD) reaf
 endif
 
 
@@ -131,7 +159,7 @@ ISO_EXTRA += rpms
 endif #MAKE_RPMS
 
 if MAKE_DEBS
-debs: Makefile
+debs: Makefile $(EXE_BINS)
 	VER=$$(echo @VERSION@ | tr '_' '-'); \
 	changelog_version=$$(sed -ne '1s/^coral (\(.*\)).*$$/\1/p' debian/changelog); \
 	if [ "$$changelog_version" != "$$VER" ]; then \
@@ -156,9 +184,8 @@ endif #MAKE_DEBS
 coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA)
 	rm $(ISO_PATH) -fr
 	rm -f coral-*.iso
-	rm -f coral-*_SHA256SUM
 	cp -a $(ISO_CACHE_PATH) $(ISO_PATH)
-	./coral release_info save $(DISTRO_SHORT) $(target_cpu) coral_release_info.yaml
+	./cbuild release_info save $(DISTRO_SHORT) $(target_cpu) coral_release_info.yaml
 	cp coral_release_info.yaml $(ISO_PATH)
 	mkdir -p $(PACKAGE_PATH)
 	if [ "$(DISTRO_SHORT)" = "ubuntu2004" -o "$(DISTRO_SHORT)" = "ubuntu2204"  ]; then \
@@ -181,9 +208,4 @@ coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso: $(ISO_EXTRA)
 	fi
 	mkisofs -joliet-long -R -o coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso $(ISO_PATH)
 
-coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso
-	sha256sum coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso \
-		> coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM
-
-iso: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso \
-	coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu)_SHA256SUM
+iso: coral-$(PACKAGE_VERSION).$(DISTRO_SHORT).$(target_cpu).iso

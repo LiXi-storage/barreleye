@@ -17,17 +17,17 @@ def download_consul(log, host, iso_cache, target_cpu):
     Download Consul
     Return package_basename. Return None on error.
     """
-    log.cl_info("downloading Consul")
     if target_cpu == "x86_64":
         url = CONSUL_URL_X86_64
         expected_sha1sum = CONSUL_SHA1SUM_X86_64
     else:
-        log.cl_error("unsupported target CPU [%s]", target_cpu)
+        log.cl_error("target CPU [%s] is not supported by Consul package", target_cpu)
         return None
 
     package_basename = os.path.basename(url)
     fpath = iso_cache + "/" + package_basename
-    ret = host.sh_download_file(log, url, fpath, expected_sha1sum)
+    ret = host.sh_download_file(log, url, fpath,
+                                expected_checksum=expected_sha1sum)
     if ret:
         log.cl_error("failed to download Consul zip file")
         return None

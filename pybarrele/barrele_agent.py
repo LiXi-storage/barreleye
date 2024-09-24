@@ -3,11 +3,10 @@ Library for Barreleye agent.
 Barreleye is a performance monitoring system for Lustre.
 """
 import json
-from http import HTTPStatus
 from pycoral import utils
-from pycoral import lustre_version
 from pycoral import os_distro
 from pybarrele import barrele_collectd
+from pybarrele import barrele_constant
 
 
 class BarreleAgent():
@@ -36,7 +35,7 @@ class BarreleAgent():
         # Lustre version on this host.
         self.bea_lustre_version = None
         # Collectd RPMs needed to be installed in this agent.
-        self.bea_needed_collectd_rpm_types = \
+        self.bea_needed_collectd_package_types = \
             [barrele_collectd.LIBCOLLECTDCLIENT_TYPE_NAME,
              barrele_collectd.COLLECTD_TYPE_NAME]
         # The last timestamp when a measurement has been found to be updated.
@@ -45,6 +44,8 @@ class BarreleAgent():
         self.bea_collectd_config_for_test = None
         # Collectd config for production. Type: CollectdConfig
         self.bea_collectd_config_for_production = None
+        # BarreleInstance
+        self.bea_instance = None
 
     def _bea_check_connection_with_server(self, log):
         # The client might has problem to access Barreyele server, find the
@@ -130,7 +131,7 @@ class BarreleAgent():
             log.cl_info("Lustre RPM is not installed on host [%s], "
                         "using default [%s]",
                         self.bea_host.sh_hostname,
-                        lustre_fallback_version.lv_name)
+                        lustre_fallback_version.lv_version_name)
             self.bea_lustre_version = lustre_fallback_version
             return 0
         if retval.cr_exit_status:
@@ -147,23 +148,26 @@ class BarreleAgent():
         for rpm_name in rpm_names:
             rpm_fnames.append(rpm_name + ".rpm")
 
-        version, _ = lustre_version.match_lustre_version_from_rpms(log,
-                                                                   rpm_fnames,
-                                                                   skip_kernel=True,
-                                                                   skip_test=True)
+        instance = self.bea_instance
+        version_db = instance.bei_lustre_version_db
+
+        version, _ = version_db.lvd_match_version_from_rpms(log,
+                                                            rpm_fnames,
+                                                            skip_kernel=True,
+                                                            skip_test=True)
         if version is None:
-            version, _ = lustre_version.match_lustre_version_from_rpms(log,
-                                                                       rpm_fnames,
-                                                                       client=True)
+            version, _ = version_db.lvd_match_version_from_rpms(log,
+                                                                rpm_fnames,
+                                                                client=True)
             if version is None:
                 log.cl_warning("failed to match Lustre version according to RPM "
                                "names on host [%s], using default [%s]",
                                self.bea_host.sh_hostname,
-                               lustre_fallback_version.lv_name)
+                               lustre_fallback_version.lv_version_name)
                 self.bea_lustre_version = lustre_fallback_version
         if version is not None:
             log.cl_info("detected Lustre version [%s] on host [%s]",
-                        version.lv_name,
+                        version.lv_version_name,
                         self.bea_host.sh_hostname)
             self.bea_lustre_version = version
         return 0
@@ -179,7 +183,7 @@ class BarreleAgent():
             log.cl_info("Lustre deb is not installed on host [%s], "
                         "using default [%s]",
                         self.bea_host.sh_hostname,
-                        lustre_fallback_version.lv_name)
+                        lustre_fallback_version.lv_version_name)
             self.bea_lustre_version = lustre_fallback_version
             return 0
         if retval.cr_exit_status:
@@ -215,14 +219,16 @@ class BarreleAgent():
             return -1
 
         version = fields[1]
-        lversion = lustre_version.match_lustre_version_from_deb(log, version)
+        instance = self.bea_instance
+        version_db = instance.bei_lustre_version_db
+        lversion = version_db.lvd_match_version_from_deb(log, version)
         if lversion is None:
             log.cl_error("failed to detect Lustre version on host [%s]",
                          self.bea_host.sh_hostname)
             return -1
 
         log.cl_info("Lustre version [%s] detected on host [%s]",
-                    lversion.lv_name,
+                    lversion.lv_version_name,
                     self.bea_host.sh_hostname)
         self.bea_lustre_version = lversion
         return 0
@@ -243,18 +249,19 @@ class BarreleAgent():
                      distro, host.sh_hostname)
         return -1
 
-    def _bea_generate_collectd_config(self, log, barreleye_instance,
+    def _bea_generate_collectd_config(self, log,
                                       collectd_test=False):
         """
         Generate Collectd config
         """
+        instance = self.bea_instance
         if collectd_test:
             interval = barrele_collectd.COLLECTD_INTERVAL_TEST
         else:
-            interval = barreleye_instance.bei_collect_interval
+            interval = instance.bei_collect_interval
         collectd_config = \
             barrele_collectd.CollectdConfig(self, interval,
-                                            barreleye_instance.bei_jobstat_pattern)
+                                            instance.bei_jobstat_pattern)
         if (self.bea_enable_lustre_oss or self.bea_enable_lustre_mds or
                 self.bea_enable_lustre_client):
             ret = collectd_config.cdc_plugin_lustre(log,
@@ -262,8 +269,8 @@ class BarreleAgent():
                                                     enable_lustre_oss=self.bea_enable_lustre_oss,
                                                     enable_lustre_mds=self.bea_enable_lustre_mds,
                                                     enable_lustre_client=self.bea_enable_lustre_client,
-                                                    enable_lustre_exp_ost=barreleye_instance.bei_enable_lustre_exp_ost,
-                                                    enable_lustre_exp_mdt=barreleye_instance.bei_enable_lustre_exp_mdt)
+                                                    enable_lustre_exp_ost=instance.bei_enable_lustre_exp_ost,
+                                                    enable_lustre_exp_mdt=instance.bei_enable_lustre_exp_mdt)
             if ret:
                 log.cl_error("failed to config Lustre plugin of Collectd")
                 return None
@@ -272,10 +279,11 @@ class BarreleAgent():
             collectd_config.cdc_plugin_infiniband()
         return collectd_config
 
-    def bea_generate_configs(self, log, barreleye_instance):
+    def bea_generate_configs(self, log):
         """
         Steps before configuring Barreleye agent
         """
+        instance = self.bea_instance
         ret = self._bea_sanity_check(log)
         if ret:
             log.cl_error("Barreleye agent host [%s] is insane",
@@ -283,14 +291,14 @@ class BarreleAgent():
             return -1
 
         ret = self._bea_check_lustre_version(log,
-                                             barreleye_instance.bei_lustre_fallback_version)
+                                             instance.bei_lustre_fallback_version)
         if ret:
             log.cl_error("failed to check the Lustre version on Barreleye "
                          "agent [%s]",
                          self.bea_host.sh_hostname)
             return -1
 
-        collectd_config = self._bea_generate_collectd_config(log, barreleye_instance,
+        collectd_config = self._bea_generate_collectd_config(log,
                                                              collectd_test=True)
         if collectd_config is None:
             log.cl_error("failed to generate Collectd config for test")
@@ -298,7 +306,7 @@ class BarreleAgent():
 
         self.bea_collectd_config_for_test = collectd_config
 
-        collectd_config = self._bea_generate_collectd_config(log, barreleye_instance,
+        collectd_config = self._bea_generate_collectd_config(log,
                                                              collectd_test=False)
         if collectd_config is None:
             log.cl_error("failed to generate Collectd config for production "
@@ -323,60 +331,26 @@ class BarreleAgent():
         query = ('SELECT * FROM "%s"%s ORDER BY time DESC LIMIT 1;' %
                  (measurement_name, tag_string))
         influxdb_client = self.bea_barreleye_server.bes_influxdb_client
-
-        response = influxdb_client.bic_query(log, query, epoch="s")
-        if response is None:
-            log.cl_debug("failed to with query Influxdb with query [%s]",
-                         query)
+        serie = influxdb_client.bic_query_serie(log, query, quiet=True)
+        if serie is None:
             return -1
 
-        if response.status_code != HTTPStatus.OK:
-            log.cl_debug("got InfluxDB status [%d] with query [%s]",
-                         response.status_code, query)
+        json_string = json.dumps(serie, indent=4, separators=(',', ': '))
+        if barrele_constant.INFLUX_COLUMNS not in serie:
+            log.cl_debug("missing [%s] in serie result of influxdb: %s",
+                         json_string, barrele_constant.INFLUX_COLUMNS)
             return -1
+        columns = serie[barrele_constant.INFLUX_COLUMNS]
 
-        data = response.json()
-        json_string = json.dumps(data, indent=4, separators=(',', ': '))
-        log.cl_debug("data: [%s]", json_string)
-        if "results" not in data:
-            log.cl_debug("got wrong InfluxDB data [%s], no [results]",
-                         json_string)
+        if barrele_constant.INFLUX_VALUES not in serie:
+            log.cl_debug("missing [%s] in serie result of influxdb: %s",
+                         barrele_constant.INFLUX_VALUES, json_string)
             return -1
-        results = data["results"]
-
-        if len(results) != 1:
-            log.cl_debug("got wrong InfluxDB data [%s], [results] is not a "
-                         "array with only one element", json_string)
-            return -1
-        result = results[0]
-
-        if "series" not in result:
-            log.cl_debug("got wrong InfluxDB data [%s], no [series] in one "
-                         "of the result", json_string)
-            return -1
-
-        series = result["series"]
-        if len(series) != 1:
-            log.cl_debug("got wrong InfluxDB data [%s], [series] is not a "
-                         "array with only one element", json_string)
-            return -1
-        serie = series[0]
-
-        if "columns" not in serie:
-            log.cl_debug("got wrong InfluxDB data [%s], no [columns] in one "
-                         "of the series", json_string)
-            return -1
-        columns = serie["columns"]
-
-        if "values" not in serie:
-            log.cl_debug("got wrong InfluxDB data [%s], no [values] in one "
-                         "of the series", json_string)
-            return -1
-        serie_values = serie["values"]
+        serie_values = serie[barrele_constant.INFLUX_VALUES]
 
         if len(serie_values) != 1:
-            log.cl_debug("got wrong InfluxDB data [%s], [values] is not a "
-                         "array with only one element", json_string)
+            log.cl_debug("invalid [%s] in serie result of influxdb: %s",
+                         barrele_constant.INFLUX_VALUES, json_string)
             return -1
         value = serie_values[0]
 
@@ -418,14 +392,15 @@ class BarreleAgent():
             return -1
         return 0
 
-    def bea_collectd_send_config(self, log, barreleye_instance,
+    def bea_collectd_send_config(self, log,
                                  test_config=False):
         """
         Dump and send the collectd.conf to the agent host
         """
         host = self.bea_host
-        local_host = barreleye_instance.bei_local_host
-        command = "mkdir -p %s" % barreleye_instance.bei_workspace
+        instance = self.bea_instance
+        local_host = instance.bei_local_host
+        command = "mkdir -p %s" % instance.bei_workspace
         retval = local_host.sh_run(log, command)
         if retval.cr_exit_status:
             log.cl_error("failed to run command [%s] on host [%s], "
@@ -437,7 +412,7 @@ class BarreleAgent():
                          retval.cr_stderr)
             return -1
 
-        fpath = barreleye_instance.bei_workspace + "/"
+        fpath = instance.bei_workspace + "/"
         if test_config:
             fpath += barrele_collectd.COLLECTD_CONFIG_TEST_FNAME
             collectd_config = self.bea_collectd_config_for_test
@@ -463,19 +438,19 @@ class BarreleAgent():
             log.cl_error("failed to send file [%s] on local host [%s] to "
                          "directory [%s] on host [%s]",
                          fpath, etc_path,
-                         barreleye_instance.bei_local_host.sh_hostname,
+                         instance.bei_local_host.sh_hostname,
                          host.sh_hostname)
             return -1
         return 0
 
-    def bea_config_agent(self, log, barreleye_instance):
+    def bea_config_agent(self, log):
         """
         Configure agent
         """
         host = self.bea_host
         log.cl_info("configuring Collectd on host [%s]",
                     host.sh_hostname)
-        ret = self.bea_collectd_send_config(log, barreleye_instance,
+        ret = self.bea_collectd_send_config(log,
                                             test_config=True)
         if ret:
             log.cl_error("failed to send test config to Barreleye agent "
@@ -499,7 +474,7 @@ class BarreleAgent():
                          host.sh_hostname)
             return -1
 
-        ret = self.bea_collectd_send_config(log, barreleye_instance,
+        ret = self.bea_collectd_send_config(log,
                                             test_config=False)
         if ret:
             log.cl_error("failed to send final Collectd config to Barreleye "

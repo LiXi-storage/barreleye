@@ -2,25 +2,25 @@
 Common libarary for Clownf commands
 """
 # pylint: disable=too-many-lines
-# Local libs
 from pycoral import parallel
 from pycoral import cmd_general
-from pycoral import lustre
 from pycoral import clog
 from pycoral import constant
 from pycoral import consul
 from pycoral import watched_io
+from pycoral import utils
 from pyclownf import clownf_constant
 from pyclownf import clownf_instance
 from pyclownf import clownf_consul
 
 
-def init_env(config_fpath, logdir, log_to_file, iso
+def init_env(config_fpath, logdir, log_to_file, iso,
+             ssh_for_local=True
              ):
     """
     Init log and instance for commands that needs it
     """
-    log_dir_is_default = (logdir == clownf_constant.CLF_LOG_DIR)
+    log_dir_is_default = (logdir == clownf_constant.CLOWNF_LOG_DIR)
     log, workspace, clownfish_config = cmd_general.init_env(config_fpath,
                                                             logdir,
                                                             log_to_file,
@@ -29,7 +29,8 @@ def init_env(config_fpath, logdir, log_to_file, iso
                                                               clownfish_config,
                                                               config_fpath,
                                                               log_dir_is_default,
-                                                              iso)
+                                                              iso,
+                                                              ssh_for_local=ssh_for_local)
     if clownfish_instance is None:
         log.cl_error("failed to init Clownfish instance")
         cmd_general.cmd_exit(log, 1)
@@ -44,42 +45,6 @@ def exit_env(log, clownfish_instance, ret):
     """
     clownfish_instance.ci_fini(log)
     cmd_general.cmd_exit(log, ret)
-
-
-def host_watcher_init(log, workspace, clownfish_instance,
-                      host_watcher_dict, consul_hostname,
-                      watching_hostname):
-    """
-    Init the host watcher of dict
-    """
-    # pylint: disable=unused-argument
-    ret, watcher = clownf_consul.host_get_watcher(log,
-                                                  clownfish_instance.ci_consul_cluster,
-                                                  watching_hostname,
-                                                  consul_hostname=consul_hostname)
-    if ret:
-        log.cl_error("failed to get the watcher of host [%s]",
-                     watching_hostname)
-        return
-    host_watcher_dict[watching_hostname] = watcher
-
-
-def service_watcher_init(log, workspace, clownfish_instance,
-                         service_watcher_dict, consul_hostname,
-                         watching_service_name):
-    """
-    Init the service watcher of dict
-    """
-    # pylint: disable=unused-argument
-    ret, watcher = clownf_consul.service_get_watcher(log,
-                                                     clownfish_instance.ci_consul_cluster,
-                                                     watching_service_name,
-                                                     consul_hostname=consul_hostname)
-    if ret:
-        log.cl_error("failed to get the watcher of host [%s]",
-                     watching_service_name)
-        return
-    service_watcher_dict[watching_service_name] = watcher
 
 
 class HostStatusCache():
@@ -100,13 +65,19 @@ class HostStatusCache():
         self.hsc_running_agent = None
         # Whether the host is running operation command. Negative on error.
         self.hsc_operating = None
-        # Mounted service number. 0 on error.
-        self.hsc_mounted_service_number = None
+        # Whetehr hsc_mounted_service_names and hsc_not_mounted_service_names
+        # inited
+        self.hsc_mounted_service_names_inited = False
+        # Mounted service names. None on error.
+        self.hsc_mounted_service_names = None
+        # Not mounted service names. None on error.
+        self.hsc_not_mounted_service_names = None
         # Whether hsc_load_status is inited
         self.hsc_load_status_inited = False
         # The return value of lsh_get_load_status()
         self.hsc_load_status = None
-        # Health status of Lustre host, lustre.LustreHost.LSH_*
+        # Health status of Lustre host, LUSTRE_STR_ERROR, LUSTRE_STR_LBUG,
+        # LUSTRE_STR_HEALTHY, or LUSTRE_STR_UNHEALTHY
         self.hsc_health_status = None
         # Consul role of the host. server, client or none.
         self.hsc_consul_role = None
@@ -118,16 +89,18 @@ class HostStatusCache():
         self.hsc_watcher = None
         # If inited successfully 0, negtavie on error.
         self.hsc_watcher_init_status = None
-        # Whether candidates of the host. Negative on error.
-        self.hsc_watcher_candidate_number = None
+        # Watcher hsc_watcher_candidate_hostnames inited.
+        self.hsc_watcher_candidate_hostnames_inited = False
+        # Watcher candidate hostnames of the host. Negative on error.
+        self.hsc_watcher_candidate_hostnames = None
         # Cluster status, ClusterStatusCache
         self.hsc_cluster_status = cluster_status
-        # Number of hosts watched by this host
-        self.hsc_watching_host_number = None
+        # Hostnames watched by this host. None if not inited.
+        self.hsc_watching_hostnames = None
         # Number of services watched by this host
-        self.hsc_watching_service_number = None
-        # Hostnames that could be watched by this host
-        self.hsc_watching_candidate_hosts = None
+        self.hsc_watching_services = None
+        # Hostnames that can be watched by this host
+        self.hsc_watching_candidate_hostnames = None
         # Names of services that could be watched by this host
         self.hsc_watching_candidate_services = None
 
@@ -170,22 +143,37 @@ class HostStatusCache():
         if self.hsc_operating < 0:
             self.hsc_failed = True
 
-    def hsc_init_mounted_service_number(self, log):
+    def hsc_init_mounted_services(self, log):
         """
-        Init hsc_mounted_service_number.
+        Init hsc_mounted_service_names.
         """
+        if self.hsc_mounted_service_names_inited:
+            return
+        self.hsc_mounted_service_names_inited = True
         if not self.hsc_is_up(log):
-            self.hsc_mounted_service_number = 0
             return
 
-        mounted_number = 0
+        host = self.hsc_host
+        client_dict = {}
+        service_instance_dict = {}
+        ret = host.lsh_lustre_detect_services(log, client_dict,
+                                              service_instance_dict)
+        if ret:
+            self.hsc_failed = True
+            log.cl_error("failed to detect Lustre services on host [%s]",
+                         host.sh_hostname)
+            return
+
+        self.hsc_mounted_service_names = []
+        self.hsc_not_mounted_service_names = []
         for instance in self.hsc_host.lsh_instance_dict.values():
-            ret = instance.lsi_check_mounted(log)
-            if ret < 0:
-                self.hsc_failed = True
-            elif ret:
-                mounted_number += 1
-        self.hsc_mounted_service_number = mounted_number
+            service_name = instance.lsi_service.ls_service_name
+            if service_name in service_instance_dict:
+                self.hsc_mounted_service_names.append(service_name)
+            else:
+                self.hsc_not_mounted_service_names.append(service_name)
+        self.hsc_mounted_service_names.sort()
+        self.hsc_not_mounted_service_names.sort()
 
     def hsc_init_load_status(self, log):
         """
@@ -210,21 +198,20 @@ class HostStatusCache():
         Init hsc_health_status
         """
         if not self.hsc_is_up(log):
-            self.hsc_health_status = lustre.LustreHost.LSH_ERROR
+            self.hsc_health_status = constant.LUSTRE_STR_ERROR
             return
 
         self.hsc_health_status = self.hsc_host.lsh_healty_check(log)
-        if self.hsc_health_status == lustre.LustreHost.LSH_ERROR:
+        if self.hsc_health_status == constant.LUSTRE_STR_ERROR:
             self.hsc_failed = True
 
-    def hsc_init_consul_role(self, log):
+    def hsc_init_consul_role(self):
         """
         Init hsc_consul_role
         """
         hostname = self.hsc_host.sh_hostname
         clownfish_instance = self.hsc_clownfish_instance
-        self.hsc_consul_role = clownfish_instance.ci_host_consul_role(log,
-                                                                      hostname)
+        self.hsc_consul_role = clownfish_instance.ci_host_consul_role(hostname)
 
     def hsc_init_consul_status(self, log):
         """
@@ -245,7 +232,7 @@ class HostStatusCache():
         hostname = self.hsc_host.sh_hostname
         clownfish_instance = self.hsc_clownfish_instance
         cluster_status = self.hsc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.hsc_autostart_enabled = -1
             return
@@ -265,7 +252,7 @@ class HostStatusCache():
         hostname = self.hsc_host.sh_hostname
         clownfish_instance = self.hsc_clownfish_instance
         cluster_status = self.hsc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.hsc_watcher_init_status = -1
             self.hsc_autostart_enabled = -1
@@ -279,15 +266,16 @@ class HostStatusCache():
             return
         self.hsc_watcher_init_status = 0
 
-    def hsc_init_watcher_candidate_number(self, log):
+    def hsc_init_watcher_candidates(self):
         """
-        Init hsc_watcher_candidate_number
+        Init hsc_watcher_candidate_hostnames
         """
         hostname = self.hsc_host.sh_hostname
         clownfish_instance = self.hsc_clownfish_instance
-        watcher_candidates = \
-            clownfish_instance.ci_host_watcher_candidates(log, hostname)
-        self.hsc_watcher_candidate_number = len(watcher_candidates)
+        self.hsc_watcher_candidate_hostnames_inited = True
+        self.hsc_watcher_candidate_hostnames = \
+            clownfish_instance.ci_host_watcher_candidates(hostname)
+        self.hsc_watcher_candidate_hostnames.sort()
 
     def hsc_can_skip_init_fields(self, field_names):
         """
@@ -300,47 +288,51 @@ class HostStatusCache():
             return True
         return False
 
-    def hsc_init_watching_host_number(self, log):
+    def hsc_init_watching_hostnames(self, log):
         """
-        Init hsc_watching_host_number
-        """
-        # pylint: disable=unused-argument
-        hostname = self.hsc_host.sh_hostname
-        host_watcher_dict = self.hsc_cluster_status.csc_host_watcher_dict
-        self.hsc_watching_host_number = 0
-        for watcher in host_watcher_dict.values():
-            if hostname == watcher:
-                self.hsc_watching_host_number += 1
-
-    def hsc_init_watching_service_number(self, log):
-        """
-        Init hsc_watching_service_number
+        Init hsc_watching_hostnames
         """
         # pylint: disable=unused-argument
         hostname = self.hsc_host.sh_hostname
-        host_watcher_dict = self.hsc_cluster_status.csc_service_watcher_dict
-        self.hsc_watching_service_number = 0
-        for watcher in host_watcher_dict.values():
+        host_watcher_dict = self.hsc_cluster_status.clsc_host_watcher_dict
+        self.hsc_watching_hostnames = []
+        for watched, watcher in host_watcher_dict.items():
             if hostname == watcher:
-                self.hsc_watching_service_number += 1
+                self.hsc_watching_hostnames.append(watched)
+        self.hsc_watching_hostnames.sort()
 
-    def hsc_init_candiate_watching_hosts(self, log):
+    def hsc_init_watching_services(self, log):
         """
-        Init hsc_watching_candidate_hosts
+        Init hsc_watching_services
+        """
+        # pylint: disable=unused-argument
+        hostname = self.hsc_host.sh_hostname
+        host_watcher_dict = self.hsc_cluster_status.clsc_service_watcher_dict
+        self.hsc_watching_services = []
+        for service_name, watcher in host_watcher_dict.items():
+            if hostname == watcher:
+                self.hsc_watching_services.append(service_name)
+        self.hsc_watching_services.sort()
+
+    def hsc_init_candidate_watching_hosts(self):
+        """
+        Init hsc_watching_candidate_hostnames
         """
         host = self.hsc_host
         clownfish_instance = self.hsc_clownfish_instance
-        self.hsc_watching_candidate_hosts = \
-            clownfish_instance.ci_host_watching_candidate_hosts(log, host)
+        self.hsc_watching_candidate_hostnames = \
+            clownfish_instance.ci_host_watching_candidate_hosts(host)
+        self.hsc_watching_candidate_hostnames.sort()
 
-    def hsc_init_candiate_watching_services(self, log):
+    def hsc_init_candidate_watching_services(self):
         """
         Init hsc_watching_candidate_services
         """
         host = self.hsc_host
         clownfish_instance = self.hsc_clownfish_instance
         self.hsc_watching_candidate_services = \
-            clownfish_instance.ci_host_watching_candidate_services(log, host)
+            clownfish_instance.ci_host_watching_candidate_services(host)
+        self.hsc_watching_candidate_services.sort()
 
     def hsc_init_fields(self, log, field_names):
         """
@@ -354,8 +346,12 @@ class HostStatusCache():
                 self.hsc_is_up(log)
             elif field == clownf_constant.CLOWNF_FIELD_AGENT:
                 self.hsc_init_running_agent(log)
+            elif field == clownf_constant.CLOWNF_FIELD_SERVICE_LOAD:
+                self.hsc_init_mounted_services(log)
             elif field == clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES:
-                self.hsc_init_mounted_service_number(log)
+                self.hsc_init_mounted_services(log)
+            elif field == clownf_constant.CLOWNF_FIELD_NOT_MOUNTED_SERVICES:
+                self.hsc_init_mounted_services(log)
             elif field == clownf_constant.CLOWNF_FIELD_LOAD_BALANCED:
                 self.hsc_init_load_status(log)
             elif field == clownf_constant.CLOWNF_FIELD_HEALTHY:
@@ -363,7 +359,7 @@ class HostStatusCache():
             elif field == clownf_constant.CLOWNF_FIELD_OPERATING:
                 self.hsc_init_operating(log)
             elif field == clownf_constant.CLOWNF_FIELD_CONSUL_ROLE:
-                self.hsc_init_consul_role(log)
+                self.hsc_init_consul_role()
             elif field == clownf_constant.CLOWNF_FIELD_CONSUL_STATUS:
                 self.hsc_init_consul_status(log)
             elif field == clownf_constant.CLOWNF_FIELD_AUTOSTART:
@@ -371,15 +367,15 @@ class HostStatusCache():
             elif field == clownf_constant.CLOWNF_FIELD_WATCHER_HOST:
                 self.hsc_init_watcher(log)
             elif field == clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES:
-                self.hsc_init_watcher_candidate_number(log)
+                self.hsc_init_watcher_candidates()
             elif field == clownf_constant.CLOWNF_FIELD_WATCHING_HOSTS:
-                self.hsc_init_watching_host_number(log)
-            elif field == clownf_constant.CLOWNF_FIELD_CWATCHING_HOSTS:
-                self.hsc_init_candiate_watching_hosts(log)
+                self.hsc_init_watching_hostnames(log)
+            elif field == clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_HOSTS:
+                self.hsc_init_candidate_watching_hosts()
             elif field == clownf_constant.CLOWNF_FIELD_WATCHING_SERVICES:
-                self.hsc_init_watching_service_number(log)
-            elif field == clownf_constant.CLOWNF_FIELD_CWATCHING_SERVICES:
-                self.hsc_init_candiate_watching_services(log)
+                self.hsc_init_watching_services(log)
+            elif field == clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_SERVICES:
+                self.hsc_init_candidate_watching_services()
             else:
                 log.cl_error("unknown field [%s]", field)
                 return -1
@@ -434,15 +430,44 @@ class HostStatusCache():
                 result = clownf_constant.CLOWNF_VALUE_OPERATING
             else:
                 result = clownf_constant.CLOWNF_VALUE_IDLE
-        elif field_name == clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES:
-            if self.hsc_mounted_service_number is None:
-                log.cl_error("mounted service number of host [%s] is not inited",
+        elif field_name == clownf_constant.CLOWNF_FIELD_SERVICE_LOAD:
+            if not self.hsc_mounted_service_names_inited:
+                log.cl_error("service load of host [%s] is not inited",
                              hostname)
+                result = clog.ERROR_MSG
+                ret = -1
+            elif self.hsc_mounted_service_names is None:
                 result = clog.ERROR_MSG
                 ret = -1
             else:
                 instance_number = len(host.lsh_instance_dict)
-                result = "%d/%d" % (self.hsc_mounted_service_number, instance_number)
+                result = "%d/%d" % (len(self.hsc_mounted_service_names), instance_number)
+        elif field_name == clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES:
+            if not self.hsc_mounted_service_names_inited:
+                log.cl_error("mounted services of host [%s] is not inited",
+                             hostname)
+                result = clog.ERROR_MSG
+                ret = -1
+            elif self.hsc_mounted_service_names is None:
+                result = clog.ERROR_MSG
+                ret = -1
+            elif len(self.hsc_mounted_service_names) == 0:
+                result = constant.CMD_MSG_NONE
+            else:
+                result = utils.list2string(self.hsc_mounted_service_names)
+        elif field_name == clownf_constant.CLOWNF_FIELD_NOT_MOUNTED_SERVICES:
+            if not self.hsc_mounted_service_names_inited:
+                log.cl_error("not mounted service number of host [%s] is not inited",
+                             hostname)
+                result = clog.ERROR_MSG
+                ret = -1
+            elif self.hsc_not_mounted_service_names is None:
+                result = clog.ERROR_MSG
+                ret = -1
+            elif len(self.hsc_not_mounted_service_names) == 0:
+                result = constant.CMD_MSG_NONE
+            else:
+                result = utils.list2string(self.hsc_not_mounted_service_names)
         elif field_name == clownf_constant.CLOWNF_FIELD_LOAD_BALANCED:
             if not self.hsc_load_status_inited:
                 log.cl_error("load balance status of host [%s] is not inited",
@@ -469,9 +494,9 @@ class HostStatusCache():
                              hostname)
                 result = clog.ERROR_MSG
                 ret = -1
-            elif self.hsc_health_status == lustre.LustreHost.LSH_ERROR:
+            elif self.hsc_health_status == constant.LUSTRE_STR_ERROR:
                 result = clog.ERROR_MSG
-            elif self.hsc_health_status == lustre.LustreHost.LSH_HEALTHY:
+            elif self.hsc_health_status == constant.LUSTRE_STR_HEALTHY:
                 result = clog.colorful_message(clog.COLOR_GREEN,
                                                self.hsc_health_status)
             else:
@@ -526,42 +551,64 @@ class HostStatusCache():
                 result = clog.colorful_message(clog.COLOR_GREEN,
                                                self.hsc_watcher)
         elif field_name == clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES:
-            if self.hsc_watcher_candidate_number is None:
-                log.cl_error("watcher candidate number of host [%s] is not inited",
+            if not self.hsc_watcher_candidate_hostnames_inited:
+                log.cl_error("watcher candidates of host [%s] is not inited",
                              hostname)
                 result = clog.ERROR_MSG
                 ret = -1
-            elif self.hsc_watcher_candidate_number < 0:
+            elif self.hsc_watcher_candidate_hostnames is None:
                 result = clog.ERROR_MSG
-            elif self.hsc_watcher_candidate_number == 0:
+                ret = -1
+            elif len(self.hsc_watcher_candidate_hostnames) == 0:
                 result = clog.colorful_message(clog.COLOR_RED,
-                                               self.hsc_watcher_candidate_number)
-            elif self.hsc_watcher_candidate_number == 1:
-                result = clog.colorful_message(clog.COLOR_YELLOW,
-                                               self.hsc_watcher_candidate_number)
+                                               constant.CMD_MSG_NONE)
             else:
-                result = clog.colorful_message(clog.COLOR_GREEN,
-                                               self.hsc_watcher_candidate_number)
+                if len(self.hsc_watcher_candidate_hostnames) == 1:
+                    color = clog.COLOR_YELLOW
+                else:
+                    color = clog.COLOR_GREEN
+                hostname_str = utils.list2string(self.hsc_watcher_candidate_hostnames)
+                result = clog.colorful_message(color, hostname_str)
         elif field_name == clownf_constant.CLOWNF_FIELD_WATCHING_HOSTS:
-            if self.hsc_watching_host_number is None:
-                log.cl_error("watching host number of host [%s] is not inited",
+            if self.hsc_watching_hostnames is None:
+                log.cl_error("watching hosts of host [%s] is not inited",
                              hostname)
                 result = clog.ERROR_MSG
                 ret = -1
+            elif len(self.hsc_watching_hostnames) == 0:
+                result = constant.CMD_MSG_NONE
             else:
-                result = str(self.hsc_watching_host_number)
-        elif field_name == clownf_constant.CLOWNF_FIELD_CWATCHING_HOSTS:
-            result = len(self.hsc_watching_candidate_hosts)
+                result = utils.list2string(self.hsc_watching_hostnames)
+        elif field_name == clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_HOSTS:
+            if self.hsc_watching_candidate_hostnames is None:
+                log.cl_error("candidate watching hosts of host [%s] is not inited",
+                             hostname)
+                result = clog.ERROR_MSG
+                ret = -1
+            elif len(self.hsc_watching_candidate_hostnames) == 0:
+                result = constant.CMD_MSG_NONE
+            else:
+                result = utils.list2string(self.hsc_watching_candidate_hostnames)
         elif field_name == clownf_constant.CLOWNF_FIELD_WATCHING_SERVICES:
-            if self.hsc_watching_service_number is None:
-                log.cl_error("watching service number of host [%s] is not inited",
+            if self.hsc_watching_services is None:
+                log.cl_error("watching services of host [%s] is not inited",
                              hostname)
                 result = clog.ERROR_MSG
                 ret = -1
+            elif len(self.hsc_watching_services) == 0:
+                result = constant.CMD_MSG_NONE
             else:
-                result = str(self.hsc_watching_service_number)
-        elif field_name == clownf_constant.CLOWNF_FIELD_CWATCHING_SERVICES:
-            result = str(len(self.hsc_watching_candidate_services))
+                result = utils.list2string(self.hsc_watching_services)
+        elif field_name == clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_SERVICES:
+            if self.hsc_watching_candidate_services is None:
+                log.cl_error("candidate watching services of host [%s] is not inited",
+                             hostname)
+                result = clog.ERROR_MSG
+                ret = -1
+            elif len(self.hsc_watching_candidate_services) == 0:
+                result = constant.CMD_MSG_NONE
+            else:
+                result = utils.list2string(self.hsc_watching_candidate_services)
         else:
             log.cl_error("unknown field [%s] of host", field_name)
             result = clog.ERROR_MSG
@@ -594,151 +641,134 @@ class ClusterStatusCache():
     # pylint: disable=too-few-public-methods
     def __init__(self, clownfish_instance):
         # Instance
-        self.csc_clownfish_instance = clownfish_instance
-        # Whether csc_consul_hostname is inited
-        self.csc_consul_hostname_inited = False
+        self.clsc_clownfish_instance = clownfish_instance
+        # Whether clsc_consul_hostname is inited
+        self.clsc_consul_hostname_inited = False
         # The active Consul server hostname
-        self._csc_consul_hostname = None
+        self._clsc_consul_hostname = None
         # Any failure when getting this cached status
-        self.csc_failed = False
+        self.clsc_failed = False
         # Dict. Key is the hostname, value is the watcher hostname of the
         # host.
-        self.csc_host_watcher_dict = None
+        self.clsc_host_watcher_dict = None
         # Dict. Key is the service name, value is the watcher hostname of
         # the service.
-        self.csc_service_watcher_dict = None
+        self.clsc_service_watcher_dict = None
 
-    def _csc_init_consul_hostname(self, log):
+    def _clsc_init_consul_hostname(self, log):
         """
         Init hostname of active Consul server.
         """
-        clownfish_instance = self.csc_clownfish_instance
+        clownfish_instance = self.clsc_clownfish_instance
         consul_cluster = clownfish_instance.ci_consul_cluster
         agent = consul_cluster.cclr_alive_agent(log)
         if agent is None:
             log.cl_error("no Consul agent is up in the system")
-            self.csc_failed = True
+            self.clsc_failed = True
             consul_hostname = None
         else:
-            consul_hostname = agent.cs_host.sh_hostname
-        self.csc_consul_hostname_inited = True
-        self._csc_consul_hostname = consul_hostname
+            consul_hostname = agent.csa_host.sh_hostname
+        self.clsc_consul_hostname_inited = True
+        self._clsc_consul_hostname = consul_hostname
 
-    def _csc_init_host_watchers(self, log, only_hostnames=None):
+    def _clsc_init_host_watchers(self, log, only_hostnames=None):
         """
-        Init csc_host_watcher_dict
+        Init clsc_host_watcher_dict
         """
-        clownfish_instance = self.csc_clownfish_instance
-        self.csc_host_watcher_dict = {}
-        consul_hostname = self.csc_consul_hostname(log)
+        clownfish_instance = self.clsc_clownfish_instance
+        self.clsc_host_watcher_dict = {}
+        consul_hostname = self.clsc_consul_hostname(log)
         if consul_hostname is None:
             return
 
         if only_hostnames is None:
             only_hostnames = list(clownfish_instance.ci_host_dict.keys())
 
-        thread_ids = []
-        args_array = []
-        for only_hostname in only_hostnames:
-            args = (clownfish_instance, self.csc_host_watcher_dict,
-                    consul_hostname, only_hostname)
-            args_array.append(args)
-            thread_id = "host_watcher_%s" % only_hostname
-            thread_ids.append(thread_id)
+        for watching_hostname in only_hostnames:
+            ret, watcher = clownf_consul.host_get_watcher(log,
+                                                          clownfish_instance.ci_consul_cluster,
+                                                          watching_hostname,
+                                                          consul_hostname=consul_hostname)
+            if ret:
+                log.cl_error("failed to get the watcher of host [%s]",
+                             watching_hostname)
+                continue
+            self.clsc_host_watcher_dict[watching_hostname] = watcher
 
-        parallel_execute = parallel.ParallelExecute(clownfish_instance.ci_workspace,
-                                                    "host_watcher",
-                                                    host_watcher_init,
-                                                    args_array,
-                                                    thread_ids=thread_ids)
-        ret = parallel_execute.pe_run(log, parallelism=10)
-        if ret:
-            log.cl_error("failed to get the watcher of hosts")
-            self.csc_failed = True
-            return
 
-    def _csc_init_service_watchers(self, log, only_service_names=None):
+    def _clsc_init_service_watchers(self, log, only_service_names=None):
         """
-        Init csc_service_watcher_dict
+        Init clsc_service_watcher_dict
         """
-        clownfish_instance = self.csc_clownfish_instance
-        self.csc_service_watcher_dict = {}
-        consul_hostname = self.csc_consul_hostname(log)
+        clownfish_instance = self.clsc_clownfish_instance
+        self.clsc_service_watcher_dict = {}
+        consul_hostname = self.clsc_consul_hostname(log)
         if consul_hostname is None:
             return
 
         if only_service_names is None:
             only_service_names = list(clownfish_instance.ci_service_dict.keys())
 
-        thread_ids = []
-        args_array = []
-        for only_service_name in only_service_names:
-            args = (clownfish_instance, self.csc_service_watcher_dict,
-                    consul_hostname, only_service_name)
-            args_array.append(args)
-            thread_id = "service_watcher_%s" % only_service_name
-            thread_ids.append(thread_id)
+        for watching_service_name in only_service_names:
+            ret, watcher = clownf_consul.service_get_watcher(log,
+                                                             clownfish_instance.ci_consul_cluster,
+                                                             watching_service_name,
+                                                             consul_hostname=consul_hostname)
+            if ret:
+                log.cl_error("failed to get the watcher of host [%s]",
+                             watching_service_name)
+                continue
+            self.clsc_service_watcher_dict[watching_service_name] = watcher
 
-        parallel_execute = parallel.ParallelExecute(clownfish_instance.ci_workspace,
-                                                    "service_watcher",
-                                                    service_watcher_init,
-                                                    args_array,
-                                                    thread_ids=thread_ids)
-        ret = parallel_execute.pe_run(log, parallelism=10)
-        if ret:
-            log.cl_error("failed to get the watcher of services")
-            self.csc_failed = True
-            return
-
-    def csc_consul_hostname(self, log):
+    def clsc_consul_hostname(self, log):
         """
         Return hostname of active Consul agent. No active agent, return None.
         """
-        if not self.csc_consul_hostname_inited:
+        if not self.clsc_consul_hostname_inited:
             log.cl_error("active Consul hostname is not inited")
             return None
-        return self._csc_consul_hostname
+        return self._clsc_consul_hostname
 
-    def csc_init_fields(self, log, init_consul_hostname=True,
-                        init_host_watchers=False, init_service_watchers=False,
-                        only_hostnames=None, only_service_names=None):
+    def clsc_init_fields(self, log, init_consul_hostname=True,
+                         init_host_watchers=False, init_service_watchers=False,
+                         only_hostnames=None, only_service_names=None):
         """
         Init the fields
         """
         if init_host_watchers or init_service_watchers:
             init_consul_hostname = True
         if init_consul_hostname:
-            self._csc_init_consul_hostname(log)
+            self._clsc_init_consul_hostname(log)
         if init_host_watchers:
-            self._csc_init_host_watchers(log, only_hostnames=only_hostnames)
+            self._clsc_init_host_watchers(log, only_hostnames=only_hostnames)
         if init_service_watchers:
-            self._csc_init_service_watchers(log,
-                                            only_service_names=only_service_names)
+            self._clsc_init_service_watchers(log,
+                                             only_service_names=only_service_names)
         return 0
 
 
-def get_possible_watched_hostnames(log, clownfish_instance, hosts):
+def get_possible_watched_hostnames(clownfish_instance, hosts):
     """
     Return the hostnames possibly watched by a list of hosts.
     """
     possible_watched_hostnames = []
     for host in hosts:
         candidate_hosts = \
-            clownfish_instance.ci_host_watching_candidate_hosts(log, host)
+            clownfish_instance.ci_host_watching_candidate_hosts(host)
         for possible_watched_hostname in candidate_hosts:
             if possible_watched_hostname not in possible_watched_hostnames:
                 possible_watched_hostnames.append(possible_watched_hostname)
     return possible_watched_hostnames
 
 
-def get_possible_watched_service_names(log, clownfish_instance, hosts):
+def get_possible_watched_service_names(clownfish_instance, hosts):
     """
     Return the service names possibly watched by a list of hosts.
     """
     possible_watched_service_names = []
     for host in hosts:
         candidate_services = \
-            clownfish_instance.ci_host_watching_candidate_services(log, host)
+            clownfish_instance.ci_host_watching_candidate_services(host)
         for possible_watched_service_name in candidate_services:
             if possible_watched_service_name not in possible_watched_service_names:
                 possible_watched_service_names.append(possible_watched_service_name)
@@ -755,19 +785,21 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
     quick_fields = [clownf_constant.CLOWNF_FIELD_HOST]
     slow_fields = [clownf_constant.CLOWNF_FIELD_UP,
                    clownf_constant.CLOWNF_FIELD_AGENT,
-                   clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES,
+                   clownf_constant.CLOWNF_FIELD_SERVICE_LOAD,
                    clownf_constant.CLOWNF_FIELD_LOAD_BALANCED,
                    clownf_constant.CLOWNF_FIELD_HEALTHY]
-    none_table_fields = [clownf_constant.CLOWNF_FIELD_OPERATING,
+    none_table_fields = [clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES,
+                         clownf_constant.CLOWNF_FIELD_NOT_MOUNTED_SERVICES,
+                         clownf_constant.CLOWNF_FIELD_OPERATING,
                          clownf_constant.CLOWNF_FIELD_CONSUL_ROLE,
                          clownf_constant.CLOWNF_FIELD_CONSUL_STATUS,
                          clownf_constant.CLOWNF_FIELD_AUTOSTART,
                          clownf_constant.CLOWNF_FIELD_WATCHER_HOST,
                          clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES,
                          clownf_constant.CLOWNF_FIELD_WATCHING_HOSTS,
-                         clownf_constant.CLOWNF_FIELD_CWATCHING_HOSTS,
+                         clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_HOSTS,
                          clownf_constant.CLOWNF_FIELD_WATCHING_SERVICES,
-                         clownf_constant.CLOWNF_FIELD_CWATCHING_SERVICES]
+                         clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_SERVICES]
     table_fields = quick_fields + slow_fields
     all_fields = table_fields + none_table_fields
 
@@ -796,13 +828,12 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
         init_consul_hostname = True
         init_host_watchers = True
         init_service_watchers = True
-        only_hostnames = get_possible_watched_hostnames(log, clownfish_instance,
+        only_hostnames = get_possible_watched_hostnames(clownfish_instance,
                                                         hosts)
         if only_hostnames is None:
             log.cl_error("failed to get possible watched hostnames")
             return -1
-        only_service_names = get_possible_watched_service_names(log,
-                                                                clownfish_instance,
+        only_service_names = get_possible_watched_service_names(clownfish_instance,
                                                                 hosts)
         if only_service_names is None:
             log.cl_error("failed to get possible watched service names")
@@ -810,11 +841,11 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
     elif (clownf_constant.CLOWNF_FIELD_AUTOSTART in field_names or
           clownf_constant.CLOWNF_FIELD_WATCHER_HOST in field_names):
         init_consul_hostname = True
-    ret = cluster_status.csc_init_fields(log, init_consul_hostname=init_consul_hostname,
-                                         init_host_watchers=init_host_watchers,
-                                         init_service_watchers=init_service_watchers,
-                                         only_hostnames=only_hostnames,
-                                         only_service_names=only_service_names)
+    ret = cluster_status.clsc_init_fields(log, init_consul_hostname=init_consul_hostname,
+                                          init_host_watchers=init_host_watchers,
+                                          init_service_watchers=init_service_watchers,
+                                          only_hostnames=only_hostnames,
+                                          only_service_names=only_service_names)
     if ret:
         log.cl_error("failed to init cluster status")
         return -1
@@ -825,8 +856,16 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
                                       host)
         host_status_list.append(host_status)
 
-    if (len(host_status_list) > 0 and
-            not host_status_list[0].hsc_can_skip_init_fields(field_names)):
+    if len(host_status_list) == 0:
+        pass
+    if host_status_list[0].hsc_can_skip_init_fields(field_names):
+        pass
+    elif len(host_status_list) == 1:
+        # The overhead of ParallelExecute is about 1 second. In the case
+        # of status collection for command "clownf local status", we only
+        # need to get status of one host.
+        ret = host_status_list[0].hsc_init_fields(log, field_names)
+    else:
         args_array = []
         thread_ids = []
         for host_status in host_status_list:
@@ -841,10 +880,10 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
                                                     args_array,
                                                     thread_ids=thread_ids)
         ret = parallel_execute.pe_run(log, parallelism=10)
-        if ret:
-            log.cl_error("failed to init fields %s for hosts",
-                         field_names)
-            return -1
+    if ret:
+        log.cl_error("failed to init fields %s for hosts",
+                     field_names)
+        return -1
 
     rc = cmd_general.print_list(log, host_status_list, quick_fields,
                                 slow_fields, none_table_fields,
@@ -852,7 +891,7 @@ def print_hosts(log, clownfish_instance, hosts, print_status=False,
                                 print_table=print_table,
                                 print_status=print_status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -879,14 +918,20 @@ class ServiceStatusCache():
         self.ssc_enabled_hostnames = None
         # Whether ssc_enabled_hostnames is inited
         self.ssc_enabled_hostnames_inited = False
+        # Prefered hostnames. If error, None.
+        self.ssc_prefered_hostnames = None
+        # Whether ssc_enabled_hostnames is inited
+        self.ssc_prefered_hostnames_inited = False
         # Whether autostart of the service is enabled. Negative on error.
         self.ssc_autostart_enabled = None
         # The watcher hostname. If no watcher, None.
         self.ssc_watcher = None
         # The status of initing ssc_watcher
         self.ssc_watcher_init_status = None
-        # Number of watcher candidates. Negative on error.
-        self.ssc_watcher_candidate_number = None
+        # Whether ssc_watcher_candidate_hostnames is inited.
+        self.ssc_watcher_candidate_hostnames_inited = False
+        # Watch candidate hostnames.
+        self.ssc_watcher_candidate_hostnames = None
 
     def ssc_init_mounted_instance(self, log):
         """
@@ -910,7 +955,25 @@ class ServiceStatusCache():
             clownfish_instance.ci_service_enabled_hostnames(log, service)
         if self.ssc_enabled_hostnames is None:
             self.ssc_failed = True
+        else:
+            self.ssc_enabled_hostnames.sort()
         self.ssc_enabled_hostnames_inited = True
+
+    def ssc_init_prefered_hostnames(self, log):
+        """
+        Init ssc_prefered_hostnames
+        """
+        if self.ssc_prefered_hostnames_inited:
+            return
+        clownfish_instance = self.ssc_clownfish_instance
+        service = self.ssc_service
+        self.ssc_prefered_hostnames = \
+            clownfish_instance.ci_service_prefered_hostnames(log, service)
+        if self.ssc_prefered_hostnames is None:
+            self.ssc_failed = True
+        else:
+            self.ssc_prefered_hostnames.sort()
+        self.ssc_prefered_hostnames_inited = True
 
     def ssc_init_autostart_enabled(self, log):
         """
@@ -919,7 +982,7 @@ class ServiceStatusCache():
         clownfish_instance = self.ssc_clownfish_instance
         service_name = self.ssc_service.ls_service_name
         cluster_status = self.ssc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.ssc_autostart_enabled = -1
             return
@@ -939,7 +1002,7 @@ class ServiceStatusCache():
         clownfish_instance = self.ssc_clownfish_instance
         service_name = self.ssc_service.ls_service_name
         cluster_status = self.ssc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.ssc_watcher_init_status = -1
             return
@@ -955,22 +1018,15 @@ class ServiceStatusCache():
             return
         self.ssc_watcher_init_status = 0
 
-    def ssc_init_watcher_candidate_number(self, log):
+    def ssc_init_watcher_candidate_hostnames(self):
         """
-        Init ssc_watcher_candidate_number
+        Init ssc_watcher_candidate_hostnames
         """
         clownfish_instance = self.ssc_clownfish_instance
-        service = self.ssc_service
-        service_name = service.ls_service_name
-        rc, watcher_candidates = \
-            clownfish_instance.ci_service_watcher_candidates(log, service)
-        if rc:
-            log.cl_error("failed to get the watcher candidates of service [%s]",
-                         service_name)
-            self.ssc_failed = True
-            self.ssc_watcher_candidate_number = -1
-        else:
-            self.ssc_watcher_candidate_number = len(watcher_candidates)
+        self.ssc_watcher_candidate_hostnames = \
+            clownfish_instance.ci_service_watcher_candidates(self.ssc_service)
+        self.ssc_watcher_candidate_hostnames.sort()
+        self.ssc_watcher_candidate_hostnames_inited = True
 
     def ssc_init_fields(self, log, field_names):
         """
@@ -986,14 +1042,18 @@ class ServiceStatusCache():
                 self.ssc_init_mounted_instance(log)
             elif field == clownf_constant.CLOWNF_FIELD_MOUNT_HOST:
                 self.ssc_init_mounted_instance(log)
+            elif field == clownf_constant.CLOWNF_FIELD_MOUNTABLE_HOSTS:
+                pass
             elif field == clownf_constant.CLOWNF_FIELD_ENABLED_HOSTS:
                 self.ssc_init_enabled_hostnames(log)
+            elif field == clownf_constant.CLOWNF_FIELD_PREFERED_HOSTS:
+                self.ssc_init_prefered_hostnames(log)
             elif field == clownf_constant.CLOWNF_FIELD_AUTOSTART:
                 self.ssc_init_autostart_enabled(log)
             elif field == clownf_constant.CLOWNF_FIELD_WATCHER_HOST:
                 self.ssc_init_watcher_hostname(log)
             elif field == clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES:
-                self.ssc_init_watcher_candidate_number(log)
+                self.ssc_init_watcher_candidate_hostnames()
             else:
                 log.cl_error("unknown field [%s]", field)
                 return -1
@@ -1047,6 +1107,10 @@ class ServiceStatusCache():
             else:
                 hostname = self.ssc_mounted_instance.lsi_host.sh_hostname
                 result = clog.colorful_message(clog.COLOR_GREEN, hostname)
+        elif field_name == clownf_constant.CLOWNF_FIELD_MOUNTABLE_HOSTS:
+            hostnames = list(service.ls_instance_dict.keys())
+            hostnames.sort()
+            result = utils.list2string(hostnames)
         elif field_name == clownf_constant.CLOWNF_FIELD_ENABLED_HOSTS:
             if not self.ssc_enabled_hostnames_inited:
                 log.cl_error("enabled hosts of service [%s] is not inited",
@@ -1054,25 +1118,26 @@ class ServiceStatusCache():
                 ret = -1
                 result = clog.ERROR_MSG
             else:
-                host_number = len(service.ls_instance_dict)
-                if host_number == 0:
-                    number_string = clog.colorful_message(clog.COLOR_RED,
-                                                          host_number)
+                if self.ssc_enabled_hostnames is None:
+                    result = clog.ERROR_MSG
+                elif len(self.ssc_enabled_hostnames) == 0:
+                    result = clog.colorful_message(clog.COLOR_RED,
+                                                   constant.CMD_MSG_NONE)
                 else:
-                    number_string = clog.colorful_message(clog.COLOR_GREEN,
-                                                          host_number)
-                hostnames = self.ssc_enabled_hostnames
-                if hostnames is None:
-                    enabled_number = clog.ERROR_MSG
+                    result = utils.list2string(self.ssc_enabled_hostnames)
+        elif field_name == clownf_constant.CLOWNF_FIELD_PREFERED_HOSTS:
+            if not self.ssc_prefered_hostnames_inited:
+                log.cl_error("prefered hosts of service [%s] is not inited",
+                             service_name)
+                ret = -1
+                result = clog.ERROR_MSG
+            else:
+                if self.ssc_prefered_hostnames is None:
+                    result = clog.ERROR_MSG
+                elif len(self.ssc_prefered_hostnames) == 0:
+                    result = constant.CMD_MSG_NONE
                 else:
-                    number = len(hostnames)
-                    if number == 0:
-                        enabled_number = clog.colorful_message(clog.COLOR_YELLOW,
-                                                               number)
-                    else:
-                        enabled_number = clog.colorful_message(clog.COLOR_GREEN,
-                                                               number)
-                result = enabled_number + "/" + number_string
+                    result = utils.list2string(self.ssc_prefered_hostnames)
         elif field_name == clownf_constant.CLOWNF_FIELD_AUTOSTART:
             if self.ssc_autostart_enabled is None:
                 log.cl_error("Autostart status of service [%s] is not inited",
@@ -1102,24 +1167,25 @@ class ServiceStatusCache():
                 result = clog.colorful_message(clog.COLOR_GREEN,
                                                self.ssc_watcher)
         elif field_name == clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES:
-            if self.ssc_watcher_candidate_number is None:
+            if not self.ssc_watcher_candidate_hostnames_inited:
                 log.cl_error("watcher candidate number of service [%s] is not inited",
                              service_name)
                 result = clog.ERROR_MSG
                 ret = -1
-            elif self.ssc_watcher_candidate_number < 0:
+            elif self.ssc_watcher_candidate_hostnames is None:
                 result = clog.ERROR_MSG
-            elif self.ssc_watcher_candidate_number == 0:
+            elif len(self.ssc_watcher_candidate_hostnames) == 0:
                 result = clog.colorful_message(clog.COLOR_RED,
-                                               self.ssc_watcher_candidate_number)
-            elif self.ssc_watcher_candidate_number == 1:
-                result = clog.colorful_message(clog.COLOR_YELLOW,
-                                               self.ssc_watcher_candidate_number)
+                                               constant.CMD_MSG_NONE)
             else:
-                result = clog.colorful_message(clog.COLOR_GREEN,
-                                               self.ssc_watcher_candidate_number)
+                if len(self.ssc_watcher_candidate_hostnames) == 1:
+                    color = clog.COLOR_YELLOW
+                else:
+                    color = clog.COLOR_GREEN
+                hostname_str = utils.list2string(self.ssc_watcher_candidate_hostnames)
+                result = clog.colorful_message(color, hostname_str)
         else:
-            log.cl_error("unknown field [%s] of service")
+            log.cl_error("unknown field [%s] of service", field_name)
             result = clog.ERROR_MSG
             ret = -1
 
@@ -1158,7 +1224,9 @@ def print_services(log, clownfish_instance, services, status=False,
                     clownf_constant.CLOWNF_FIELD_BACKFS_TYPE]
     slow_fields = [clownf_constant.CLOWNF_FIELD_MOUNTED,
                    clownf_constant.CLOWNF_FIELD_MOUNT_HOST]
-    none_table_fields = [clownf_constant.CLOWNF_FIELD_ENABLED_HOSTS,
+    none_table_fields = [clownf_constant.CLOWNF_FIELD_MOUNTABLE_HOSTS,
+                         clownf_constant.CLOWNF_FIELD_ENABLED_HOSTS,
+                         clownf_constant.CLOWNF_FIELD_PREFERED_HOSTS,
                          clownf_constant.CLOWNF_FIELD_AUTOSTART,
                          clownf_constant.CLOWNF_FIELD_WATCHER_HOST,
                          clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES]
@@ -1181,9 +1249,10 @@ def print_services(log, clownfish_instance, services, status=False,
 
     cluster_status = ClusterStatusCache(clownfish_instance)
     if ((clownf_constant.CLOWNF_FIELD_ENABLED_HOSTS in field_names) or
-            (clownf_constant.CLOWNF_FIELD_AUTOSTART in field_names) or
-            (clownf_constant.CLOWNF_FIELD_WATCHER_HOST in field_names)):
-        ret = cluster_status.csc_init_fields(log)
+        (clownf_constant.CLOWNF_FIELD_PREFERED_HOSTS in field_names) or
+        (clownf_constant.CLOWNF_FIELD_AUTOSTART in field_names) or
+        (clownf_constant.CLOWNF_FIELD_WATCHER_HOST in field_names)):
+        ret = cluster_status.clsc_init_fields(log)
         if ret:
             log.cl_error("failed to init cluster status")
             return -1
@@ -1194,8 +1263,16 @@ def print_services(log, clownfish_instance, services, status=False,
                                             service)
         service_status_list.append(service_status)
 
-    if (len(service_status_list) > 0 and
-            not service_status_list[0].ssc_can_skip_init_fields(field_names)):
+    if len(service_status_list) == 0:
+        pass
+    if service_status_list[0].ssc_can_skip_init_fields(field_names):
+        pass
+    elif len(service_status_list) == 1:
+        # The overhead of ParallelExecute is about 1 second. In the case
+        # of status collection for command "clownf service status", we only
+        # need to get status of one host.
+        ret = service_status_list[0].ssc_init_fields(log, field_names)
+    else:
         args_array = []
         thread_ids = []
         for service_status in service_status_list:
@@ -1221,7 +1298,7 @@ def print_services(log, clownfish_instance, services, status=False,
                                 print_table=print_table,
                                 print_status=status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -1246,8 +1323,10 @@ class InstanceStatusCache():
         self.isc_mounted_instance = None
         # Whether ssc_mounted_instance is inited
         self.isc_mounted_instance_inited = False
-        #  Whether the instance is enabled. Negative if error.
+        # Whether the instance is enabled. Negative if error.
         self.isc_enabled = None
+        # Whether the instance is prefered to be mounted. Negative if error.
+        self.isc_prefered = None
 
     def isc_init_mounted_instance(self, log):
         """
@@ -1264,9 +1343,9 @@ class InstanceStatusCache():
         Init isc_enabled.
         """
         service_name = self.isc_service.ls_service_name
-        hostname = self.isc_instance.lsi_hostname
+        hostname = self.isc_instance.lsi_host.sh_hostname
         cluster_status = self.isc_cluster_status
-        consul_hostname = cluster_status.csc_consul_hostname(log)
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
         if consul_hostname is None:
             self.isc_enabled = -1
             return
@@ -1277,6 +1356,26 @@ class InstanceStatusCache():
                                                              hostname,
                                                              consul_hostname=consul_hostname)
         if self.isc_enabled < 0:
+            self.isc_failed = True
+
+    def isc_init_prefered(self, log):
+        """
+        Init isc_prefered.
+        """
+        service_name = self.isc_service.ls_service_name
+        hostname = self.isc_instance.lsi_host.sh_hostname
+        cluster_status = self.isc_cluster_status
+        consul_hostname = cluster_status.clsc_consul_hostname(log)
+        if consul_hostname is None:
+            self.isc_prefered = -1
+            return
+        clownfish_instance = self.isc_clownfish_instance
+        self.isc_prefered =\
+            clownfish_instance.ci_service_host_check_prefered(log,
+                                                              service_name,
+                                                              hostname,
+                                                              consul_hostname=consul_hostname)
+        if self.isc_prefered < 0:
             self.isc_failed = True
 
     def isc_init_fields(self, log, field_names):
@@ -1295,6 +1394,8 @@ class InstanceStatusCache():
                 self.isc_init_mounted_instance(log)
             elif field == clownf_constant.CLOWNF_FIELD_ENABLED:
                 self.isc_init_enabled(log)
+            elif field == clownf_constant.CLOWNF_FIELD_PREFERED:
+                self.isc_init_prefered(log)
             else:
                 log.cl_error("unknown field [%s]", field)
                 return -1
@@ -1347,8 +1448,22 @@ class InstanceStatusCache():
             else:
                 result = clog.colorful_message(clog.COLOR_YELLOW,
                                                clownf_constant.CLOWNF_VALUE_DISABLED)
+        elif field_name == clownf_constant.CLOWNF_FIELD_PREFERED:
+            if self.isc_prefered is None:
+                log.cl_error("instance prefered status of service [%s] is "
+                             "not inited",
+                             service_name)
+                ret = -1
+                result = clog.ERROR_MSG
+            elif self.isc_prefered < 0:
+                result = clog.ERROR_MSG
+            elif self.isc_prefered:
+                result = clog.colorful_message(clog.COLOR_GREEN,
+                                               clownf_constant.CLOWNF_VALUE_PREFERED)
+            else:
+                result = clownf_constant.CLOWNF_VALUE_DISPREFERED
         else:
-            log.cl_error("unknown field [%s] of service")
+            log.cl_error("unknown field [%s] of service", field_name)
             result = clog.ERROR_MSG
             ret = -1
 
@@ -1397,8 +1512,12 @@ def print_instances(log, clownfish_instance, instances, status=False,
         log.cl_error("failed to print non-table output with multiple instances")
         return -1
 
-    quick_fields = [clownf_constant.CLOWNF_FIELD_SERVICE, clownf_constant.CLOWNF_FIELD_DEVICE, clownf_constant.CLOWNF_FIELD_MOUNT_POINT]
-    slow_fields = [clownf_constant.CLOWNF_FIELD_MOUNTED, clownf_constant.CLOWNF_FIELD_ENABLED]
+    quick_fields = [clownf_constant.CLOWNF_FIELD_SERVICE,
+                    clownf_constant.CLOWNF_FIELD_DEVICE,
+                    clownf_constant.CLOWNF_FIELD_MOUNT_POINT]
+    slow_fields = [clownf_constant.CLOWNF_FIELD_MOUNTED,
+                   clownf_constant.CLOWNF_FIELD_ENABLED,
+                   clownf_constant.CLOWNF_FIELD_PREFERED]
     none_table_fields = []
     table_fields = quick_fields + slow_fields
     all_fields = table_fields + none_table_fields
@@ -1418,8 +1537,9 @@ def print_instances(log, clownfish_instance, instances, status=False,
         return -1
 
     cluster_status = ClusterStatusCache(clownfish_instance)
-    if (clownf_constant.CLOWNF_FIELD_ENABLED in field_names):
-        ret = cluster_status.csc_init_fields(log)
+    if (clownf_constant.CLOWNF_FIELD_ENABLED in field_names or
+        clownf_constant.CLOWNF_FIELD_PREFERED in field_names):
+        ret = cluster_status.clsc_init_fields(log)
         if ret:
             log.cl_error("failed to init cluster status")
             return -1
@@ -1460,7 +1580,7 @@ def print_instances(log, clownfish_instance, instances, status=False,
                                 print_table=print_table,
                                 print_status=status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -1523,6 +1643,45 @@ def instance_disable(log, clownfish_instance, hostname, service_name):
                                     service_name, enable=False)
 
 
+def _instance_prefer_disprefer(log, clownfish_instance, service_name, hostname,
+                               prefer=True):
+    """
+    Prefer or disprefer mounting a service instance on a host
+    """
+    service = clownfish_instance.ci_lustre_name2service(log, service_name)
+    if service is None:
+        log.cl_error("service [%s] is not configured",
+                     service_name)
+        return -1
+    if hostname not in service.ls_instance_dict:
+        log.cl_error("service [%s] has no instance on host [%s]",
+                     service_name, hostname)
+        return -1
+    ret = clownfish_instance.ci_service_prefer_disprefer_host(log,
+                                                              service_name,
+                                                              hostname,
+                                                              prefer=prefer)
+    if ret:
+        return -1
+    return 0
+
+
+def instance_prefer(log, clownfish_instance, service_name, hostname):
+    """
+    Prefer to mount a service instance on a host
+    """
+    return _instance_prefer_disprefer(log, clownfish_instance, service_name,
+                                      hostname, prefer=True)
+
+
+def instance_disprefer(log, clownfish_instance, service_name, hostname):
+    """
+    Disprefer to mount a service instance on a host
+    """
+    return _instance_prefer_disprefer(log, clownfish_instance, service_name,
+                                      hostname, prefer=False)
+
+
 class LustreFilesystemStatusCache():
     """
     This object saves temporary status of a Lustre file system.
@@ -1539,7 +1698,10 @@ class LustreFilesystemStatusCache():
         self.lfsc_lustrefs = lustrefs
         # Mounted instances of this file system. A list of
         # LustreServiceInstance.
-        self.lfsc_mounted_instances = None
+        self.lfsc_mounted_service_names = None
+        # Umounted instances of this file system. A list of
+        # service names.
+        self.lfsc_umounted_service_names = None
         # Mounted clients of this file system. A list of
         # LustreClient.
         self.lfsc_mounted_clients = None
@@ -1547,22 +1709,31 @@ class LustreFilesystemStatusCache():
         self.lfsc_symmetric = None
         # If lfsc_symmetric is False, doesn't matter. Negative on error.
         self.lfsc_load_balanced = None
-        # LustreHost.LSH_*
+        # LUSTRE_STR_ERROR, LUSTRE_STR_LBUG, LUSTRE_STR_HEALTHY, or
+        # LUSTRE_STR_UNHEALTHY
         self.lfsc_health_status = None
 
     def lfsc_init_mounted_instances(self, log):
         """
-        Init lfsc_mounted_instances
+        Init lfsc_mounted_service_names and lfsc_umounted_service_names
         """
-        self.lfsc_mounted_instances = []
+        if self.lfsc_mounted_service_names is not None:
+            return
+        self.lfsc_mounted_service_names = []
+        self.lfsc_umounted_service_names = []
         for service in self.lfsc_lustrefs.lf_service_dict.values():
+            service_name = service.ls_service_name
             mounted_instance = service.ls_mounted_instance(log)
             if mounted_instance is not None:
-                self.lfsc_mounted_instances.append(mounted_instance)
+                self.lfsc_mounted_service_names.append(service_name)
+            else:
+                self.lfsc_umounted_service_names.append(service_name)
+        self.lfsc_umounted_service_names.sort()
+        self.lfsc_mounted_service_names.sort()
 
     def lfsc_init_mounted_clients(self, log):
         """
-        Init lfsc_mounted_instances
+        Init lfsc_mounted_clients
         """
         self.lfsc_mounted_clients = []
         for client in self.lfsc_lustrefs.lf_client_dict.values():
@@ -1602,16 +1773,16 @@ class LustreFilesystemStatusCache():
         Init lfsc_health_status
         """
         host_dict = self.lfsc_lustrefs.lf_host_dict()
-        self.lfsc_health_status = lustre.LustreHost.LSH_HEALTHY
+        self.lfsc_health_status = constant.LUSTRE_STR_HEALTHY
         for host in host_dict.values():
             healty_result = host.lsh_healty_check(log)
-            if healty_result == lustre.LustreHost.LSH_ERROR:
+            if healty_result == constant.LUSTRE_STR_ERROR:
                 log.cl_error("failed to check whether host [%s] is healthy",
                              host.sh_hostname)
-                self.lfsc_health_status = lustre.LustreHost.LSH_ERROR
+                self.lfsc_health_status = constant.LUSTRE_STR_ERROR
                 self.lfsc_failed = True
                 break
-            if healty_result != lustre.LustreHost.LSH_HEALTHY:
+            if healty_result != constant.LUSTRE_STR_HEALTHY:
                 self.lfsc_health_status = healty_result
                 break
 
@@ -1624,6 +1795,8 @@ class LustreFilesystemStatusCache():
             if field == clownf_constant.CLOWNF_FIELD_FSNAME:
                 continue
             if field == clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES:
+                self.lfsc_init_mounted_instances(log)
+            elif field == clownf_constant.CLOWNF_FIELD_UMOUNTED_SERVICES:
                 self.lfsc_init_mounted_instances(log)
             elif field == clownf_constant.CLOWNF_FIELD_MOUNTED_CLIENTS:
                 self.lfsc_init_mounted_clients(log)
@@ -1647,13 +1820,13 @@ class LustreFilesystemStatusCache():
         if field_name == clownf_constant.CLOWNF_FIELD_FSNAME:
             result = fsname
         elif field_name == clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES:
-            if self.lfsc_mounted_instances is None:
-                log.cl_error("mounted instances of fs [%s] is not inited",
+            if self.lfsc_mounted_service_names is None:
+                log.cl_error("mounted services of fs [%s] is not inited",
                              fsname)
                 ret = -1
                 result = clog.ERROR_MSG
             else:
-                mounted_number = len(self.lfsc_mounted_instances)
+                mounted_number = len(self.lfsc_mounted_service_names)
                 service_number = len(lustrefs.lf_service_dict)
                 if service_number == mounted_number:
                     color = clog.COLOR_GREEN
@@ -1662,6 +1835,19 @@ class LustreFilesystemStatusCache():
                 result = clog.colorful_message(color,
                                                str(mounted_number))
                 result += "/" + str(service_number)
+        elif field_name == clownf_constant.CLOWNF_FIELD_UMOUNTED_SERVICES:
+            if self.lfsc_umounted_service_names is None:
+                log.cl_error("umounted services of fs [%s] is not inited",
+                             fsname)
+                ret = -1
+                result = clog.ERROR_MSG
+            elif len(self.lfsc_umounted_service_names) == 0:
+                result = clog.colorful_message(clog.COLOR_GREEN,
+                                               constant.CMD_MSG_NONE)
+            else:
+                umounted_service_names_str = utils.list2string(self.lfsc_umounted_service_names)
+                result = clog.colorful_message(clog.COLOR_YELLOW,
+                                               umounted_service_names_str)
         elif field_name == clownf_constant.CLOWNF_FIELD_MOUNTED_CLIENTS:
             if self.lfsc_mounted_clients is None:
                 log.cl_error("mounted clients of fs [%s] is not inited",
@@ -1702,7 +1888,7 @@ class LustreFilesystemStatusCache():
                              fsname)
                 ret = -1
                 result = clog.ERROR_MSG
-            elif health_status == lustre.LustreHost.LSH_HEALTHY:
+            elif health_status == constant.LUSTRE_STR_HEALTHY:
                 result = clog.colorful_message(clog.COLOR_GREEN,
                                                health_status)
             else:
@@ -1746,8 +1932,8 @@ def fs_status_field(log, fs_status, field_name):
     return fs_status.lfsc_field_result(log, field_name)
 
 
-def print_lustres(log, clownfish_instance, lustres, status=False,
-                  print_table=True, field_string=None):
+def print_filesystems(log, clownfish_instance, lustres, status=False,
+                      print_table=True, field_string=None):
     """
     Print table of LustreFilesystem.
     """
@@ -1758,7 +1944,8 @@ def print_lustres(log, clownfish_instance, lustres, status=False,
         return -1
 
     quick_fields = [clownf_constant.CLOWNF_FIELD_FSNAME]
-    slow_fields = [clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES,
+    slow_fields = [clownf_constant.CLOWNF_FIELD_UMOUNTED_SERVICES,
+                   clownf_constant.CLOWNF_FIELD_MOUNTED_SERVICES,
                    clownf_constant.CLOWNF_FIELD_MOUNTED_CLIENTS,
                    clownf_constant.CLOWNF_FIELD_LOAD_BALANCED,
                    clownf_constant.CLOWNF_FIELD_HEALTHY]
@@ -1818,7 +2005,7 @@ def print_lustres(log, clownfish_instance, lustres, status=False,
                                 print_table=print_table,
                                 print_status=status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -2013,7 +2200,7 @@ def print_clients(log, clownfish_instance, clients, print_status=False,
                                 print_table=print_table,
                                 print_status=print_status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -2159,7 +2346,7 @@ def print_autostart(log, clownfish_instance, hosts=None, services=None,
     if (clownf_constant.CLOWNF_FIELD_AUTOSTART in field_names or
             clownf_constant.CLOWNF_FIELD_WATCHER_HOST in field_names or
             clownf_constant.CLOWNF_FIELD_WATCHER_CANDIDATES in field_names):
-        ret = cluster_status.csc_init_fields(log)
+        ret = cluster_status.clsc_init_fields(log)
         if ret:
             log.cl_error("failed to init cluster status")
             return -1
@@ -2206,7 +2393,7 @@ def print_autostart(log, clownfish_instance, hosts=None, services=None,
                                 print_table=print_table,
                                 print_status=full,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -2330,7 +2517,7 @@ def print_watchers(log, clownfish_instance, watcher_hostname,
                                 print_table=print_table,
                                 print_status=print_status,
                                 field_string=field_string)
-    if cluster_status.csc_failed:
+    if cluster_status.clsc_failed:
         rc = -1
     return rc
 
@@ -2342,10 +2529,23 @@ def print_watching(log, clownfish_instance, hosts):
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     field_string = (clownf_constant.CLOWNF_FIELD_HOST + "," +
                     clownf_constant.CLOWNF_FIELD_WATCHING_HOSTS + "," +
-                    clownf_constant.CLOWNF_FIELD_CWATCHING_HOSTS + "," +
+                    clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_HOSTS + "," +
                     clownf_constant.CLOWNF_FIELD_WATCHING_SERVICES + "," +
-                    clownf_constant.CLOWNF_FIELD_CWATCHING_SERVICES)
+                    clownf_constant.CLOWNF_FIELD_CANDIDATE_WATCHING_SERVICES)
     rc = print_hosts(log, clownfish_instance, hosts,
+                     field_string=field_string)
+    return rc
+
+
+def print_agents(log, clownfish_instance, hosts, print_table=True):
+    """
+    Print table about how many agent on each host
+    """
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    field_string = (clownf_constant.CLOWNF_FIELD_HOST + "," +
+                    clownf_constant.CLOWNF_FIELD_AGENT)
+    rc = print_hosts(log, clownfish_instance, hosts,
+                     print_table=print_table,
                      field_string=field_string)
     return rc
 

@@ -1,5 +1,5 @@
 include(`sfa.m4')dnl
-HEAD(SFA-0.1)
+HEAD(SFA-3.0)
 <definition>
 	<version>3.0</version>
 	<entry>

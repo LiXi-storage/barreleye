@@ -20,7 +20,7 @@ class CoralReleaseInfoCommand():
 
     def save(self, distro, arch, path):
         """
-        Save release info to a file.
+        Save release info of this Coral version to a file.
         :param distro: Distro version, e.g. el7 or el8.
         :param arch: CPU arch type, e.g. x86_64.
         :param path: The file to save the release info.
@@ -36,7 +36,7 @@ class CoralReleaseInfoCommand():
         rinfo.rli_version = version_string
         rinfo.rli_distro_short = distro
         rinfo.rli_target_cpu = arch
-        ret = rinfo.rli_save_to_file(log, path)
+        ret = rinfo.rli_save_to_local_file(log, path)
         if ret:
             log.cl_error("failed to save release info to file [%s]", path)
             cmd_general.cmd_exit(log, -1)

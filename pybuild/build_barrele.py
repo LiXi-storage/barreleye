@@ -10,15 +10,16 @@ from pycoral import clog
 from pycoral import cmd_general
 from pycoral import os_distro
 from pybuild import build_common
+from pybuild import build_reaf
 from pybarrele import barrele_constant
 
 PACAKGE_URL_DICT = {}
 # The URL of Collectd tarball
 COLLECTD_URL = ("https://github.com/LiXi-storage/collectd/releases/download/"
-                "collectd-5.12.0.brl3/collectd-5.12.0.brl3.tar.bz2")
+                "collectd-5.12.0.brl4/collectd-5.12.0.brl4.tar.bz2")
 # The sha1sum of Collectd tarball. Need to update together with
 # COLLECTD_URL
-COLLECTD_SHA1SUM = "7469694df09576b9e5460a0a6ee8d429af962bda"
+COLLECTD_SHA1SUM = "ff537a6d5f9eda1dfb748911ba04ab7e94662489"
 PACAKGE_URL_DICT["collectd"] = COLLECTD_URL# The RPM names of Collectd to check
 
 # The deb names of Collectd to check
@@ -166,6 +167,7 @@ COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS = ["bison",
                                             "libvirt-dev",
                                             "libxen-dev",
                                             "libxml2-dev",
+                                            "libxml2-utils",
                                             "libyajl-dev",
                                             "libzmq3-dev",
                                             "perl",
@@ -181,7 +183,6 @@ BARRELE_BUILD_DEPENDENT_UBUNTU_DEBS = (COLLECTD_BUILD_DEPENDENT_UBUNTU2204_DEBS 
                                         "libext2fs-dev",
                                         "pylint",
                                         "python3-slugify",
-                                        "python3-pip",
                                         "genisoimage"])
 
 BARRELEYE_BUILD_DEPENDENT_PIPS = ["requests", "python-slugify"]
@@ -391,8 +392,7 @@ def build_collectd_rpms(log, host, target_cpu, packages_dir,
                'contrib/redhat/collectd.spec' %
                (collectd_src_dir, collectd_src_dir,
                 collectd_version, distro_number))
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
+    log.cl_info("building Collectd from source codes")
     # This command is time consuming.
     retval = host.sh_run(log, command, timeout=None)
     if retval.cr_exit_status:
@@ -450,7 +450,7 @@ def collectd_build_and_check_rhel(log, host, target_cpu, packages_dir,
                                         distro_number, target_cpu,
                                         collectd_version_release)
     if ret == 0:
-        log.cl_debug("Collectd RPMs already exist")
+        log.cl_info("reusing cached Collectd RPMs")
         collectd_rpm_fnames = get_and_clean_collectd_rpms(log, host,
                                                           packages_dir,
                                                           existing_rpm_fnames,
@@ -641,7 +641,7 @@ def build_collectd_debs(log, host, source_dir, type_cache,
     tarball_fname = os.path.basename(COLLECTD_DEBIAN_URL)
     tarball_fpath = type_cache + "/" + tarball_fname
     ret = host.sh_download_file(log, COLLECTD_DEBIAN_URL, tarball_fpath,
-                                COLLECTD_DEBIAN_SHA1SUM)
+                                expected_checksum=COLLECTD_DEBIAN_SHA1SUM)
     if ret:
         log.cl_error("failed to download Collectd debian tarball")
         return -1
@@ -713,8 +713,7 @@ def build_collectd_debs(log, host, source_dir, type_cache,
             return -1
 
     command = "cd %s && dpkg-buildpackage -us -uc -I.git -I.github" % collectd_src_dir
-    log.cl_info("running command [%s] on host [%s]",
-                command, host.sh_hostname)
+    log.cl_info("building deb packages of Collectd")
     retval = host.sh_run(log, command)
     if retval.cr_exit_status:
         log.cl_error("failed to run command [%s] on host [%s], "
@@ -939,12 +938,10 @@ def download_and_build_collectd(log, workspace, host, source_dir,
     """
     Download Collectd source code tarball and build
     """
-    log.cl_info("building Collectd packages from URL [%s] on host [%s]",
-                collectd_url, host.sh_hostname)
     tarball_fname = os.path.basename(collectd_url)
     tarball_fpath = type_cache + "/" + tarball_fname
     ret = host.sh_download_file(log, collectd_url, tarball_fpath,
-                                expected_sha1sum)
+                                expected_checksum=expected_sha1sum)
     if ret:
         log.cl_error("failed to download Collectd sourcecode tarball")
         return -1
@@ -1121,8 +1118,8 @@ def download_influxdb_x86_64(log, host, packages_dir, extra_package_fnames):
 
     fname = os.path.basename(url)
     fpath = packages_dir + "/" + fname
-    log.cl_info("downloading Influxdb RPM")
-    ret = host.sh_download_file(log, url, fpath, expected_sha1sum)
+    ret = host.sh_download_file(log, url, fpath,
+                                expected_checksum=expected_sha1sum)
     if ret:
         log.cl_error("failed to download RPM of Influxdb")
         return -1
@@ -1161,8 +1158,8 @@ def build_grafana(log, host, target_cpu, packages_dir, extra_package_fnames):
         return -1
     fname = os.path.basename(url)
     fpath = packages_dir + "/" + fname
-    log.cl_info("downloading Grafana RPM")
-    ret = host.sh_download_file(log, url, fpath, expected_sha1sum)
+    ret = host.sh_download_file(log, url, fpath,
+                                expected_checksum=expected_sha1sum)
     if ret:
         log.cl_error("failed to download RPM of Grafana")
         return -1
@@ -1180,9 +1177,8 @@ def download_grafana_status_panel_plugin(log, host, type_cache, iso_cache,
     tarball_fpath = type_cache + "/" + tarball_fname
     expected_sha1sum = GRAFANASTATUS_PANEL_SHA1SUM
 
-    log.cl_info("downloading Grafana Status Panel plugin")
     ret = host.sh_download_file(log, tarball_url, tarball_fpath,
-                                expected_sha1sum,
+                                expected_checksum=expected_sha1sum,
                                 output_fname=tarball_fname)
     if ret:
         log.cl_error("failed to download Grafana Status Panel plugin")
@@ -1231,9 +1227,8 @@ def download_grafana_piechart_panel_plugin(log, host, type_cache, iso_cache,
     tarball_fpath = type_cache + "/" + tarball_fname
     expected_sha1sum = GRAFANA_PIECHART_PANEL_SHA1SUM
 
-    log.cl_info("downloading Grafana Piechart panel")
     ret = host.sh_download_file(log, tarball_url, tarball_fpath,
-                                expected_sha1sum)
+                                expected_checksum=expected_sha1sum)
     if ret:
         log.cl_error("failed to download Grafana Piechart panel plugin")
         return -1
@@ -1326,12 +1321,14 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
     """
     # pylint: disable=too-few-public-methods
     def __init__(self):
+        plugins = [build_reaf.REAF_PLUGIN_NAME]
         super().__init__("barrele",
                          BARRELEYE_BUILD_DEPENDENT_PIPS,
                          is_devel=False,
-                         need_collectd=True)
+                         need_collectd=True,
+                         plugins=plugins)
 
-    def cpt_build_dependent_packages(self, distro):
+    def cpt_build_dependent_packages(self, log, distro):
         """
         Return the RPMs needed to install before building
         """
@@ -1353,6 +1350,7 @@ class CoralBarrelePlugin(build_common.CoralPluginType):
         """
         # pylint: disable=unused-argument,no-self-use
         collectd = option_dict["collectd"]
+        log.cl_info("building Coral plugin [Barreleye]")
         ret = build_barreleye(log, workspace, local_host, source_dir,
                               type_cache,
                               target_cpu, iso_cache, packages_dir, collectd,
@@ -1414,7 +1412,7 @@ class CoralCollectdCommand():
             collectd = cmd_general.check_argument_fpath(log, local_host, collectd)
 
         shared_cache = constant.CORAL_BUILD_CACHE
-        type_fname = constant.CORAL_BUILD_CACHE_TYPE_DEVEL
+        type_fname = constant.CORAL_BUILD_CACHE_TYPE_OPEN
         # Shared cache for this build type
         shared_type_cache = shared_cache + "/" + type_fname
         type_cache = workspace + "/" + type_fname
