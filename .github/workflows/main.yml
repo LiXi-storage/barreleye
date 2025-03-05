@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  #push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        label:
+          - el7
+          - el8
+        include:
+          - label: el7
+            container: centos:7
+            install-dependency: yum install -y python3 which
+          - label: el8
+            container: centos:8
+            install-dependency: dnf install -y python3 which
+    
+    container:
+      image: ${{ matrix.container }}
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: ${{ matrix.install-dependency }}
+      - name: Coral Build
+        run: ./coral build --debug=True
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@master
+        with:
+          name: artifacts-${{ matrix.label }}
+          path: ./coral-*
+      - name: Upload logs
+        uses: actions/upload-artifact@master
+        if: ${{ always() }}  # Upload logs regardless of whether the build failed or not
+        with:
+          name: logs-${{ matrix.label }}
+          path: ./coral_build_*/*.log
